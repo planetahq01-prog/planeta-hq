@@ -220,6 +220,9 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
   background:var(--ink);color:var(--paper-dim);font-size:9px;font-weight:700;
   letter-spacing:.3px;padding:3px 7px;border-radius:999px;
 }
+.folder-count.count-error{
+  background:var(--accent-dark);color:#fff;cursor:pointer;
+}
 
 .empty-state{
   padding:60px 24px;text-align:center;color:var(--text-muted);
@@ -628,8 +631,76 @@ function guessExt(f){
   return null;
 }
 
+// ---- Limitador GLOBAL de chamadas simultâneas à API do Drive ----------
+// Sem isso, uma árvore de pastas grande dispara centenas de requisições em
+// paralelo (o limite de 4 em runLimited só vale por NÍVEL da árvore, então
+// vários níveis rodando ao mesmo tempo somam muito mais que 4 no total).
+// O Drive responde com 429/403 de limite de taxa para o excesso, e se esse
+// erro for ignorado, a pasta acaba contada como vazia — por isso a maioria
+// das contagens ficava errada. Este semáforo serializa o app inteiro para
+// no máximo N chamadas reais simultâneas.
+const DRIVE_MAX_CONCURRENT = 5;
+let driveActiveRequests = 0;
+const driveWaitQueue = [];
+function driveAcquireSlot(){
+  if(driveActiveRequests < DRIVE_MAX_CONCURRENT){
+    driveActiveRequests++;
+    return Promise.resolve();
+  }
+  return new Promise(resolve=>driveWaitQueue.push(resolve));
+}
+function driveReleaseSlot(){
+  const next = driveWaitQueue.shift();
+  if(next) next();
+  else driveActiveRequests--;
+}
+function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
+
+// Faz uma chamada à API do Drive respeitando o semáforo global e, se o
+// Drive responder com erro de limite de taxa (429 ou 403 com motivo de
+// quota/rate), tenta de novo com backoff exponencial + jitter em vez de
+// desistir na primeira falha.
+async function driveFetchJson(url){
+  const MAX_ATTEMPTS = 6;
+  for(let attempt=1; attempt<=MAX_ATTEMPTS; attempt++){
+    await driveAcquireSlot();
+    let res, errBody;
+    try{
+      res = await fetch(url);
+      if(res.ok) return await res.json();
+      errBody = await res.text().catch(()=> '');
+    } finally {
+      driveReleaseSlot();
+    }
+    const isRateLimit = res.status === 429 ||
+      (res.status === 403 && /rateLimitExceeded|userRateLimitExceeded|quotaExceeded/i.test(errBody));
+    if(isRateLimit && attempt < MAX_ATTEMPTS){
+      const backoff = Math.min(8000, 400 * (2 ** (attempt-1))) + Math.random()*300;
+      await sleep(backoff);
+      continue;
+    }
+    console.error('Drive API error', res.status, errBody);
+    throw new Error(`Drive respondeu ${res.status}. ${String(errBody).slice(0,200)}`);
+  }
+}
+
+// Evita disparar duas chamadas para a MESMA pasta ao mesmo tempo (acontece
+// quando a capa e a contagem de itens pedem a mesma pasta quase junto):
+// enquanto a primeira está em andamento, as demais esperam o resultado dela
+// em vez de gerar requisições duplicadas.
+const folderCacheInFlight = {};
+
 async function driveListFolder(folderId){
   if(state.folderCache[folderId]) return state.folderCache[folderId];
+  if(folderCacheInFlight[folderId]) return folderCacheInFlight[folderId];
+  const promise = driveListFolderUncached(folderId).finally(()=>{
+    delete folderCacheInFlight[folderId];
+  });
+  folderCacheInFlight[folderId] = promise;
+  return promise;
+}
+
+async function driveListFolderUncached(folderId){
   let files = [];
   let pageToken = null;
   do{
@@ -642,13 +713,7 @@ async function driveListFolder(folderId){
       key: CONFIG.apiKey
     });
     if(pageToken) params.set('pageToken', pageToken);
-    const res = await fetch(`https://www.googleapis.com/drive/v3/files?${params.toString()}`);
-    if(!res.ok){
-      const errBody = await res.text().catch(()=> '');
-      console.error('Drive API error', res.status, errBody);
-      throw new Error(`Drive respondeu ${res.status}. ${errBody.slice(0,200)}`);
-    }
-    const data = await res.json();
+    const data = await driveFetchJson(`https://www.googleapis.com/drive/v3/files?${params.toString()}`);
     // Atalhos (shortcuts) apontam para outro arquivo/pasta real: resolvemos aqui
     // para que o resto do app trate tudo de forma transparente.
     const resolved = (data.files || []).map(f=>{
@@ -1096,22 +1161,56 @@ async function resolveFolderCoverFile(folderId, depth){
 // também o conteúdo de todas as subpastas (CBZ/CBR não entram na contagem).
 // Reaproveita o cache de driveListFolder, então só gera chamadas novas à
 // API na primeira vez que cada (sub)pasta é vista na sessão.
-async function countComicsRecursive(folderId){
-  let listing;
-  try{ listing = await driveListFolder(folderId); }catch(e){ return 0; }
+// IMPORTANTE: se alguma (sub)pasta falhar ao carregar (rede, limite de taxa
+// do Drive, etc.), o erro é PROPAGADO em vez de virar "0" silenciosamente —
+// era exatamente isso (contar falha como 0) que fazia a maioria das pastas
+// mostrar número errado.
+async function countPdfsRecursive(folderId){
+  const listing = await driveListFolder(folderId);
   let total = listing.files.filter(f=>f._ext==='pdf').length;
-  await runLimited(listing.folders, 4, async sub=>{
-    total += await countComicsRecursive(sub.id);
+  const subtotals = new Array(listing.folders.length).fill(0);
+  await runLimited(listing.folders, 4, async (sub, i)=>{
+    subtotals[i] = await countPdfsRecursive(sub.id);
   });
-  return total;
+  return total + subtotals.reduce((a,b)=>a+b, 0);
+}
+// Tenta contar uma pasta com algumas tentativas extras antes de desistir de
+// vez — o retry fino de cada requisição individual já mora em driveFetchJson;
+// isso aqui é uma segunda camada para o caso raro de a árvore inteira falhar
+// (ex.: perda de conexão momentânea).
+async function countPdfsWithRetry(folderId, attempts){
+  attempts = attempts || 3;
+  let lastErr;
+  for(let i=0; i<attempts; i++){
+    try{ return await countPdfsRecursive(folderId); }
+    catch(e){ lastErr = e; await sleep(500 * (i+1)); }
+  }
+  throw lastErr;
+}
+// Atualiza o texto de contagem de um card de pasta. Em caso de falha
+// definitiva (mesmo após os retries), NÃO mostra um número — mostra um
+// aviso clicável para tentar de novo, pra nunca exibir uma contagem errada.
+async function refreshFolderCount(countEl, folderId){
+  if(!countEl) return;
+  countEl.textContent = '...';
+  countEl.classList.remove('count-error');
+  countEl.onclick = null;
+  try{
+    const total = await countPdfsWithRetry(folderId);
+    countEl.textContent = total===0 ? 'Vazia' : `${total} ${total===1?'item':'itens'}`;
+  }catch(e){
+    countEl.textContent = '⚠️ tentar de novo';
+    countEl.classList.add('count-error');
+    countEl.onclick = (ev)=>{
+      ev.stopPropagation();
+      refreshFolderCount(countEl, folderId);
+    };
+  }
 }
 async function attachFolderCoverAsync(card, folderObj){
   const placeholder = card.querySelector('.cover-placeholder');
   const countEl = card.querySelector('.folder-count');
-  try{
-    const total = await countComicsRecursive(folderObj.id);
-    if(countEl) countEl.textContent = total===0 ? 'Vazia' : `${total} ${total===1?'item':'itens'}`;
-  }catch(e){ if(countEl) countEl.textContent=''; }
+  refreshFolderCount(countEl, folderObj.id);
   try{
     const file = await resolveFolderCoverFile(folderObj.id);
     if(!file) return;
