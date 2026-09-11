@@ -183,74 +183,33 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 .dl-btn.done{background:linear-gradient(135deg,var(--teal),var(--teal-dark));color:#03211c;}
 .dl-btn:active{background:linear-gradient(135deg,var(--accent),var(--accent-dark));color:#fff;}
 
-/* ---- Cards de pasta — visual "gibi" (estilo quadrinho, com bordas grossas
-   estilo tira de HQ, tramas de pontos/halftone e um selo tipo "POW!") ---- */
+/* ---- Cards de pasta — simplificados, no mesmo estilo dos cards das
+   seções em carrossel da Home: apenas capa (recortada) + nome embaixo ---- */
 .card.folder{
-  border:3px solid var(--ink);
-  border-radius:var(--radius-md);
-  background:var(--paper);
-  box-shadow:var(--shadow-card), 4px 4px 0 0 var(--ink);
-  transition:transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+  background:none;border:none;box-shadow:none;min-height:0;
+  transition:transform .15s ease;
 }
-@media(hover:hover){
-  .card.folder:hover{
-    transform:translate(-2px,-5px) rotate(-.6deg);
-    box-shadow:0 16px 30px -14px rgba(0,0,0,.65), 6px 6px 0 0 var(--accent);
-    border-color:var(--accent);
-  }
-}
-.card.folder:active{transform:translate(1px,1px) rotate(0deg);box-shadow:1px 1px 0 0 var(--ink);}
+@media(hover:hover){ .card.folder:hover{transform:translateY(-3px);} }
+.card.folder:active{transform:scale(.97);}
 .folder-cover{
   position:relative;width:100%;aspect-ratio:2/3;overflow:hidden;flex-shrink:0;
-  background:
-    radial-gradient(circle, rgba(255,255,255,.16) 1.6px, transparent 1.7px) 0 0/13px 13px,
-    radial-gradient(120% 100% at 50% 0%, var(--ink-elevated), var(--ink));
-  border-bottom:3px solid var(--ink);
+  border-radius:var(--radius-md);
+  box-shadow:0 8px 20px -10px rgba(0,0,0,.7);
+  background:radial-gradient(120% 100% at 50% 0%, var(--ink-elevated), var(--ink));
 }
 .folder-cover .cover-placeholder{
   position:absolute;inset:0;width:100%;height:100%;aspect-ratio:auto;
-  background:
-    radial-gradient(circle, rgba(255,255,255,.16) 1.6px, transparent 1.7px) 0 0/13px 13px,
-    radial-gradient(120% 100% at 50% 0%, var(--ink-elevated), var(--ink));
-  color:var(--gold);opacity:1;
+  display:flex;align-items:center;justify-content:center;
+  background:radial-gradient(120% 100% at 50% 0%, var(--ink-elevated), var(--ink));
+  color:var(--paper-dim);opacity:.55;
 }
-.folder-cover .cover-placeholder svg{width:34px;height:34px;opacity:.7;filter:drop-shadow(0 2px 0 rgba(0,0,0,.4));}
-/* Capa real: fundo desfocado (preenche o espaço) + arte inteira por cima, sem cortar nada */
-.folder-cover-wrap{position:absolute;inset:0;}
-.folder-cover-bg{
-  position:absolute;inset:-12%;width:124%;height:124%;object-fit:cover;
-  filter:blur(20px) saturate(1.5) brightness(.5);transform:scale(1.02);
-}
-.folder-cover-fg{
-  position:relative;z-index:1;display:block;width:100%;height:100%;object-fit:contain;
-  padding:14px 12px;filter:drop-shadow(0 12px 20px rgba(0,0,0,.55));
-  transition:transform .2s ease;
-}
-@media(hover:hover){ .card.folder:hover .folder-cover-fg{transform:scale(1.04) rotate(.8deg);} }
-/* Selo estilo "balão de impacto" de quadrinho, no lugar do chip discreto anterior */
-.folder-chip{
-  position:absolute;top:6px;left:6px;z-index:2;
-  display:flex;align-items:center;gap:4px;
-  background:var(--gold);color:var(--ink);
-  font-family:var(--font-display);font-size:11px;font-weight:400;letter-spacing:.4px;
-  padding:5px 10px 4px 8px;
-  border:2px solid var(--ink);border-radius:4px;
-  transform:rotate(-4deg);
-  box-shadow:2px 2px 0 0 var(--ink);
-}
-.folder-chip svg{width:11px;height:11px;flex-shrink:0;}
+.folder-cover .cover-placeholder svg{width:30px;height:30px;}
+.folder-cover .cover{border-radius:var(--radius-md);}
 .card.folder .label{
-  font-family:var(--font-display);font-weight:400;letter-spacing:.3px;
-  font-size:13px;-webkit-line-clamp:2;
+  font-family:var(--font-body);font-weight:600;letter-spacing:0;
+  font-size:12px;color:var(--paper);padding:8px 2px 0;background:none;
 }
-.card.folder .meta{justify-content:flex-start;}
-.folder-count{
-  background:var(--ink);color:var(--gold);font-size:9px;font-weight:700;
-  letter-spacing:.3px;padding:3px 7px;border-radius:999px;border:1px solid var(--ink);
-}
-.folder-count.count-error{
-  background:var(--accent-dark);color:#fff;cursor:pointer;
-}
+.card.folder .meta{display:none;}
 
 .empty-state{
   padding:60px 24px;text-align:center;color:var(--text-muted);
@@ -1090,12 +1049,8 @@ function renderFolderCard(f, opts){
   const cover = el('div','folder-cover');
   const ph = elHtml('div','cover-placeholder', ICONS.folder);
   cover.appendChild(ph);
-  cover.appendChild(elHtml('span','folder-chip', `${ICONS.folder}<span>Pasta</span>`));
   card.appendChild(cover);
   card.appendChild(el('div','label', f.name));
-  const meta = el('div','meta');
-  meta.appendChild(el('span','folder-count','...'));
-  card.appendChild(meta);
   card.onclick = opts.fromSearch ? ()=>openFolderFromSearch(f) : ()=>enterFolder(f.id, f.name);
   return card;
 }
@@ -1265,13 +1220,11 @@ async function refreshFolderCount(countEl, folderId){
 }
 async function attachFolderCoverAsync(card, folderObj){
   const placeholder = card.querySelector('.cover-placeholder');
-  const countEl = card.querySelector('.folder-count');
-  refreshFolderCount(countEl, folderObj.id);
   try{
     const file = await resolveFolderCoverFile(folderObj.id);
     if(!file) return;
     card.classList.add('has-cover');
-    await attachCoverToEl(placeholder, file, true);
+    await attachCoverToEl(placeholder, file, false);
   }catch(e){ }
 }
 
