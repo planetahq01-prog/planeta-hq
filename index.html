@@ -178,22 +178,48 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 .dl-btn.done{background:linear-gradient(135deg,var(--teal),var(--teal-dark));color:#03211c;}
 .dl-btn:active{background:linear-gradient(135deg,var(--accent),var(--accent-dark));color:#fff;}
 
-/* ---- Cards de pasta (com capa ilustrativa) ---- */
-.card.folder{min-height:190px;}
-.card.folder .cover-placeholder,
-.card.folder .cover{
+/* ---- Cards de pasta (com capa ilustrativa, sem cortar a arte) ---- */
+.card.folder{
+  border:1px solid transparent;
+  background:linear-gradient(var(--paper),var(--paper)) padding-box,
+             linear-gradient(135deg, rgba(255,183,3,.55), rgba(255,77,94,.4)) border-box;
+  transition:transform .15s ease, box-shadow .15s ease, border-color .15s ease;
+}
+.folder-cover{
+  position:relative;width:100%;aspect-ratio:2/3;overflow:hidden;flex-shrink:0;
+  background:radial-gradient(120% 100% at 50% 0%, var(--ink-elevated), var(--ink));
+}
+.folder-cover .cover-placeholder{
   position:absolute;inset:0;width:100%;height:100%;aspect-ratio:auto;
+  background:radial-gradient(120% 100% at 50% 0%, var(--ink-elevated), var(--ink));
+  color:var(--paper-dim);opacity:1;
 }
-.card.folder .cover-placeholder{
-  background:linear-gradient(160deg,var(--ink-elevated),var(--ink));color:var(--paper-dim);opacity:1;
+.folder-cover .cover-placeholder svg{width:34px;height:34px;opacity:.55;}
+/* Capa real: fundo desfocado (preenche o espaço) + arte inteira por cima, sem cortar nada */
+.folder-cover-wrap{position:absolute;inset:0;}
+.folder-cover-bg{
+  position:absolute;inset:-12%;width:124%;height:124%;object-fit:cover;
+  filter:blur(20px) saturate(1.35) brightness(.5);transform:scale(1.02);
 }
-.card.folder .cover-placeholder svg{width:36px;height:36px;opacity:.65;}
-.card.folder .folder-scrim{
-  position:absolute;left:0;right:0;bottom:0;z-index:1;
-  padding:14px 9px 9px;
-  background:linear-gradient(180deg,transparent,rgba(0,0,0,.88) 78%);
+.folder-cover-fg{
+  position:relative;z-index:1;display:block;width:100%;height:100%;object-fit:contain;
+  padding:14px 12px;filter:drop-shadow(0 12px 20px rgba(0,0,0,.55));
+  transition:transform .2s ease;
 }
-.card.folder .folder-scrim .label{padding:0;color:#fff;-webkit-line-clamp:2;}
+@media(hover:hover){ .card.folder:hover .folder-cover-fg{transform:scale(1.04);} }
+.folder-chip{
+  position:absolute;top:8px;left:8px;z-index:2;
+  display:flex;align-items:center;gap:5px;
+  background:rgba(13,12,18,.75);backdrop-filter:blur(4px);
+  color:var(--gold);font-size:10px;font-weight:700;letter-spacing:.3px;
+  padding:5px 9px 5px 7px;border-radius:999px;border:1px solid rgba(255,255,255,.1);
+}
+.folder-chip svg{width:11px;height:11px;flex-shrink:0;}
+.card.folder .meta{justify-content:flex-start;}
+.folder-count{
+  background:var(--ink);color:var(--paper-dim);font-size:9px;font-weight:700;
+  letter-spacing:.3px;padding:3px 7px;border-radius:999px;
+}
 
 .empty-state{
   padding:60px 24px;text-align:center;color:var(--text-muted);
@@ -368,7 +394,7 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
       <div class="wordmark">PLANETA <span>HQ</span></div>
       <div class="search-box">
         <span class="search-icon" id="search-icon-slot"></span>
-        <input type="text" id="search-input" placeholder="Buscar nesta pasta...">
+        <input type="text" id="search-input" placeholder="Buscar na biblioteca (ex.: Batman)...">
       </div>
       <button class="icon-btn" id="btn-refresh" title="Atualizar pasta"></button>
       <button class="icon-btn" id="btn-settings" title="Configurações"></button>
@@ -496,7 +522,6 @@ const state = {
   currentTab: 'library',
   path: [],            // pilha de {id, name} até a pasta atual
   folderCache: {},     // folderId -> {folders:[], files:[]}
-  flatIndex: [],        // arquivos já vistos nesta sessão, para busca
   currentListContext: [], // lista (pasta atual/busca/baixados) usada p/ navegar entre HQs no leitor
   currentListIsLocal: false,
   reader: {
@@ -659,9 +684,6 @@ async function driveListFolder(folderId){
 
   const result = {folders, files: comics};
   state.folderCache[folderId] = result;
-  comics.forEach(f=>{
-    if(!state.flatIndex.find(x=>x.id===f.id)) state.flatIndex.push(f);
-  });
   return result;
 }
 
@@ -917,11 +939,16 @@ async function renderLibrary(folderId, forceRefresh){
 
 function renderFolderCard(f){
   const card = el('div','card folder');
+  card.dataset.id = f.id;
+  const cover = el('div','folder-cover');
   const ph = elHtml('div','cover-placeholder', ICONS.folder);
-  card.appendChild(ph);
-  const scrim = el('div','folder-scrim');
-  scrim.appendChild(el('div','label', f.name));
-  card.appendChild(scrim);
+  cover.appendChild(ph);
+  cover.appendChild(elHtml('span','folder-chip', `${ICONS.folder}<span>Pasta</span>`));
+  card.appendChild(cover);
+  card.appendChild(el('div','label', f.name));
+  const meta = el('div','meta');
+  meta.appendChild(el('span','folder-count','...'));
+  card.appendChild(meta);
   card.onclick = ()=>enterFolder(f.id, f.name);
   return card;
 }
@@ -975,28 +1002,23 @@ function renderComicCard(f){
   return card;
 }
 
-// Substitui o placeholder de um card (comic ou pasta) pela capa real assim
-// que ela estiver pronta, gerando-a sob demanda e guardando em cache.
-async function attachCoverToEl(placeholder, f){
+// Resolve a URL/dataURL da capa de um arquivo (cache -> miniatura do Drive ->
+// gerada manualmente a partir da 1ª página), sem tocar no DOM.
+async function resolveCoverSrc(f){
   const cached = await idbGet('covers', f.id);
-  if(cached){
-    const img = el('img','cover'); img.src = cached.dataUrl;
-    if(placeholder.isConnected) placeholder.replaceWith(img);
-    return;
-  }
+  if(cached) return cached.dataUrl;
   // Caminho rápido: o próprio Google Drive já gera e guarda uma miniatura
   // pronta pra vários arquivos (principalmente PDF) — usar ela é instantâneo
   // e não baixa nada do arquivo. Só cai no método manual se isso falhar.
   if(f.thumbnailLink){
     const bigger = f.thumbnailLink.replace(/=s\d+$/, '=s400');
-    const usedFallback = await new Promise(resolve=>{
+    const ok = await new Promise(resolve=>{
       const img = new Image();
-      img.className = 'cover';
-      img.onload = ()=>{ if(placeholder.isConnected) placeholder.replaceWith(img); resolve(false); };
-      img.onerror = ()=>resolve(true);
+      img.onload = ()=>resolve(true);
+      img.onerror = ()=>resolve(false);
       img.src = bigger;
     });
-    if(!usedFallback) return;
+    if(ok) return bigger;
   }
   try{
     const localDl = await idbGet('downloads', f.id);
@@ -1013,15 +1035,36 @@ async function attachCoverToEl(placeholder, f){
     const pageUrl = await doc.getPage(0);
     const dataUrl = await toDataUrl(pageUrl);
     await idbSet('covers', {id: f.id, dataUrl});
-    const img = el('img','cover'); img.src = dataUrl;
-    if(placeholder.isConnected) placeholder.replaceWith(img);
+    return dataUrl;
   }catch(err){
-    // mantém o placeholder se a capa não puder ser gerada
+    return null;
   }
+}
+// Monta o elemento visual da capa. Para pastas (folderMode), a arte inteira
+// aparece sem cortes (object-fit:contain) sobre um fundo desfocado da mesma
+// imagem, em vez de esticar/cortar a capa para preencher o card inteiro.
+function buildCoverNode(src, folderMode){
+  if(folderMode){
+    const wrap = el('div','folder-cover-wrap');
+    const bg = el('img','folder-cover-bg'); bg.src = src; bg.alt = '';
+    const fg = el('img','folder-cover-fg'); fg.src = src; fg.alt = '';
+    wrap.appendChild(bg); wrap.appendChild(fg);
+    return wrap;
+  }
+  const img = el('img','cover'); img.src = src;
+  return img;
+}
+// Substitui o placeholder de um card (comic ou pasta) pela capa real assim
+// que ela estiver pronta.
+async function attachCoverToEl(placeholder, f, folderMode){
+  const src = await resolveCoverSrc(f);
+  if(!src) return; // mantém o placeholder se a capa não puder ser gerada
+  const node = buildCoverNode(src, folderMode);
+  if(placeholder.isConnected) placeholder.replaceWith(node);
 }
 async function attachCoverAsync(card, f){
   const placeholder = card.querySelector('.cover-placeholder');
-  await attachCoverToEl(placeholder, f);
+  await attachCoverToEl(placeholder, f, false);
 }
 
 // Encontra um arquivo de HQ representativo dentro de uma pasta (ou, se ela só
@@ -1050,11 +1093,19 @@ async function resolveFolderCoverFile(folderId, depth){
 }
 async function attachFolderCoverAsync(card, folderObj){
   const placeholder = card.querySelector('.cover-placeholder');
+  const countEl = card.querySelector('.folder-count');
+  try{
+    const listing = await driveListFolder(folderObj.id);
+    if(countEl){
+      const count = listing.files.length + listing.folders.length;
+      countEl.textContent = count===0 ? 'Vazia' : `${count} ${count===1?'item':'itens'}`;
+    }
+  }catch(e){ if(countEl) countEl.textContent=''; }
   try{
     const file = await resolveFolderCoverFile(folderObj.id);
     if(!file) return;
     card.classList.add('has-cover');
-    await attachCoverToEl(placeholder, file);
+    await attachCoverToEl(placeholder, file, true);
   }catch(e){ /* mantém o ícone de pasta */ }
 }
 
@@ -1452,21 +1503,58 @@ function syncReaderSettingsUI(){
 }
 
 /* ---------------------------------------------------------------------
-   9) Busca (dentro dos arquivos já indexados na sessão)
+   9) Busca (varre toda a árvore de pastas do Drive, não só o que já foi aberto)
    --------------------------------------------------------------------- */
+function normalizeStr(s){
+  return String(s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+}
+// Percorre recursivamente todas as (sub)pastas a partir da raiz configurada,
+// procurando arquivos cujo nome contenha o termo buscado. Usa o cache de
+// driveListFolder, então pastas já visitadas não geram nova requisição.
+async function searchAllComics(normTerm, token, isStale){
+  const results = [];
+  const seen = new Set();
+  async function walk(folderId){
+    if(isStale(token)) return;
+    let listing;
+    try{ listing = await driveListFolder(folderId); }catch(e){ return; }
+    listing.files.forEach(f=>{
+      if(!seen.has(f.id) && normalizeStr(f.name).includes(normTerm)){
+        seen.add(f.id);
+        results.push(f);
+      }
+    });
+    await runLimited(listing.folders, 4, sub=>walk(sub.id));
+  }
+  await walk(CONFIG.rootFolderId);
+  results.sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
+  return results;
+}
+
+let searchToken = 0;
+let searchDebounceTimer = null;
 $('#search-input').addEventListener('input', e=>{
-  const term = e.target.value.trim().toLowerCase();
-  const grid = $('#grid-library');
+  const term = e.target.value.trim();
+  clearTimeout(searchDebounceTimer);
   if(!term){
+    searchToken++; // cancela qualquer busca em andamento
     renderLibrary(state.path[state.path.length-1].id, false);
     return;
   }
-  const matches = state.flatIndex.filter(f=>f.name.toLowerCase().includes(term));
+  searchDebounceTimer = setTimeout(()=>runSearch(term), 300);
+});
+
+async function runSearch(term){
+  const myToken = ++searchToken;
+  const grid = $('#grid-library');
+  grid.innerHTML = `<div class="empty-state"><div class="spinner" style="margin:0 auto 12px"></div>Buscando em toda a biblioteca...</div>`;
+  const matches = await searchAllComics(normalizeStr(term), myToken, t=>t!==searchToken);
+  if(myToken !== searchToken) return; // usuário já digitou outra coisa nesse meio-tempo
   state.currentListContext = matches;
   state.currentListIsLocal = false;
   grid.innerHTML = '';
   if(matches.length===0){
-    grid.innerHTML = `<div class="empty-state">${ICONS.search}<h3>Nada encontrado</h3>A busca cobre pastas já abertas nesta sessão.</div>`;
+    grid.innerHTML = `<div class="empty-state">${ICONS.search}<h3>Nada encontrado</h3>Nenhuma HQ com esse nome na biblioteca.</div>`;
     return;
   }
   const cardsToLoad = matches.map(f=>{
@@ -1475,7 +1563,7 @@ $('#search-input').addEventListener('input', e=>{
     return {card, f};
   });
   runLimited(cardsToLoad, 3, ({card, f})=>attachCoverAsync(card, f));
-});
+}
 
 /* ---------------------------------------------------------------------
    10) Abas, atualizar, configurações
