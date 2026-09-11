@@ -834,6 +834,22 @@ async function driveListFolder(folderId){
   return promise;
 }
 
+function resolveShortcuts(rawFiles){
+  return (rawFiles || []).map(f=>{
+    if(f.mimeType === 'application/vnd.google-apps.shortcut' && f.shortcutDetails){
+      return {
+        id: f.shortcutDetails.targetId,
+        name: f.name,
+        mimeType: f.shortcutDetails.targetMimeType,
+        size: f.size,
+        modifiedTime: f.modifiedTime,
+        thumbnailLink: f.thumbnailLink
+      };
+    }
+    return f;
+  });
+}
+
 async function driveListFolderUncached(folderId){
   let files = [];
   let pageToken = null;
@@ -848,20 +864,7 @@ async function driveListFolderUncached(folderId){
     });
     if(pageToken) params.set('pageToken', pageToken);
     const data = await driveFetchJson(`https://www.googleapis.com/drive/v3/files?${params.toString()}`);
-    const resolved = (data.files || []).map(f=>{
-      if(f.mimeType === 'application/vnd.google-apps.shortcut' && f.shortcutDetails){
-        return {
-          id: f.shortcutDetails.targetId,
-          name: f.name,
-          mimeType: f.shortcutDetails.targetMimeType,
-          size: f.size,
-          modifiedTime: f.modifiedTime,
-          thumbnailLink: f.thumbnailLink
-        };
-      }
-      return f;
-    });
-    files = files.concat(resolved);
+    files = files.concat(resolveShortcuts(data.files));
     pageToken = data.nextPageToken || null;
   } while(pageToken);
 
@@ -1439,7 +1442,52 @@ function normalizeStr(s){
   return String(s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
 }
 
-async function searchLibrary(normTerm, token, isStale){
+async function driveSearchByName(term){
+  // Pede pro próprio Google Drive procurar pelo nome — uma chamada (ou
+  // poucas, se paginar), independente de quantas pastas a biblioteca tem.
+  const escaped = term.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
+  let files = [];
+  let pageToken = null;
+  do{
+    const params = new URLSearchParams({
+      q: `name contains '${escaped}' and trashed = false`,
+      fields: 'nextPageToken, files(id,name,mimeType,size,modifiedTime,shortcutDetails,thumbnailLink)',
+      pageSize: '1000',
+      supportsAllDrives: 'true',
+      includeItemsFromAllDrives: 'true',
+      key: CONFIG.apiKey
+    });
+    if(pageToken) params.set('pageToken', pageToken);
+    const data = await driveFetchJson(`https://www.googleapis.com/drive/v3/files?${params.toString()}`);
+    files = files.concat(resolveShortcuts(data.files));
+    pageToken = data.nextPageToken || null;
+  } while(pageToken);
+  return files;
+}
+
+async function searchLibrary(normTerm, rawTerm, token, isStale){
+  // 1) Tenta a busca direta do Drive primeiro — rápida mesmo em bibliotecas
+  // enormes, porque quem procura é o próprio Google, não a gente pasta por
+  // pasta.
+  try{
+    const direct = await driveSearchByName(rawTerm);
+    if(isStale(token)) return {folders: [], files: []};
+    if(direct.length){
+      const folders = direct
+        .filter(f=>f.mimeType === 'application/vnd.google-apps.folder' && normalizeStr(f.name).includes(normTerm))
+        .sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
+      const comics = direct
+        .map(f=>({...f, _ext: guessExt(f)}))
+        .filter(f=>f._ext && f._ext !== 'cbr' && normalizeStr(f.name).includes(normTerm))
+        .sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
+      if(folders.length || comics.length) return {folders, files: comics};
+    }
+  }catch(e){
+    console.warn('[PlanetaHQ] Busca direta do Drive falhou, usando índice local como reforço.', e);
+  }
+
+  // 2) Sem resultado pela via rápida: usa o índice completo (cacheado) da
+  // biblioteca como reforço — pode ser mais lento na primeira vez.
   const [allFolders, allComics] = await Promise.all([
     getAllFoldersCached(),
     getAllComicsCached()
@@ -1478,7 +1526,7 @@ async function runSearch(term){
   $('#home-sections').classList.add('hidden');
   const grid = $('#grid-library');
   grid.innerHTML = `<div class="empty-state"><div class="spinner" style="margin:0 auto 12px"></div>Buscando em toda a biblioteca...</div>`;
-  const {folders, files: allFiles} = await searchLibrary(normalizeStr(term), myToken, t=>t!==searchToken);
+  const {folders, files: allFiles} = await searchLibrary(normalizeStr(term), term, myToken, t=>t!==searchToken);
   if(myToken !== searchToken) return;
   $('#filter-bar').classList.toggle('hidden', allFiles.length===0);
   const files = await applyLibraryFilterSort(allFiles);
@@ -2233,6 +2281,7 @@ function writeHomeCache(key, arrProp, list){
   try{ localStorage.setItem(key, JSON.stringify({savedAt: Date.now(), [arrProp]: list})); }catch(e){}
 }
 
+let aranhaToken = 0;
 let aranhaCachePromise = null;
 async function getAranhaFolders(forceRefresh){
   if(forceRefresh) aranhaCachePromise = null;
@@ -2240,20 +2289,21 @@ async function getAranhaFolders(forceRefresh){
   aranhaCachePromise = (async ()=>{
     const cached = readHomeCache(ARANHA_CACHE_KEY, 'folders');
     if(cached && Date.now()-cached.savedAt < HOME_CACHE_MAX_AGE) return cached.folders;
-    const token = ++searchToken;
-    const folders = await collectAranhaFolders(token, t=>t!==searchToken);
+    const token = ++aranhaToken;
+    const folders = await collectAranhaFolders(token, t=>t!==aranhaToken);
     writeHomeCache(ARANHA_CACHE_KEY, 'folders', folders);
     return folders;
   })();
   return aranhaCachePromise;
 }
 
+let libraryIndexToken = 0;
 let libraryIndexPromise = null;
 async function refreshLibraryIndex(){
   if(libraryIndexPromise) return libraryIndexPromise;
   libraryIndexPromise = (async ()=>{
-    const token = ++searchToken;
-    const {comics, folders} = await collectAllComics(token, t=>t!==searchToken);
+    const token = ++libraryIndexToken;
+    const {comics, folders} = await collectAllComics(token, t=>t!==libraryIndexToken);
     writeHomeCache(ALLCOMICS_CACHE_KEY, 'comics', comics);
     writeHomeCache(ALLFOLDERS_CACHE_KEY, 'folders', folders);
     return {comics, folders};
@@ -2339,12 +2389,13 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, allComics}){
   wrap.classList.toggle('hidden', !anySection);
 }
 
+let homeToken = 0;
 async function renderHomeSections(forceRefresh){
   const wrap = $('#home-sections');
   if(!wrap) return;
 
-  const myToken = ++searchToken;
-  const isStale = t=>t!==searchToken;
+  const myToken = ++homeToken;
+  const isStale = t=>t!==homeToken;
 
   // 1) Se já temos algo em cache (mesmo desatualizado), pinta na hora — a
   // sensação é de carregamento instantâneo — e atualiza tudo em segundo
