@@ -4,10 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Planeta HQ</title>
-<link rel="manifest" href="manifest.json">
-<meta name="theme-color" content="#0d0c12">
-<link rel="icon" href="icon-192.png">
-<link rel="apple-touch-icon" href="icon-192.png">
 
 <!-- Fontes -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -95,6 +91,7 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 .icon-btn svg{width:18px;height:18px;}
 .icon-btn.small{width:32px;height:32px;}
 .icon-btn.small svg{width:15px;height:15px;}
+.icon-btn:disabled{opacity:.3;pointer-events:none;}
 .icon-btn:active{background:var(--accent);border-color:var(--accent);transform:scale(.94);}
 
 /* ---- Tabs ---- */
@@ -262,7 +259,7 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 .reader-scroll{
   flex:1;overflow-y:auto;overflow-x:auto;-webkit-overflow-scrolling:touch;background:#000;
 }
-#reader-scroll-inner{width:100%;margin:0 auto;transition:width .12s ease;}
+#reader-scroll-inner{width:100%;margin:0 auto;}
 .reader-page{width:100%;}
 .reader-page img{width:100%;height:auto;display:block;}
 .reader-page.skeleton{
@@ -406,10 +403,12 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
     <div class="reader-scroll hidden" id="reader-scroll"></div>
 
     <div class="reader-bottom" id="reader-bottom">
+      <button class="icon-btn small" id="btn-prev-chapter" title="HQ/capítulo anterior"></button>
       <button class="icon-btn small" id="btn-zoom-out" title="Diminuir zoom"></button>
       <span class="page-count" id="page-count">- / -</span>
       <input type="range" id="page-slider" min="1" max="1" value="1">
       <button class="icon-btn small" id="btn-zoom-in" title="Aumentar zoom"></button>
+      <button class="icon-btn small" id="btn-next-chapter" title="Próxima HQ/capítulo"></button>
     </div>
 
     <div class="reader-settings hidden" id="reader-settings">
@@ -470,7 +469,9 @@ const ICONS = {
   folder: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6.5a2 2 0 0 1 2-2h4.2l2 2H19a2 2 0 0 1 2 2v9a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/></svg>',
   trash: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6m5 0V4a2 2 0 0 1 2-2h0a2 2 0 0 1 2 2v2"/></svg>',
   library: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>',
-  warning: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>'
+  warning: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"/><line x1="12" y1="9" x2="12" y2="13"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>',
+  skipPrev: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 4 10 12 18 20"/><polyline points="11 4 3 12 11 20"/></svg>',
+  skipNext: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 4 14 12 6 20"/><polyline points="13 4 21 12 13 20"/></svg>'
 };
 function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -488,6 +489,8 @@ const state = {
   path: [],            // pilha de {id, name} até a pasta atual
   folderCache: {},     // folderId -> {folders:[], files:[]}
   flatIndex: [],        // arquivos já vistos nesta sessão, para busca
+  currentListContext: [], // lista (pasta atual/busca/baixados) usada p/ navegar entre HQs no leitor
+  currentListIsLocal: false,
   reader: {
     doc: null,          // ComicDocument atual
     fileMeta: null,
@@ -496,7 +499,9 @@ const state = {
     mode: 'scroll',      // 'scroll' (padrão) | 'paginate'
     fit: 'width',         // 'width' | 'height' (só no modo paginado)
     zoom: 1,
-    scrollIO: null
+    scrollIO: null,
+    siblings: [],       // lista de HQs "irmãs" (mesma pasta/busca/baixados) p/ os botões de próx/anterior
+    siblingIndex: -1
   }
 };
 
@@ -878,6 +883,8 @@ async function renderLibrary(folderId, forceRefresh){
   try{
     if(forceRefresh) delete state.folderCache[folderId];
     const {folders, files} = await driveListFolder(folderId);
+    state.currentListContext = files;
+    state.currentListIsLocal = false;
     grid.innerHTML = '';
     if(folders.length===0 && files.length===0){
       grid.innerHTML = `<div class="empty-state">${ICONS.folder}<h3>Pasta vazia</h3>Nenhuma HQ ou subpasta encontrada aqui.</div>`;
@@ -1062,6 +1069,8 @@ async function renderDownloads(){
     return;
   }
   items.sort((a,b)=>b.savedAt-a.savedAt);
+  state.currentListContext = items;
+  state.currentListIsLocal = true;
   items.forEach(it=>{
     const card = el('div','card comic');
     const ph = elHtml('div','cover-placeholder', `${ICONS.page}<span class="ph-name">${escapeHtml(it.name.split('.')[0].slice(0,40))}</span>`);
@@ -1110,6 +1119,10 @@ async function openReader(fileMeta, forceLocal){
   status.classList.remove('hidden');
   state.reader.zoom = 1;
   updateZoomLabel();
+  state.reader.forceLocal = forceLocal;
+  state.reader.siblings = state.currentListContext || [];
+  state.reader.siblingIndex = state.reader.siblings.findIndex(x=>x.id===fileMeta.id);
+  updateChapterNavButtons();
 
   try{
     const local = await idbGet('downloads', fileMeta.id);
@@ -1184,15 +1197,18 @@ function applyFitAndZoom(){
   const wrap = $('#zoom-wrap');
   const z = state.reader.zoom;
   if(state.reader.fit === 'height'){
-    img.style.height = (100*z)+'%';
+    img.style.height = '100%';
     img.style.width = 'auto';
   } else {
-    img.style.width = (100*z)+'%';
+    img.style.width = '100%';
     img.style.height = 'auto';
   }
   img.style.maxWidth = 'none';
   img.style.maxHeight = 'none';
-  wrap.style.overflow = 'auto';
+  img.style.transformOrigin = '50% 0';
+  img.style.willChange = 'transform';
+  img.style.transform = z > 1 ? `scale(${z})` : 'none';
+  wrap.style.overflow = z > 1 ? 'auto' : 'hidden';
   $('#nav-prev').style.pointerEvents = z>1 ? 'none' : '';
   $('#nav-next').style.pointerEvents = z>1 ? 'none' : '';
 }
@@ -1247,7 +1263,11 @@ async function loadScrollPage(doc, i, pageDiv){
 }
 function applyScrollZoom(){
   const inner = document.getElementById('reader-scroll-inner');
-  if(inner) inner.style.width = (state.reader.zoom*100)+'%';
+  if(!inner) return;
+  const z = state.reader.zoom;
+  inner.style.transformOrigin = '50% 0';
+  inner.style.willChange = 'transform';
+  inner.style.transform = z > 1 ? `scale(${z})` : 'none';
 }
 
 /* ---- Zoom (comum aos dois modos) ---- */
@@ -1260,6 +1280,33 @@ function setZoom(z){
   updateZoomLabel();
   if(state.reader.mode === 'scroll') applyScrollZoom();
   else applyFitAndZoom();
+}
+
+function updateChapterNavButtons(){
+  const list = state.reader.siblings || [];
+  const idx = state.reader.siblingIndex;
+  const prevBtn = $('#btn-prev-chapter');
+  const nextBtn = $('#btn-next-chapter');
+  if(!prevBtn || !nextBtn) return;
+  const known = idx != null && idx >= 0;
+  prevBtn.disabled = !known || idx <= 0;
+  nextBtn.disabled = !known || idx >= list.length-1;
+}
+
+async function openAdjacentComic(delta){
+  const list = state.reader.siblings || [];
+  const idx = state.reader.siblingIndex;
+  if(idx==null || idx<0) return;
+  const target = list[idx+delta];
+  if(!target){
+    toast(delta>0 ? 'Essa é a última HQ desta lista' : 'Essa é a primeira HQ desta lista');
+    return;
+  }
+  const meta = {
+    id: target.id, name: target.name, mimeType: target.mimeType,
+    size: target.size, _ext: target._ext || target.ext, thumbnailLink: target.thumbnailLink
+  };
+  await openReader(meta, !!state.currentListIsLocal);
 }
 
 function closeReader(){
@@ -1296,6 +1343,8 @@ $('#btn-download-reader').onclick = async ()=>{
 /* Navegação do leitor: toques nas laterais, teclado, swipe, pinça e roda */
 $('#nav-prev').onclick = prevPage;
 $('#nav-next').onclick = nextPage;
+$('#btn-prev-chapter').onclick = ()=>openAdjacentComic(-1);
+$('#btn-next-chapter').onclick = ()=>openAdjacentComic(1);
 $('#btn-close-reader').onclick = closeReader;
 $('#page-slider').addEventListener('input', e=>showPage(Number(e.target.value)-1));
 document.addEventListener('keydown', e=>{
@@ -1319,14 +1368,23 @@ document.addEventListener('keydown', e=>{
 (function zoomGestureSetup(){
   const root = $('#view-reader');
   let pinchStartDist = null, pinchStartZoom = 1;
+  let rafId = null, pendingZoom = null;
   function dist(t1,t2){ return Math.hypot(t1.clientX-t2.clientX, t1.clientY-t2.clientY); }
+  function scheduleZoom(z){
+    pendingZoom = z;
+    if(rafId) return;
+    rafId = requestAnimationFrame(()=>{
+      rafId = null;
+      setZoom(pendingZoom);
+    });
+  }
   root.addEventListener('touchstart', e=>{
     if(e.touches.length===2){ pinchStartDist = dist(e.touches[0], e.touches[1]); pinchStartZoom = state.reader.zoom; }
   }, {passive:true});
   root.addEventListener('touchmove', e=>{
     if(e.touches.length===2 && pinchStartDist){
       const d = dist(e.touches[0], e.touches[1]);
-      setZoom(pinchStartZoom * (d/pinchStartDist));
+      scheduleZoom(pinchStartZoom * (d/pinchStartDist));
     }
   }, {passive:true});
   root.addEventListener('touchend', e=>{ if(e.touches.length<2) pinchStartDist=null; });
@@ -1386,6 +1444,8 @@ $('#search-input').addEventListener('input', e=>{
     return;
   }
   const matches = state.flatIndex.filter(f=>f.name.toLowerCase().includes(term));
+  state.currentListContext = matches;
+  state.currentListIsLocal = false;
   grid.innerHTML = '';
   if(matches.length===0){
     grid.innerHTML = `<div class="empty-state">${ICONS.search}<h3>Nada encontrado</h3>A busca cobre pastas já abertas nesta sessão.</div>`;
@@ -1438,7 +1498,9 @@ Object.entries({
   'nav-prev': ICONS.chevLeft,
   'nav-next': ICONS.chevRight,
   'btn-zoom-in': ICONS.zoomIn,
-  'btn-zoom-out': ICONS.zoomOut
+  'btn-zoom-out': ICONS.zoomOut,
+  'btn-prev-chapter': ICONS.skipPrev,
+  'btn-next-chapter': ICONS.skipNext
 }).forEach(([id, svg])=>{ const node = document.getElementById(id); if(node) node.innerHTML = svg; });
 
 loadReaderPrefs();
@@ -1467,12 +1529,6 @@ async function boot(){
 }
 
 boot();
-
-if('serviceWorker' in navigator){
-  window.addEventListener('load', ()=>{
-    navigator.serviceWorker.register('sw.js').catch(()=>{});
-  });
-}
 </script>
 </body>
 </html>
