@@ -1526,7 +1526,15 @@ async function runSearch(term){
   $('#home-sections').classList.add('hidden');
   const grid = $('#grid-library');
   grid.innerHTML = `<div class="empty-state"><div class="spinner" style="margin:0 auto 12px"></div>Buscando em toda a biblioteca...</div>`;
-  const {folders, files: allFiles} = await searchLibrary(normalizeStr(term), term, myToken, t=>t!==searchToken);
+  let folders, allFiles;
+  try{
+    ({folders, files: allFiles} = await searchLibrary(normalizeStr(term), term, myToken, t=>t!==searchToken));
+  }catch(e){
+    if(myToken !== searchToken) return;
+    console.error('[PlanetaHQ] Falha na busca', e);
+    grid.innerHTML = `<div class="empty-state">${ICONS.search}<h3>Não foi possível buscar</h3>Verifique sua conexão ou a chave de API e tente de novo.</div>`;
+    return;
+  }
   if(myToken !== searchToken) return;
   $('#filter-bar').classList.toggle('hidden', allFiles.length===0);
   const files = await applyLibraryFilterSort(allFiles);
@@ -2174,7 +2182,7 @@ async function collectAllComics(token, isStale){
   }
   await walk(CONFIG.rootFolderId);
   if(!isStale(token)) writeHomeCache(ALLFOLDERS_CACHE_KEY, 'folders', allFolders);
-  return all;
+  return {comics: all, folders: allFolders};
 }
 
 const ALLFOLDERS_CACHE_KEY = 'planetahq_allfolders_cache_v1';
