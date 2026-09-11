@@ -585,7 +585,7 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 /* =========================================================================
    PLANETA HQ — app de leitura de HQs digitais
    Home com seções em carrossel horizontal (Continuar lendo, Coleção
-   Homem-Aranha, Recomendados, Recém atualizados).
+   Homem-Aranha, Recomendados).
    ========================================================================= */
 
 /* ---------------------------------------------------------------------
@@ -2162,6 +2162,22 @@ function aranhaRank(name){
   return 999;
 }
 
+// Pastas que não devem aparecer na coleção do Homem-Aranha, mesmo
+// contendo "aranha"/"spider" no nome.
+const ARANHA_EXCLUDED_FOLDERS = [
+  'Ultimate Spider-Man',
+  'Aranhaverso (2014)',
+  'Arquivos Secretos do Homem-Aranha (1995)',
+  'Homem Aranha & Dr. Octopus: Exposição Negativa (2004)',
+  'Homem-Aranha Ultimate Vol 01',
+  'Homem-Aranha: A Vingança do Duende Verde (2000)',
+  'Homem-Aranha: Renovando Votos',
+  'No Limiar do Aranhaverso (2022)',
+  'No Limiar do Aranhaverso (2023)',
+  'O Espantoso Homem-Aranha (2016)',
+  'Ultimate Homem-Aranha V2'
+].map(normalizeStr);
+
 async function collectAranhaFolders(token, isStale){
   const found = [];
   const seen = new Set();
@@ -2180,12 +2196,22 @@ async function collectAranhaFolders(token, isStale){
     await runLimited(listing.folders, 6, sub=>walk(sub.id));
   }
   await walk(CONFIG.rootFolderId);
-  found.sort((a,b)=>{
+  const seenNames = new Set();
+  const filtered = found.filter(f=>{
+    const n = normalizeStr(f.name);
+    if(ARANHA_EXCLUDED_FOLDERS.includes(n)) return false;
+    // Descarta pastas repetidas com o mesmo nome (ex.: "Aranha-Geddon"
+    // duplicada em dois lugares da biblioteca) — mantém só a primeira.
+    if(seenNames.has(n)) return false;
+    seenNames.add(n);
+    return true;
+  });
+  filtered.sort((a,b)=>{
     const ra = aranhaRank(a.name), rb = aranhaRank(b.name);
     if(ra !== rb) return ra - rb;
     return a.name.localeCompare(b.name,'pt-BR',{numeric:true});
   });
-  return found;
+  return filtered;
 }
 
 async function collectAllComics(token, isStale){
@@ -2193,23 +2219,23 @@ async function collectAllComics(token, isStale){
   const allFolders = [];
   const seen = new Set();
   const seenFolders = new Set();
-  async function walk(folderId){
+  async function walk(folderId, path){
     if(isStale(token)) return;
     let listing;
     try{ listing = await driveListFolder(folderId); }catch(e){ return; }
     listing.files.forEach(f=>{
       if(seen.has(f.id)) return;
       seen.add(f.id);
-      all.push(f);
+      all.push({...f, _path: path});
     });
     listing.folders.forEach(sub=>{
       if(seenFolders.has(sub.id)) return;
       seenFolders.add(sub.id);
       allFolders.push(sub);
     });
-    await runLimited(listing.folders, 6, sub=>walk(sub.id));
+    await runLimited(listing.folders, 6, sub=>walk(sub.id, [...path, sub.name]));
   }
-  await walk(CONFIG.rootFolderId);
+  await walk(CONFIG.rootFolderId, []);
   if(!isStale(token)) writeHomeCache(ALLFOLDERS_CACHE_KEY, 'folders', allFolders);
   return {comics: all, folders: allFolders};
 }
@@ -2388,22 +2414,100 @@ async function getContinueItems(){
   }catch(e){ return []; }
 }
 
-function buildRecentAndRecommended(allComics){
-  const recent = [...allComics]
-    .filter(f=>f.modifiedTime)
-    .sort((a,b)=> new Date(b.modifiedTime) - new Date(a.modifiedTime))
-    .slice(0, 20);
+// Escolhas fixas para "Recomendados". Cada item é o caminho de pastas até
+// a HQ (sem o nome da biblioteca raiz) terminando no nome do arquivo, sem
+// extensão. Um item de um segmento só é o nome do arquivo, e casa em
+// qualquer pasta.
+const RECOMMENDED_PICKS = [
+  ['Guerras Secretas','1984','Capítulo 01'],
+  ['Fênix Negra'],
+  ['Capitão América V1 110 (1969)'],
+  ['Guerras Secretas','1984','Capítulo 08'],
+  ['Grandes Heróis Marvel 35 - Arma X - A Origem de Wolverine (1992)'],
+  ['20 - Homem de Ferro - Missão de Resgate (1988)']
+];
+
+// Palavras-chave (normalizadas) de heróis/personagens populares, usadas
+// pra preencher o restante dos "Recomendados" com HQs conhecidas em vez
+// de qualquer HQ aleatória da biblioteca.
+const POPULAR_HERO_KEYWORDS = [
+  'homem-aranha','homem aranha','spider-man','spiderman','spider man',
+  'vingadores','avengers',
+  'homem de ferro','iron man',
+  'capitao america','captain america',
+  'wolverine','x-men','x men',
+  'thor','hulk',
+  'demolidor','daredevil',
+  'pantera negra','black panther',
+  'doutor estranho','doctor strange',
+  'guardioes da galaxia','guardians of the galaxy',
+  'batman','superman','mulher-maravilha','mulher maravilha','wonder woman',
+  'liga da justica','justice league','flash','lanterna verde','green lantern',
+  'motoqueiro fantasma','ghost rider',
+  'gaviao arqueiro','hawkeye',
+  'viuva negra','black widow',
+  'esquadrao suicida','suicide squad',
+  'quarteto fantastico','fantastic four',
+  'homem-formiga','homem formiga','ant-man',
+  'fenix negra','dark phoenix',
+  'wolverine','magneto','tempestade'
+].map(normalizeStr);
+
+function isPopularHeroComic(name){
+  const n = normalizeStr(name);
+  return POPULAR_HERO_KEYWORDS.some(k=>n.includes(k));
+}
+
+function fileBaseName(f){
+  return f.name.replace(/\.(pdf|cbz|cbr)$/i,'');
+}
+
+// Confere se uma HQ bate com uma escolha fixa: o último segmento precisa
+// bater com o nome do arquivo, e os segmentos anteriores (se houver)
+// precisam bater com o final do caminho de pastas da HQ, na ordem certa.
+function matchesRecommendedPick(file, segments){
+  const last = normalizeStr(segments[segments.length-1]);
+  if(normalizeStr(fileBaseName(file)) !== last) return false;
+  const folderSegs = segments.slice(0,-1);
+  if(folderSegs.length === 0) return true;
+  const path = file._path || [];
+  if(path.length < folderSegs.length) return false;
+  const tail = path.slice(path.length - folderSegs.length);
+  return tail.every((seg,i)=>normalizeStr(seg)===normalizeStr(folderSegs[i]));
+}
+
+function buildRecommended(allComics){
+  const used = new Set();
+  const picked = [];
+  RECOMMENDED_PICKS.forEach(segments=>{
+    const found = allComics.find(f=>!used.has(f.id) && matchesRecommendedPick(f, segments));
+    if(found){ used.add(found.id); picked.push(found); }
+  });
+
   const daySeed = Math.floor(Date.now()/(24*3600*1000));
-  const recommended = [...allComics]
+  const shuffle = list => list
     .map(f=>({f, k: hashStr(f.id + ':' + daySeed)}))
     .sort((a,b)=>a.k-b.k)
-    .slice(0, 20)
     .map(x=>x.f);
-  return {recent, recommended};
+
+  const targetTotal = 20;
+  const remainingSlots = Math.max(0, targetTotal - picked.length);
+
+  const popularPool = allComics.filter(f=>!used.has(f.id) && isPopularHeroComic(f.name));
+  let filler = shuffle(popularPool).slice(0, remainingSlots);
+  filler.forEach(f=>used.add(f.id));
+
+  if(filler.length < remainingSlots){
+    const generalPool = allComics.filter(f=>!used.has(f.id));
+    const extra = shuffle(generalPool).slice(0, remainingSlots - filler.length);
+    filler = filler.concat(extra);
+  }
+
+  return picked.concat(filler);
 }
 
 function paintHomeSections(wrap, {continueItems, aranhaFolders, allComics}){
-  const {recent, recommended} = buildRecentAndRecommended(allComics);
+  const recommended = buildRecommended(allComics);
   wrap.innerHTML = '';
   let anySection = false;
 
@@ -2421,12 +2525,6 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, allComics}){
     return buildCarouselCard(it, { isFolder:false, size: it.size });
   });
   if(secRec){ wrap.appendChild(secRec); anySection = true; }
-
-  const secNew = buildHomeSection('Recém atualizados', recent, (it)=>{
-    const d = it.modifiedTime ? new Date(it.modifiedTime).toLocaleDateString('pt-BR') : '';
-    return buildCarouselCard(it, { isFolder:false, size: it.size, sub: d });
-  });
-  if(secNew){ wrap.appendChild(secNew); anySection = true; }
 
   wrap.classList.toggle('hidden', !anySection);
 }
