@@ -130,6 +130,14 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
   min-height:190px;box-shadow:var(--shadow-card);
   transition:transform .15s ease, box-shadow .15s ease;
 }
+.card.loading::before{
+  content:'';position:absolute;inset:0;background:rgba(13,12,18,.55);z-index:4;
+}
+.card.loading::after{
+  content:'';position:absolute;top:0;left:0;right:0;bottom:34px;margin:auto;
+  width:32px;height:32px;border:3px solid rgba(255,255,255,.3);border-top-color:var(--accent);
+  border-radius:50%;animation:spin .8s linear infinite;z-index:5;
+}
 .card:active{transform:scale(.97);}
 @media(hover:hover){
   .card:hover{transform:translateY(-3px);box-shadow:0 16px 30px -14px rgba(0,0,0,.65);}
@@ -935,8 +943,12 @@ function renderComicCard(f){
     if(d){ dlBtn.innerHTML = `${ICONS.check}<span>Offline</span>`; dlBtn.classList.add('done'); }
   });
 
-  ph.onclick = ()=>openReader(f);
-  card.querySelector('.label').onclick = ()=>openReader(f);
+  card.onclick = async ()=>{
+    if(card.classList.contains('loading')) return;
+    card.classList.add('loading');
+    try{ await openReader(f); }
+    finally{ card.classList.remove('loading'); }
+  };
   dlBtn.onclick = async (e)=>{
     e.stopPropagation();
     const existing = await idbGet('downloads', f.id);
@@ -1082,9 +1094,13 @@ async function renderDownloads(){
     card.appendChild(meta);
     const rmBtn = elHtml('button','dl-btn done', `${ICONS.trash}<span>Remover</span>`);
     card.appendChild(rmBtn);
-    const openThis = ()=>openReader({id:it.id, name:it.name, _ext: it.ext, mimeType: it.mimeType}, true);
-    ph.onclick = openThis;
-    card.querySelector('.label').onclick = openThis;
+    const openThis = async ()=>{
+      if(card.classList.contains('loading')) return;
+      card.classList.add('loading');
+      try{ await openReader({id:it.id, name:it.name, _ext: it.ext, mimeType: it.mimeType}, true); }
+      finally{ card.classList.remove('loading'); }
+    };
+    card.onclick = openThis;
     rmBtn.onclick = async (e)=>{
       e.stopPropagation();
       await idbDelete('downloads', it.id);
@@ -1217,6 +1233,8 @@ function applyFitAndZoom(){
 async function buildScrollReader(doc){
   const container = $('#reader-scroll');
   container.innerHTML = '';
+  container.scrollTop = 0;
+  container.scrollLeft = 0;
   const inner = el('div','');
   inner.id = 'reader-scroll-inner';
   container.appendChild(inner);
