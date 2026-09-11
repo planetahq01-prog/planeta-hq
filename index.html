@@ -1864,19 +1864,24 @@ function buildHomeSection(title, items, builder){
 }
 
 function attachCarouselDrag(carousel){
+  // Arrastar com o mouse é só um recurso extra de desktop. Em telas de toque
+  // o navegador já rola nativamente e já gera cliques nativos — por isso
+  // ignoramos totalmente interações do tipo 'touch'/'pen' aqui, evitando que
+  // qualquer tremido do dedo seja interpretado como "arrasto" e cancele o clique.
   let isDown=false, startX=0, startScroll=0, moved=false;
-  carousel.addEventListener('mousedown', e=>{
+  carousel.addEventListener('pointerdown', e=>{
+    if(e.pointerType && e.pointerType !== 'mouse') return;
     isDown=true; moved=false;
-    startX = e.pageX; startScroll = carousel.scrollLeft;
+    startX = e.clientX; startScroll = carousel.scrollLeft;
     carousel.classList.add('dragging');
   });
-  window.addEventListener('mouseup', ()=>{
+  window.addEventListener('pointerup', e=>{
     if(!isDown) return;
     isDown=false; carousel.classList.remove('dragging');
   });
-  carousel.addEventListener('mousemove', e=>{
-    if(!isDown) return;
-    const dx = e.pageX - startX;
+  carousel.addEventListener('pointermove', e=>{
+    if(!isDown || (e.pointerType && e.pointerType !== 'mouse')) return;
+    const dx = e.clientX - startX;
     if(Math.abs(dx) > 4) moved = true;
     carousel.scrollLeft = startScroll - dx;
   });
