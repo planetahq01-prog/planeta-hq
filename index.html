@@ -123,6 +123,16 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
   gap:10px;
   padding:12px;
 }
+.shelf{padding:12px;}
+.shelf-title{font-size:15px;font-weight:800;margin:0 0 10px 2px;color:var(--paper);}
+.shelf-row{
+  display:flex;gap:12px;overflow-x:auto;padding:2px 2px 14px;
+  scroll-snap-type:x proximity;-webkit-overflow-scrolling:touch;
+  cursor:grab;
+}
+.shelf-row.dragging{cursor:grabbing;scroll-snap-type:none;}
+.shelf-row .card{flex:0 0 132px;scroll-snap-align:start;}
+.shelf-row .card .cover, .shelf-row .card .cover-placeholder{height:172px;}
 .card{
   background:var(--paper);color:var(--ink);
   display:flex;flex-direction:column;overflow:hidden;
@@ -360,7 +370,7 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
       <div class="wordmark">PLANETA <span>HQ</span></div>
       <div class="search-box">
         <span class="search-icon" id="search-icon-slot"></span>
-        <input type="text" id="search-input" placeholder="Buscar nesta pasta...">
+        <input type="text" id="search-input" placeholder="Buscar em toda a biblioteca...">
       </div>
       <button class="icon-btn" id="btn-refresh" title="Atualizar pasta"></button>
       <button class="icon-btn" id="btn-settings" title="Configurações"></button>
@@ -375,6 +385,7 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
   <!-- ===================== BIBLIOTECA ===================== -->
   <div id="view-library" class="view hidden">
     <div id="grid-library" class="grid"></div>
+    <div id="shelf-library" class="shelf hidden"></div>
   </div>
 
   <!-- ===================== BAIXADOS ===================== -->
@@ -879,17 +890,41 @@ function renderBreadcrumb(){
 
 async function renderLibrary(folderId, forceRefresh){
   const grid = $('#grid-library');
+  const shelf = $('#shelf-library');
+  grid.classList.remove('hidden');
+  shelf.classList.add('hidden');
   grid.innerHTML = `<div class="empty-state"><div class="spinner" style="margin:0 auto 12px"></div>Carregando pasta...</div>`;
   try{
     if(forceRefresh) delete state.folderCache[folderId];
     const {folders, files} = await driveListFolder(folderId);
     state.currentListContext = files;
     state.currentListIsLocal = false;
-    grid.innerHTML = '';
     if(folders.length===0 && files.length===0){
       grid.innerHTML = `<div class="empty-state">${ICONS.folder}<h3>Pasta vazia</h3>Nenhuma HQ ou subpasta encontrada aqui.</div>`;
       return;
     }
+
+    // "Pasta-categoria" (ex: Homem-Aranha): uma subpasta que só contém outras
+    // subpastas (nenhuma HQ direta) vira uma fileira horizontal deslizável,
+    // em vez da grade normal. Não se aplica à pasta raiz da biblioteca.
+    if(state.path.length > 1 && folders.length>0 && files.length===0){
+      grid.classList.add('hidden');
+      shelf.classList.remove('hidden');
+      shelf.innerHTML = '';
+      shelf.appendChild(el('div','shelf-title', state.path[state.path.length-1].name));
+      const row = el('div','shelf-row');
+      shelf.appendChild(row);
+      const folderCards = folders.map(f=>{
+        const card = renderFolderCard(f);
+        row.appendChild(card);
+        return {card, f};
+      });
+      enableDragScroll(row);
+      runLimited(folderCards, 2, ({card, f})=>attachFolderCoverAsync(card, f));
+      return;
+    }
+
+    grid.innerHTML = '';
     const folderCards = folders.map(f=>{
       const card = renderFolderCard(f);
       grid.appendChild(card);
@@ -903,8 +938,35 @@ async function renderLibrary(folderId, forceRefresh){
     runLimited(folderCards, 2, ({card, f})=>attachFolderCoverAsync(card, f));
     runLimited(comicCards, 3, ({card, f})=>attachCoverAsync(card, f));
   }catch(err){
+    grid.classList.remove('hidden'); shelf.classList.add('hidden');
     grid.innerHTML = `<div class="empty-state">${ICONS.warning}<h3>Não foi possível carregar</h3>${escapeHtml(err.message)}</div>`;
   }
+}
+
+// Permite arrastar a fileira horizontal com o mouse (no touch, a rolagem
+// nativa já funciona sozinha) e evita que o arraste seja interpretado como
+// um clique/toque no card.
+function enableDragScroll(container){
+  let isDown = false, startX = 0, startScroll = 0, moved = false;
+  container.addEventListener('pointerdown', e=>{
+    if(e.pointerType === 'touch') return;
+    isDown = true; moved = false;
+    startX = e.clientX; startScroll = container.scrollLeft;
+    container.classList.add('dragging');
+  });
+  window.addEventListener('pointermove', e=>{
+    if(!isDown) return;
+    const dx = e.clientX - startX;
+    if(Math.abs(dx) > 4) moved = true;
+    container.scrollLeft = startScroll - dx;
+  });
+  window.addEventListener('pointerup', ()=>{
+    isDown = false;
+    container.classList.remove('dragging');
+  });
+  container.addEventListener('click', e=>{
+    if(moved){ e.stopPropagation(); e.preventDefault(); moved = false; }
+  }, true);
 }
 
 function renderFolderCard(f){
@@ -935,8 +997,7 @@ function renderComicCard(f){
     if(d){ dlBtn.innerHTML = `${ICONS.check}<span>Offline</span>`; dlBtn.classList.add('done'); }
   });
 
-  ph.onclick = ()=>openReader(f);
-  card.querySelector('.label').onclick = ()=>openReader(f);
+  card.onclick = ()=>openReader(f);
   dlBtn.onclick = async (e)=>{
     e.stopPropagation();
     const existing = await idbGet('downloads', f.id);
@@ -1083,8 +1144,7 @@ async function renderDownloads(){
     const rmBtn = elHtml('button','dl-btn done', `${ICONS.trash}<span>Remover</span>`);
     card.appendChild(rmBtn);
     const openThis = ()=>openReader({id:it.id, name:it.name, _ext: it.ext, mimeType: it.mimeType}, true);
-    ph.onclick = openThis;
-    card.querySelector('.label').onclick = openThis;
+    card.onclick = openThis;
     rmBtn.onclick = async (e)=>{
       e.stopPropagation();
       await idbDelete('downloads', it.id);
@@ -1434,29 +1494,56 @@ function syncReaderSettingsUI(){
 }
 
 /* ---------------------------------------------------------------------
-   9) Busca (dentro dos arquivos já indexados na sessão)
+   9) Busca (em toda a biblioteca, não só nas pastas já abertas)
    --------------------------------------------------------------------- */
+let fullIndexPromise = null;
+function ensureFullIndex(){
+  if(fullIndexPromise) return fullIndexPromise;
+  fullIndexPromise = (async ()=>{
+    async function crawl(folderId){
+      const {folders} = await driveListFolder(folderId); // já popula state.flatIndex
+      await runLimited(folders, 3, sub=>crawl(sub.id));
+    }
+    if(CONFIG && CONFIG.rootFolderId) await crawl(CONFIG.rootFolderId);
+  })();
+  return fullIndexPromise;
+}
+
+let searchDebounce = null;
 $('#search-input').addEventListener('input', e=>{
   const term = e.target.value.trim().toLowerCase();
+  clearTimeout(searchDebounce);
   const grid = $('#grid-library');
+  const shelf = $('#shelf-library');
   if(!term){
     renderLibrary(state.path[state.path.length-1].id, false);
     return;
   }
-  const matches = state.flatIndex.filter(f=>f.name.toLowerCase().includes(term));
-  state.currentListContext = matches;
-  state.currentListIsLocal = false;
-  grid.innerHTML = '';
-  if(matches.length===0){
-    grid.innerHTML = `<div class="empty-state">${ICONS.search}<h3>Nada encontrado</h3>A busca cobre pastas já abertas nesta sessão.</div>`;
-    return;
-  }
-  const cardsToLoad = matches.map(f=>{
-    const card = renderComicCard(f);
-    grid.appendChild(card);
-    return {card, f};
-  });
-  runLimited(cardsToLoad, 3, ({card, f})=>attachCoverAsync(card, f));
+  searchDebounce = setTimeout(async ()=>{
+    shelf.classList.add('hidden');
+    grid.classList.remove('hidden');
+    const alreadyIndexed = !!fullIndexPromise;
+    if(!alreadyIndexed){
+      grid.innerHTML = `<div class="empty-state"><div class="spinner" style="margin:0 auto 12px"></div>Vasculhando toda a biblioteca...</div>`;
+    }
+    await ensureFullIndex();
+    // o texto pode ter mudado enquanto indexava; garante que ainda é a busca atual
+    if($('#search-input').value.trim().toLowerCase() !== term) return;
+    const matches = state.flatIndex.filter(f=>f.name.toLowerCase().includes(term));
+    state.currentListContext = matches;
+    state.currentListIsLocal = false;
+    grid.innerHTML = '';
+    if(matches.length===0){
+      grid.innerHTML = `<div class="empty-state">${ICONS.search}<h3>Nada encontrado</h3>Nenhuma HQ com esse nome na biblioteca.</div>`;
+      return;
+    }
+    const cardsToLoad = matches.map(f=>{
+      const card = renderComicCard(f);
+      grid.appendChild(card);
+      return {card, f};
+    });
+    runLimited(cardsToLoad, 3, ({card, f})=>attachCoverAsync(card, f));
+  }, 250);
 });
 
 /* ---------------------------------------------------------------------
@@ -1526,6 +1613,7 @@ async function boot(){
   $('#chrome').classList.remove('hidden');
   $('#view-library').classList.remove('hidden');
   await enterFolder(CONFIG.rootFolderId, 'Biblioteca', {reset:true});
+  ensureFullIndex(); // indexa a biblioteca inteira em segundo plano p/ a busca ser instantânea
 }
 
 boot();
