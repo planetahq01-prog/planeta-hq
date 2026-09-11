@@ -937,7 +937,8 @@ async function renderLibrary(folderId, forceRefresh){
   }
 }
 
-function renderFolderCard(f){
+function renderFolderCard(f, opts){
+  opts = opts || {};
   const card = el('div','card folder');
   card.dataset.id = f.id;
   const cover = el('div','folder-cover');
@@ -949,7 +950,7 @@ function renderFolderCard(f){
   const meta = el('div','meta');
   meta.appendChild(el('span','folder-count','...'));
   card.appendChild(meta);
-  card.onclick = ()=>enterFolder(f.id, f.name);
+  card.onclick = opts.fromSearch ? ()=>openFolderFromSearch(f) : ()=>enterFolder(f.id, f.name);
   return card;
 }
 
@@ -1091,15 +1092,25 @@ async function resolveFolderCoverFile(folderId, depth){
   }
   return file;
 }
+// Conta recursivamente quantas HQs (PDF/CBZ/CBR) existem dentro de uma pasta,
+// somando também o conteúdo de todas as subpastas. Reaproveita o cache de
+// driveListFolder, então só gera chamadas novas à API na primeira vez que
+// cada (sub)pasta é vista na sessão.
+async function countComicsRecursive(folderId){
+  let listing;
+  try{ listing = await driveListFolder(folderId); }catch(e){ return 0; }
+  let total = listing.files.length;
+  await runLimited(listing.folders, 4, async sub=>{
+    total += await countComicsRecursive(sub.id);
+  });
+  return total;
+}
 async function attachFolderCoverAsync(card, folderObj){
   const placeholder = card.querySelector('.cover-placeholder');
   const countEl = card.querySelector('.folder-count');
   try{
-    const listing = await driveListFolder(folderObj.id);
-    if(countEl){
-      const count = listing.files.length + listing.folders.length;
-      countEl.textContent = count===0 ? 'Vazia' : `${count} ${count===1?'item':'itens'}`;
-    }
+    const total = await countComicsRecursive(folderObj.id);
+    if(countEl) countEl.textContent = total===0 ? 'Vazia' : `${total} ${total===1?'item':'itens'}`;
   }catch(e){ if(countEl) countEl.textContent=''; }
   try{
     const file = await resolveFolderCoverFile(folderObj.id);
@@ -1509,26 +1520,44 @@ function normalizeStr(s){
   return String(s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
 }
 // Percorre recursivamente todas as (sub)pastas a partir da raiz configurada,
-// procurando arquivos cujo nome contenha o termo buscado. Usa o cache de
-// driveListFolder, então pastas já visitadas não geram nova requisição.
-async function searchAllComics(normTerm, token, isStale){
-  const results = [];
-  const seen = new Set();
+// procurando PASTAS e ARQUIVOS cujo nome contenha o termo buscado. Usa o
+// cache de driveListFolder, então pastas já visitadas não geram nova requisição.
+async function searchLibrary(normTerm, token, isStale){
+  const folderResults = [];
+  const fileResults = [];
+  const seenFolders = new Set();
+  const seenFiles = new Set();
   async function walk(folderId){
     if(isStale(token)) return;
     let listing;
     try{ listing = await driveListFolder(folderId); }catch(e){ return; }
+    listing.folders.forEach(sub=>{
+      if(!seenFolders.has(sub.id) && normalizeStr(sub.name).includes(normTerm)){
+        seenFolders.add(sub.id);
+        folderResults.push(sub);
+      }
+    });
     listing.files.forEach(f=>{
-      if(!seen.has(f.id) && normalizeStr(f.name).includes(normTerm)){
-        seen.add(f.id);
-        results.push(f);
+      if(!seenFiles.has(f.id) && normalizeStr(f.name).includes(normTerm)){
+        seenFiles.add(f.id);
+        fileResults.push(f);
       }
     });
     await runLimited(listing.folders, 4, sub=>walk(sub.id));
   }
   await walk(CONFIG.rootFolderId);
-  results.sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
-  return results;
+  folderResults.sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
+  fileResults.sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
+  return {folders: folderResults, files: fileResults};
+}
+
+// Ao clicar numa PASTA encontrada pela busca, entra nela direto a partir da
+// raiz (a busca não guarda o caminho completo de ancestrais, então o
+// breadcrumb passa a mostrar só "Biblioteca / <pasta encontrada>").
+function openFolderFromSearch(f){
+  $('#search-input').value = '';
+  state.path = [{id: CONFIG.rootFolderId, name:'Biblioteca'}];
+  enterFolder(f.id, f.name);
 }
 
 let searchToken = 0;
@@ -1548,22 +1577,29 @@ async function runSearch(term){
   const myToken = ++searchToken;
   const grid = $('#grid-library');
   grid.innerHTML = `<div class="empty-state"><div class="spinner" style="margin:0 auto 12px"></div>Buscando em toda a biblioteca...</div>`;
-  const matches = await searchAllComics(normalizeStr(term), myToken, t=>t!==searchToken);
+  const {folders, files} = await searchLibrary(normalizeStr(term), myToken, t=>t!==searchToken);
   if(myToken !== searchToken) return; // usuário já digitou outra coisa nesse meio-tempo
-  state.currentListContext = matches;
+  state.currentListContext = files;
   state.currentListIsLocal = false;
   grid.innerHTML = '';
-  if(matches.length===0){
-    grid.innerHTML = `<div class="empty-state">${ICONS.search}<h3>Nada encontrado</h3>Nenhuma HQ com esse nome na biblioteca.</div>`;
+  if(folders.length===0 && files.length===0){
+    grid.innerHTML = `<div class="empty-state">${ICONS.search}<h3>Nada encontrado</h3>Nenhuma pasta ou HQ com esse nome na biblioteca.</div>`;
     return;
   }
-  const cardsToLoad = matches.map(f=>{
+  const folderCards = folders.map(f=>{
+    const card = renderFolderCard(f, {fromSearch:true});
+    grid.appendChild(card);
+    return {card, f};
+  });
+  const comicCards = files.map(f=>{
     const card = renderComicCard(f);
     grid.appendChild(card);
     return {card, f};
   });
-  runLimited(cardsToLoad, 3, ({card, f})=>attachCoverAsync(card, f));
+  runLimited(folderCards, 2, ({card, f})=>attachFolderCoverAsync(card, f));
+  runLimited(comicCards, 3, ({card, f})=>attachCoverAsync(card, f));
 }
+
 
 /* ---------------------------------------------------------------------
    10) Abas, atualizar, configurações
