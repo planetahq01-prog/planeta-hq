@@ -761,7 +761,7 @@ function guessExt(f){
 // Cache persistente (sobrevive a recarregar a página) de "esta pasta tem
 // conteúdo válido em algum nível?" — evita repetir a varredura recursiva
 // da árvore inteira toda vez que o app abre.
-const FOLDER_OK_CACHE_KEY = 'planetahq_folderok_v1';
+const FOLDER_OK_CACHE_KEY = 'planetahq_folderok_v2';
 const FOLDER_OK_TTL = 12*3600*1000; // 12h
 let folderOkCache = (()=>{ try{ return JSON.parse(localStorage.getItem(FOLDER_OK_CACHE_KEY)) || {}; }catch(e){ return {}; } })();
 let folderOkDirty = false;
@@ -889,19 +889,16 @@ async function folderHasQualifyingContent(folderId){
   const cached = getCachedFolderOk(folderId);
   if(cached !== undefined) return cached;
   let listing;
-  try{ listing = await driveListFolder(folderId); }catch(e){ return false; }
-  let ok = listing.files.length > 0;
-  if(!ok){
-    // só desce mais um nível se a própria pasta não tinha HQ direta —
-    // suficiente pra pegar o caso comum (subpasta única com HQs dentro)
-    // sem crawlear a árvore inteira de novo.
-    for(const sub of listing.folders){
-      const subOk = getCachedFolderOk(sub.id);
-      if(subOk === true || (subOk === undefined && (await driveListFolder(sub.id).catch(()=>({files:[]}))).files.length > 0)){
-        ok = true; break;
-      }
-    }
-  }
+  try{ listing = await driveListFolder(folderId); }
+  catch(e){ return true; } // erro de rede/API nunca deve esconder uma pasta real
+
+  // listing.files já exclui CBR (só tem pdf/cbz) — então, se tiver qualquer
+  // arquivo aqui, a pasta fica visível na hora, sem precisar olhar mais
+  // fundo. Se não tiver arquivo mas tiver subpastas, também mostra (o
+  // usuário desce e cada subpasta se filtra sozinha, no seu próprio nível).
+  // Só some quando não sobra nada: nem pdf/cbz aqui, nem subpasta alguma —
+  // ou seja, exclusivamente CBR (ou de fato vazia).
+  const ok = listing.files.length > 0 || listing.folders.length > 0;
   setCachedFolderOk(folderId, ok);
   return ok;
 }
@@ -1128,17 +1125,19 @@ function saveConfig(apiKey, folderId, proxyUrl){
 async function enterFolder(id, name, {reset=false}={}){
   if(reset) state.path = [];
   state.path.push({id, name});
+  $('#search-input').value = '';
   renderBreadcrumb();
   await renderLibrary(id, false);
-  if(id === CONFIG.rootFolderId && !$('#search-input').value.trim()){
+  if(id === CONFIG.rootFolderId){
     renderHomeSections();
   }
 }
 function goToBreadcrumbIndex(idx){
   state.path = state.path.slice(0, idx+1);
+  $('#search-input').value = '';
   renderBreadcrumb();
   renderLibrary(state.path[state.path.length-1].id, false);
-  if(state.path[state.path.length-1].id === CONFIG.rootFolderId && !$('#search-input').value.trim()){
+  if(state.path[state.path.length-1].id === CONFIG.rootFolderId){
     renderHomeSections();
   }
 }
