@@ -673,7 +673,7 @@ function guessExt(f){
   return null;
 }
 
-const DRIVE_MAX_CONCURRENT = 5;
+const DRIVE_MAX_CONCURRENT = 6;
 let driveActiveRequests = 0;
 const driveWaitQueue = [];
 function driveAcquireSlot(){
@@ -890,14 +890,18 @@ async function openComicCBR(blob){
   };
 }
 
-async function openComicPDF(source, onProgress){
+async function openComicPDF(source, onProgress, knownSize){
   pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   const loadingTask = typeof source === 'string'
     ? pdfjsLib.getDocument({url: source, rangeChunkSize: 1 << 16})
     : pdfjsLib.getDocument({data: await source.arrayBuffer()});
   if(onProgress){
     loadingTask.onProgress = (p)=>{
-      if(p && p.total) onProgress(p.loaded/p.total);
+      // Como o PDF é carregado por partes (range requests) para abrir o
+      // mais rápido possível, nem sempre o total vem no evento — nesse
+      // caso usamos o tamanho já conhecido pela listagem do Drive.
+      const total = (p && p.total) || knownSize || 0;
+      if(total && p && typeof p.loaded === 'number') onProgress(Math.min(1, p.loaded/total));
     };
   }
   const pdf = await loadingTask.promise;
@@ -1267,7 +1271,7 @@ async function searchLibrary(normTerm, token, isStale){
         fileResults.push(f);
       }
     });
-    await runLimited(listing.folders, 4, sub=>walk(sub.id));
+    await runLimited(listing.folders, 6, sub=>walk(sub.id));
   }
   await walk(CONFIG.rootFolderId);
   folderResults.sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
@@ -1413,18 +1417,31 @@ async function openReader(fileMeta, forceLocal){
       if(forceLocal) throw new Error('Este arquivo não está mais salvo offline.');
       state.reader.fromDownload = false;
       const ext = fileMeta._ext || guessExt(fileMeta) || fileMeta.name.split('.').pop().toLowerCase();
+      const setPct = (v)=>{ const pctEl = document.getElementById('reader-status-pct'); if(pctEl) pctEl.textContent = `${v}%`; };
       if(ext === 'pdf'){
+        // Mantém o PDF abrindo do jeito mais rápido possível (por partes,
+        // sob demanda), sem baixar o arquivo inteiro antes. Como nesse modo
+        // nem sempre chegam avisos de progresso reais o tempo todo, misturamos
+        // o progresso real (quando chega) com um avanço suave "de cortesia",
+        // pra porcentagem nunca ficar travada e sempre ir subindo até 100%.
         status.innerHTML = '<div class="spinner"></div><div>Carregando PDF... <span id="reader-status-pct">0%</span></div>';
-        doc = await openComicPDF(driveMediaUrl(fileMeta.id), p=>{
-          const pctEl = document.getElementById('reader-status-pct');
-          if(pctEl) pctEl.textContent = `${Math.round(p*100)}%`;
-        });
+        let shown = 0;
+        setPct(0);
+        const ticker = setInterval(()=>{
+          if(shown < 90){ shown += 3; setPct(shown); }
+        }, 100);
+        try{
+          doc = await openComicPDF(driveMediaUrl(fileMeta.id), p=>{
+            const real = Math.round(p*100);
+            if(real > shown){ shown = real; setPct(shown); }
+          }, Number(fileMeta.size)||0);
+        } finally {
+          clearInterval(ticker);
+        }
+        setPct(100);
       } else {
         status.innerHTML = '<div class="spinner"></div><div>Baixando... <span id="reader-status-pct">0%</span></div>';
-        const blob = await driveFetchBlob(fileMeta.id, p=>{
-          const pctEl = document.getElementById('reader-status-pct');
-          if(pctEl) pctEl.textContent = `${Math.round(p*100)}%`;
-        }, Number(fileMeta.size)||0);
+        const blob = await driveFetchBlob(fileMeta.id, p=>{ setPct(Math.round(p*100)); }, Number(fileMeta.size)||0);
         doc = await openComicFromBlob(fileMeta, blob);
       }
     }
@@ -1777,7 +1794,7 @@ async function collectAranhaFolders(token, isStale){
         found.push(sub);
       }
     });
-    await runLimited(listing.folders, 4, sub=>walk(sub.id));
+    await runLimited(listing.folders, 6, sub=>walk(sub.id));
   }
   await walk(CONFIG.rootFolderId);
   found.sort((a,b)=>{
@@ -1800,7 +1817,7 @@ async function collectAllComics(token, isStale){
       seen.add(f.id);
       all.push(f);
     });
-    await runLimited(listing.folders, 4, sub=>walk(sub.id));
+    await runLimited(listing.folders, 6, sub=>walk(sub.id));
   }
   await walk(CONFIG.rootFolderId);
   return all;
@@ -1891,25 +1908,50 @@ function attachCarouselDrag(carousel){
 }
 
 const ARANHA_CACHE_KEY = 'planetahq_aranha_cache_v1';
+const ALLCOMICS_CACHE_KEY = 'planetahq_allcomics_cache_v1';
+const HOME_CACHE_MAX_AGE = 6*3600*1000;
+
+function readHomeCache(key, arrProp){
+  try{
+    const raw = localStorage.getItem(key);
+    if(!raw) return null;
+    const c = JSON.parse(raw);
+    if(c && typeof c.savedAt === 'number' && Array.isArray(c[arrProp])) return c;
+  }catch(e){}
+  return null;
+}
+function writeHomeCache(key, arrProp, list){
+  try{ localStorage.setItem(key, JSON.stringify({savedAt: Date.now(), [arrProp]: list})); }catch(e){}
+}
+
 let aranhaCachePromise = null;
-async function getAranhaFolders(){
+async function getAranhaFolders(forceRefresh){
+  if(forceRefresh) aranhaCachePromise = null;
   if(aranhaCachePromise) return aranhaCachePromise;
   aranhaCachePromise = (async ()=>{
-    try{
-      const raw = localStorage.getItem(ARANHA_CACHE_KEY);
-      if(raw){
-        const c = JSON.parse(raw);
-        if(c.savedAt && Date.now()-c.savedAt < 6*3600*1000 && Array.isArray(c.folders)) return c.folders;
-      }
-    }catch(e){}
+    const cached = readHomeCache(ARANHA_CACHE_KEY, 'folders');
+    if(cached && Date.now()-cached.savedAt < HOME_CACHE_MAX_AGE) return cached.folders;
     const token = ++searchToken;
     const folders = await collectAranhaFolders(token, t=>t!==searchToken);
-    try{
-      localStorage.setItem(ARANHA_CACHE_KEY, JSON.stringify({savedAt: Date.now(), folders}));
-    }catch(e){}
+    writeHomeCache(ARANHA_CACHE_KEY, 'folders', folders);
     return folders;
   })();
   return aranhaCachePromise;
+}
+
+let allComicsCachePromise = null;
+async function getAllComicsCached(forceRefresh){
+  if(forceRefresh) allComicsCachePromise = null;
+  if(allComicsCachePromise) return allComicsCachePromise;
+  allComicsCachePromise = (async ()=>{
+    const cached = readHomeCache(ALLCOMICS_CACHE_KEY, 'comics');
+    if(cached && Date.now()-cached.savedAt < HOME_CACHE_MAX_AGE) return cached.comics;
+    const token = ++searchToken;
+    const comics = await collectAllComics(token, t=>t!==searchToken);
+    writeHomeCache(ALLCOMICS_CACHE_KEY, 'comics', comics);
+    return comics;
+  })();
+  return allComicsCachePromise;
 }
 
 function hashStr(s){
@@ -1918,46 +1960,32 @@ function hashStr(s){
   return (h>>>0);
 }
 
-async function renderHomeSections(){
-  const wrap = $('#home-sections');
-  if(!wrap) return;
-  wrap.innerHTML = `<div class="home-section"><div class="home-section-title">Carregando seções…</div></div>`;
-  wrap.classList.remove('hidden');
-
-  const myToken = ++searchToken;
-  const isStale = t=>t!==searchToken;
-
-  let continueItems = [];
+async function getContinueItems(){
   try{
     const allProg = await idbAll('progress');
-    continueItems = allProg
+    return allProg
       .filter(p=>p.pct >= 5 && p.pct < 98)
       .sort((a,b)=>b.updatedAt-a.updatedAt)
       .slice(0, 20);
-  }catch(e){}
+  }catch(e){ return []; }
+}
 
-  let aranhaFolders = [];
-  try{ aranhaFolders = await getAranhaFolders(); }catch(e){}
-  if(isStale(myToken)) return;
-
-  let allComics = [];
-  try{ allComics = await collectAllComics(myToken, isStale); }catch(e){}
-  if(isStale(myToken)) return;
-
+function buildRecentAndRecommended(allComics){
   const recent = [...allComics]
     .filter(f=>f.modifiedTime)
     .sort((a,b)=> new Date(b.modifiedTime) - new Date(a.modifiedTime))
     .slice(0, 20);
-
   const daySeed = Math.floor(Date.now()/(24*3600*1000));
   const recommended = [...allComics]
     .map(f=>({f, k: hashStr(f.id + ':' + daySeed)}))
     .sort((a,b)=>a.k-b.k)
     .slice(0, 20)
     .map(x=>x.f);
+  return {recent, recommended};
+}
 
-  if(isStale(myToken)) return;
-
+function paintHomeSections(wrap, {continueItems, aranhaFolders, allComics}){
+  const {recent, recommended} = buildRecentAndRecommended(allComics);
   wrap.innerHTML = '';
   let anySection = false;
 
@@ -1982,7 +2010,48 @@ async function renderHomeSections(){
   });
   if(secNew){ wrap.appendChild(secNew); anySection = true; }
 
-  if(!anySection) wrap.classList.add('hidden');
+  wrap.classList.toggle('hidden', !anySection);
+}
+
+async function renderHomeSections(forceRefresh){
+  const wrap = $('#home-sections');
+  if(!wrap) return;
+
+  const myToken = ++searchToken;
+  const isStale = t=>t!==searchToken;
+
+  // 1) Se já temos algo em cache (mesmo desatualizado), pinta na hora — a
+  // sensação é de carregamento instantâneo — e atualiza tudo em segundo
+  // plano logo em seguida, sem travar a tela.
+  const cachedAranha = !forceRefresh && readHomeCache(ARANHA_CACHE_KEY, 'folders');
+  const cachedComics = !forceRefresh && readHomeCache(ALLCOMICS_CACHE_KEY, 'comics');
+  const continueItemsFast = await getContinueItems();
+  if(isStale(myToken)) return;
+
+  let paintedFast = false;
+  if(cachedAranha || cachedComics){
+    wrap.classList.remove('hidden');
+    paintHomeSections(wrap, {
+      continueItems: continueItemsFast,
+      aranhaFolders: cachedAranha ? cachedAranha.folders : [],
+      allComics: cachedComics ? cachedComics.comics : []
+    });
+    paintedFast = true;
+  } else {
+    wrap.innerHTML = `<div class="home-section"><div class="home-section-title">Carregando seções…</div></div>`;
+    wrap.classList.remove('hidden');
+  }
+
+  // 2) Busca (ou revalida) tudo em paralelo — antes isso era sequencial,
+  // agora roda ao mesmo tempo, o que já corta bastante o tempo de espera.
+  const [continueItems, aranhaFolders, allComics] = await Promise.all([
+    getContinueItems(),
+    getAranhaFolders(forceRefresh).catch(()=>paintedFast && cachedAranha ? cachedAranha.folders : []),
+    getAllComicsCached(forceRefresh).catch(()=>paintedFast && cachedComics ? cachedComics.comics : [])
+  ]);
+  if(isStale(myToken)) return;
+
+  paintHomeSections(wrap, {continueItems, aranhaFolders, allComics});
 }
 
 /* ---------------------------------------------------------------------
@@ -2001,10 +2070,12 @@ document.querySelectorAll('.tab').forEach(tab=>{
 });
 $('#btn-refresh').onclick = ()=>{
   localStorage.removeItem(ARANHA_CACHE_KEY);
+  localStorage.removeItem(ALLCOMICS_CACHE_KEY);
   aranhaCachePromise = null;
+  allComicsCachePromise = null;
   const current = state.path[state.path.length-1];
   if(current) renderLibrary(current.id, true);
-  if(current && current.id === CONFIG.rootFolderId) renderHomeSections();
+  if(current && current.id === CONFIG.rootFolderId) renderHomeSections(true);
 };
 $('#btn-settings').onclick = ()=>{
   if(confirm('Apagar a configuração da biblioteca (chave de API e pasta)? Seus downloads offline serão mantidos.')){
