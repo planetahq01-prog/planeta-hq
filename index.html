@@ -811,6 +811,17 @@ async function openComicCBZ(blob){
       const url = URL.createObjectURL(fileBlob);
       urlCache[i] = url;
       return url;
+    },
+    // IMPORTANTE: cada getPage() cria uma blob URL com URL.createObjectURL,
+    // que fica retida na memória do navegador até ser explicitamente
+    // revogada — mesmo depois do objeto "doc" ser descartado. Sem isso,
+    // cada HQ (ou cada capa gerada) lida ao longo da sessão vai acumulando
+    // memória permanentemente, deixando o app cada vez mais pesado até
+    // travar/fechar. dispose() deve ser chamado sempre que este documento
+    // deixar de ser usado.
+    dispose(){
+      Object.values(urlCache).forEach(u=>URL.revokeObjectURL(u));
+      for(const k in urlCache) delete urlCache[k];
     }
   };
 }
@@ -861,6 +872,12 @@ async function openComicCBR(blob){
       const url = URL.createObjectURL(f);
       urlCache[i] = url;
       return url;
+    },
+    // Ver comentário em openComicCBZ: sem revogar, cada blob URL fica pinada
+    // na memória para sempre.
+    dispose(){
+      Object.values(urlCache).forEach(u=>URL.revokeObjectURL(u));
+      for(const k in urlCache) delete urlCache[k];
     }
   };
 }
@@ -887,8 +904,21 @@ async function openComicPDF(source){
       canvas.width = viewport.width; canvas.height = viewport.height;
       await page.render({canvasContext: canvas.getContext('2d'), viewport}).promise;
       const url = canvas.toDataURL('image/jpeg', 0.9);
+      // Libera imediatamente o canvas (zera as dimensões): em iOS/WebView
+      // canvases grandes não coletados a tempo são uma fonte conhecida de
+      // pressão de memória.
+      canvas.width = 0; canvas.height = 0;
+      page.cleanup && page.cleanup();
       urlCache[i] = url;
       return url;
+    },
+    // pdf.destroy() libera os buffers internos do pdf.js (fontes, streams,
+    // recursos do worker) para este documento. Sem chamar isso, cada PDF
+    // aberto — inclusive só para gerar a miniatura/capa de um card na grade —
+    // ficava retido na memória pelo resto da sessão.
+    dispose(){
+      for(const k in urlCache) delete urlCache[k];
+      pdf.destroy();
     }
   };
 }
@@ -1101,6 +1131,11 @@ async function resolveCoverSrc(f){
     const pageUrl = await doc.getPage(0);
     const dataUrl = await toDataUrl(pageUrl);
     await idbSet('covers', {id: f.id, dataUrl});
+    // Esse "doc" foi aberto só para extrair a 1ª página como capa — sem
+    // descartar aqui, cada card exibido na grade (dezenas por pasta) deixava
+    // uma blob URL ou um documento pdf.js inteiro pendurado na memória para
+    // sempre, mesmo sem o usuário nunca ter aberto o leitor.
+    if(doc.dispose) doc.dispose();
     return dataUrl;
   }catch(err){
     return null;
@@ -1286,6 +1321,11 @@ async function openReader(fileMeta, forceLocal){
   // isso, a HQ anterior (imagens já renderizadas) fica visível por baixo do
   // spinner enquanto a nova carrega.
   if(state.reader.scrollIO){ state.reader.scrollIO.disconnect(); state.reader.scrollIO = null; }
+  // Descarta o documento anterior (revoga as blob URLs de suas páginas /
+  // destroi o pdf.js interno) ANTES de abrir o próximo. Isso é essencial ao
+  // navegar entre capítulos/HQs (btn-prev-chapter / btn-next-chapter), que
+  // antes acumulavam um documento inteiro por HQ aberta na sessão.
+  if(state.reader.doc && state.reader.doc.dispose) state.reader.doc.dispose();
   state.reader.doc = null;
   img.src = '';
   img.style.display = 'none';
@@ -1418,6 +1458,16 @@ async function buildScrollReader(doc){
           state.reader.pageIndex = idx;
           $('#page-count').textContent = `${idx+1} / ${doc.pageCount}`;
         }
+      } else {
+        // Fora da faixa observada (900px de margem): descarrega a imagem já
+        // decodificada e volta ao skeleton. A blob URL/dataURL continua em
+        // urlCache dentro do "doc", então voltar a rolar até aqui é
+        // instantâneo — só o bitmap decodificado na tela é liberado. Sem
+        // isso, uma HQ de 100+ páginas mantinha TODAS as páginas já vistas
+        // decodificadas na memória ao mesmo tempo, o que é a principal causa
+        // do app ficar cada vez mais pesado (e travar/fechar) quanto mais
+        // tempo fica aberto lendo.
+        unloadScrollPage(pageEls[idx]);
       }
     });
   }, {root: container, rootMargin:'900px 0px', threshold:[0, 0.5]});
@@ -1439,6 +1489,12 @@ async function loadScrollPage(doc, i, pageDiv){
   }catch(e){
     pageDiv.dataset.loaded = '';
   }
+}
+function unloadScrollPage(pageDiv){
+  if(!pageDiv || !pageDiv.dataset.loaded) return;
+  pageDiv.dataset.loaded = '';
+  pageDiv.innerHTML = '';
+  pageDiv.classList.add('skeleton');
 }
 function applyScrollZoom(){
   const inner = document.getElementById('reader-scroll-inner');
@@ -1492,7 +1548,12 @@ function closeReader(){
   $('#view-reader').classList.add('hidden');
   $('#reader-settings').classList.add('hidden');
   if(state.reader.scrollIO){ state.reader.scrollIO.disconnect(); state.reader.scrollIO = null; }
+  if(state.reader.doc && state.reader.doc.dispose) state.reader.doc.dispose();
   state.reader.doc = null;
+  // Solta as imagens já renderizadas na tela (senão o navegador continua
+  // com os bitmaps decodificados na memória mesmo com o leitor escondido).
+  $('#reader-img').src = '';
+  $('#reader-scroll').innerHTML = '';
 }
 
 async function updateDownloadButtonReader(){
