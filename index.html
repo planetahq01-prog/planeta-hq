@@ -1440,32 +1440,18 @@ function normalizeStr(s){
 }
 
 async function searchLibrary(normTerm, token, isStale){
-  const folderResults = [];
-  const fileResults = [];
-  const seenFolders = new Set();
-  const seenFiles = new Set();
-  async function walk(folderId){
-    if(isStale(token)) return;
-    let listing;
-    try{ listing = await driveListFolder(folderId); }catch(e){ return; }
-    listing.folders.forEach(sub=>{
-      if(!seenFolders.has(sub.id) && normalizeStr(sub.name).includes(normTerm)){
-        seenFolders.add(sub.id);
-        folderResults.push(sub);
-      }
-    });
-    listing.files.forEach(f=>{
-      if(!seenFiles.has(f.id) && normalizeStr(f.name).includes(normTerm)){
-        seenFiles.add(f.id);
-        fileResults.push(f);
-      }
-    });
-    await runLimited(listing.folders, 6, sub=>walk(sub.id));
-  }
-  await walk(CONFIG.rootFolderId);
-  folderResults.sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
-  fileResults.sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
-  return {folders: folderResults, files: fileResults};
+  const [allFolders, allComics] = await Promise.all([
+    getAllFoldersCached(),
+    getAllComicsCached()
+  ]);
+  if(isStale(token)) return {folders: [], files: []};
+  const folders = allFolders
+    .filter(f=>normalizeStr(f.name).includes(normTerm))
+    .sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
+  const files = allComics
+    .filter(f=>normalizeStr(f.name).includes(normTerm))
+    .sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
+  return {folders, files};
 }
 
 function openFolderFromSearch(f){
@@ -2119,7 +2105,9 @@ async function collectAranhaFolders(token, isStale){
 
 async function collectAllComics(token, isStale){
   const all = [];
+  const allFolders = [];
   const seen = new Set();
+  const seenFolders = new Set();
   async function walk(folderId){
     if(isStale(token)) return;
     let listing;
@@ -2129,11 +2117,19 @@ async function collectAllComics(token, isStale){
       seen.add(f.id);
       all.push(f);
     });
+    listing.folders.forEach(sub=>{
+      if(seenFolders.has(sub.id)) return;
+      seenFolders.add(sub.id);
+      allFolders.push(sub);
+    });
     await runLimited(listing.folders, 6, sub=>walk(sub.id));
   }
   await walk(CONFIG.rootFolderId);
+  if(!isStale(token)) writeHomeCache(ALLFOLDERS_CACHE_KEY, 'folders', allFolders);
   return all;
 }
+
+const ALLFOLDERS_CACHE_KEY = 'planetahq_allfolders_cache_v1';
 
 function buildCarouselCard(item, opts){
   opts = opts || {};
@@ -2252,19 +2248,36 @@ async function getAranhaFolders(forceRefresh){
   return aranhaCachePromise;
 }
 
-let allComicsCachePromise = null;
+let libraryIndexPromise = null;
+async function refreshLibraryIndex(){
+  if(libraryIndexPromise) return libraryIndexPromise;
+  libraryIndexPromise = (async ()=>{
+    const token = ++searchToken;
+    const {comics, folders} = await collectAllComics(token, t=>t!==searchToken);
+    writeHomeCache(ALLCOMICS_CACHE_KEY, 'comics', comics);
+    writeHomeCache(ALLFOLDERS_CACHE_KEY, 'folders', folders);
+    return {comics, folders};
+  })();
+  try{ return await libraryIndexPromise; }
+  finally{ libraryIndexPromise = null; }
+}
+
 async function getAllComicsCached(forceRefresh){
-  if(forceRefresh) allComicsCachePromise = null;
-  if(allComicsCachePromise) return allComicsCachePromise;
-  allComicsCachePromise = (async ()=>{
+  if(!forceRefresh){
     const cached = readHomeCache(ALLCOMICS_CACHE_KEY, 'comics');
     if(cached && Date.now()-cached.savedAt < HOME_CACHE_MAX_AGE) return cached.comics;
-    const token = ++searchToken;
-    const comics = await collectAllComics(token, t=>t!==searchToken);
-    writeHomeCache(ALLCOMICS_CACHE_KEY, 'comics', comics);
-    return comics;
-  })();
-  return allComicsCachePromise;
+  }
+  const {comics} = await refreshLibraryIndex();
+  return comics;
+}
+
+async function getAllFoldersCached(forceRefresh){
+  if(!forceRefresh){
+    const cached = readHomeCache(ALLFOLDERS_CACHE_KEY, 'folders');
+    if(cached && Date.now()-cached.savedAt < HOME_CACHE_MAX_AGE) return cached.folders;
+  }
+  const {folders} = await refreshLibraryIndex();
+  return folders;
 }
 
 function hashStr(s){
@@ -2407,8 +2420,9 @@ $('#sort-select').addEventListener('change', e=>{
 $('#btn-refresh').onclick = ()=>{
   localStorage.removeItem(ARANHA_CACHE_KEY);
   localStorage.removeItem(ALLCOMICS_CACHE_KEY);
+  localStorage.removeItem(ALLFOLDERS_CACHE_KEY);
   aranhaCachePromise = null;
-  allComicsCachePromise = null;
+  libraryIndexPromise = null;
   const current = state.path[state.path.length-1];
   if(current) renderLibrary(current.id, true);
   if(current && current.id === CONFIG.rootFolderId) renderHomeSections(true);
