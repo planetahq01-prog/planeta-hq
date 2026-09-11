@@ -107,6 +107,11 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 }
 
 /* ---- Breadcrumb ---- */
+.breadcrumb-row{
+  display:flex;align-items:center;gap:6px;
+  padding:6px 10px;background:var(--ink);
+}
+.breadcrumb-row .breadcrumb{padding:4px 6px;flex:1;min-width:0;}
 .breadcrumb{
   display:flex;align-items:center;flex-wrap:wrap;gap:4px;
   padding:10px 16px;font-size:13px;color:var(--text-muted);background:var(--ink);
@@ -178,47 +183,70 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 .dl-btn.done{background:linear-gradient(135deg,var(--teal),var(--teal-dark));color:#03211c;}
 .dl-btn:active{background:linear-gradient(135deg,var(--accent),var(--accent-dark));color:#fff;}
 
-/* ---- Cards de pasta (com capa ilustrativa, sem cortar a arte) ---- */
+/* ---- Cards de pasta — visual "gibi" (estilo quadrinho, com bordas grossas
+   estilo tira de HQ, tramas de pontos/halftone e um selo tipo "POW!") ---- */
 .card.folder{
-  border:1px solid transparent;
-  background:linear-gradient(var(--paper),var(--paper)) padding-box,
-             linear-gradient(135deg, rgba(255,183,3,.55), rgba(255,77,94,.4)) border-box;
+  border:3px solid var(--ink);
+  border-radius:var(--radius-md);
+  background:var(--paper);
+  box-shadow:var(--shadow-card), 4px 4px 0 0 var(--ink);
   transition:transform .15s ease, box-shadow .15s ease, border-color .15s ease;
 }
+@media(hover:hover){
+  .card.folder:hover{
+    transform:translate(-2px,-5px) rotate(-.6deg);
+    box-shadow:0 16px 30px -14px rgba(0,0,0,.65), 6px 6px 0 0 var(--accent);
+    border-color:var(--accent);
+  }
+}
+.card.folder:active{transform:translate(1px,1px) rotate(0deg);box-shadow:1px 1px 0 0 var(--ink);}
 .folder-cover{
   position:relative;width:100%;aspect-ratio:2/3;overflow:hidden;flex-shrink:0;
-  background:radial-gradient(120% 100% at 50% 0%, var(--ink-elevated), var(--ink));
+  background:
+    radial-gradient(circle, rgba(255,255,255,.16) 1.6px, transparent 1.7px) 0 0/13px 13px,
+    radial-gradient(120% 100% at 50% 0%, var(--ink-elevated), var(--ink));
+  border-bottom:3px solid var(--ink);
 }
 .folder-cover .cover-placeholder{
   position:absolute;inset:0;width:100%;height:100%;aspect-ratio:auto;
-  background:radial-gradient(120% 100% at 50% 0%, var(--ink-elevated), var(--ink));
-  color:var(--paper-dim);opacity:1;
+  background:
+    radial-gradient(circle, rgba(255,255,255,.16) 1.6px, transparent 1.7px) 0 0/13px 13px,
+    radial-gradient(120% 100% at 50% 0%, var(--ink-elevated), var(--ink));
+  color:var(--gold);opacity:1;
 }
-.folder-cover .cover-placeholder svg{width:34px;height:34px;opacity:.55;}
+.folder-cover .cover-placeholder svg{width:34px;height:34px;opacity:.7;filter:drop-shadow(0 2px 0 rgba(0,0,0,.4));}
 /* Capa real: fundo desfocado (preenche o espaço) + arte inteira por cima, sem cortar nada */
 .folder-cover-wrap{position:absolute;inset:0;}
 .folder-cover-bg{
   position:absolute;inset:-12%;width:124%;height:124%;object-fit:cover;
-  filter:blur(20px) saturate(1.35) brightness(.5);transform:scale(1.02);
+  filter:blur(20px) saturate(1.5) brightness(.5);transform:scale(1.02);
 }
 .folder-cover-fg{
   position:relative;z-index:1;display:block;width:100%;height:100%;object-fit:contain;
   padding:14px 12px;filter:drop-shadow(0 12px 20px rgba(0,0,0,.55));
   transition:transform .2s ease;
 }
-@media(hover:hover){ .card.folder:hover .folder-cover-fg{transform:scale(1.04);} }
+@media(hover:hover){ .card.folder:hover .folder-cover-fg{transform:scale(1.04) rotate(.8deg);} }
+/* Selo estilo "balão de impacto" de quadrinho, no lugar do chip discreto anterior */
 .folder-chip{
-  position:absolute;top:8px;left:8px;z-index:2;
-  display:flex;align-items:center;gap:5px;
-  background:rgba(13,12,18,.75);backdrop-filter:blur(4px);
-  color:var(--gold);font-size:10px;font-weight:700;letter-spacing:.3px;
-  padding:5px 9px 5px 7px;border-radius:999px;border:1px solid rgba(255,255,255,.1);
+  position:absolute;top:6px;left:6px;z-index:2;
+  display:flex;align-items:center;gap:4px;
+  background:var(--gold);color:var(--ink);
+  font-family:var(--font-display);font-size:11px;font-weight:400;letter-spacing:.4px;
+  padding:5px 10px 4px 8px;
+  border:2px solid var(--ink);border-radius:4px;
+  transform:rotate(-4deg);
+  box-shadow:2px 2px 0 0 var(--ink);
 }
 .folder-chip svg{width:11px;height:11px;flex-shrink:0;}
+.card.folder .label{
+  font-family:var(--font-display);font-weight:400;letter-spacing:.3px;
+  font-size:13px;-webkit-line-clamp:2;
+}
 .card.folder .meta{justify-content:flex-start;}
 .folder-count{
-  background:var(--ink);color:var(--paper-dim);font-size:9px;font-weight:700;
-  letter-spacing:.3px;padding:3px 7px;border-radius:999px;
+  background:var(--ink);color:var(--gold);font-size:9px;font-weight:700;
+  letter-spacing:.3px;padding:3px 7px;border-radius:999px;border:1px solid var(--ink);
 }
 .folder-count.count-error{
   background:var(--accent-dark);color:#fff;cursor:pointer;
@@ -315,9 +343,11 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 .page-count{font-size:12px;min-width:56px;text-align:center;font-variant-numeric:tabular-nums;color:var(--paper-dim);}
 .reader-status{
   position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
-  gap:14px;color:var(--paper-dim);font-size:14px;text-align:center;padding:24px;
-  background:var(--ink);z-index:3;
+  gap:14px;color:var(--paper);font-size:15px;font-weight:600;text-align:center;padding:24px;
+  background:radial-gradient(ellipse 700px 400px at 50% 40%, #241f38 0%, var(--ink) 60%) var(--ink);
+  z-index:10;
 }
+.reader-status #reader-status-pct{color:var(--gold);font-variant-numeric:tabular-nums;}
 .spinner{
   width:34px;height:34px;border:3px solid var(--ink-border);border-top-color:var(--accent);
   border-radius:50%;animation:spin .8s linear infinite;
@@ -459,7 +489,10 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
       <button class="tab active" data-tab="library">Biblioteca</button>
       <button class="tab" data-tab="downloads">Baixados</button>
     </div>
-    <div id="breadcrumb" class="breadcrumb"></div>
+    <div id="breadcrumb-row" class="breadcrumb-row">
+      <button class="icon-btn small hidden" id="btn-back" title="Voltar"></button>
+      <div id="breadcrumb" class="breadcrumb"></div>
+    </div>
   </div>
 
   <!-- ===================== BIBLIOTECA ===================== -->
@@ -485,13 +518,15 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
     <!-- Modo paginado -->
     <div class="reader-stage" id="reader-stage">
       <div class="zoom-wrap" id="zoom-wrap"><img id="reader-img" style="display:none"></div>
-      <div class="reader-status" id="reader-status"></div>
       <button class="reader-nav left" id="nav-prev"></button>
       <button class="reader-nav right" id="nav-next"></button>
     </div>
 
     <!-- Modo scroll (padrão) -->
     <div class="reader-scroll hidden" id="reader-scroll"></div>
+
+    <!-- Tela de carregamento (sempre visível por cima, independente do modo) -->
+    <div class="reader-status" id="reader-status"></div>
 
     <div class="reader-bottom" id="reader-bottom">
       <button class="icon-btn small" id="btn-prev-chapter" title="HQ/capítulo anterior"></button>
@@ -783,7 +818,7 @@ function driveMediaUrl(fileId){
     : `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&key=${CONFIG.apiKey}`;
 }
 
-async function driveFetchBlob(fileId, onProgress){
+async function driveFetchBlob(fileId, onProgress, knownSize){
   const url = driveMediaUrl(fileId);
   let res;
   try{
@@ -795,17 +830,25 @@ async function driveFetchBlob(fileId, onProgress){
     throw new Error('Falha de rede/CORS ao baixar o arquivo. Configure uma URL de proxy nas configurações.');
   }
   if(!res.ok) throw new Error(`Não foi possível baixar o arquivo (${res.status}).`);
-  const total = Number(res.headers.get('Content-Length')) || 0;
+  // Alguns proxies/CDNs não expõem o header Content-Length via CORS, então usamos
+  // o tamanho já conhecido pela listagem do Drive (f.size) como alternativa, para
+  // que a porcentagem sempre consiga avançar de forma real.
+  const total = Number(res.headers.get('Content-Length')) || Number(knownSize) || 0;
   const reader = res.body.getReader();
   const chunks = [];
   let received = 0;
+  let lastPct = -1;
   while(true){
     const {done, value} = await reader.read();
     if(done) break;
     chunks.push(value);
     received += value.length;
-    if(onProgress && total) onProgress(received/total);
+    if(onProgress && total){
+      const pct = Math.min(99, Math.max(1, Math.round((received/total)*100)));
+      if(pct !== lastPct){ lastPct = pct; onProgress(pct/100); }
+    }
   }
+  if(onProgress) onProgress(1);
   return new Blob(chunks);
 }
 
@@ -888,11 +931,16 @@ async function openComicCBR(blob){
   };
 }
 
-async function openComicPDF(source){
+async function openComicPDF(source, onProgress){
   pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   const loadingTask = typeof source === 'string'
     ? pdfjsLib.getDocument({url: source, rangeChunkSize: 1 << 16})
     : pdfjsLib.getDocument({data: await source.arrayBuffer()});
+  if(onProgress){
+    loadingTask.onProgress = (p)=>{
+      if(p && p.total) onProgress(p.loaded/p.total);
+    };
+  }
   const pdf = await loadingTask.promise;
   const urlCache = {};
   return {
@@ -982,6 +1030,13 @@ function goToBreadcrumbIndex(idx){
   state.path = state.path.slice(0, idx+1);
   renderBreadcrumb();
   renderLibrary(state.path[state.path.length-1].id, false);
+  if(state.path[state.path.length-1].id === CONFIG.rootFolderId && !$('#search-input').value.trim()){
+    renderHomeSections();
+  }
+}
+function goBack(){
+  if(state.path.length<=1) return;
+  goToBreadcrumbIndex(state.path.length-2);
 }
 function renderBreadcrumb(){
   const bc = $('#breadcrumb');
@@ -992,7 +1047,10 @@ function renderBreadcrumb(){
     b.onclick = ()=>goToBreadcrumbIndex(idx);
     bc.appendChild(b);
   });
+  const backBtn = $('#btn-back');
+  if(backBtn) backBtn.classList.toggle('hidden', state.path.length<=1);
 }
+$('#btn-back').onclick = goBack;
 
 async function renderLibrary(folderId, forceRefresh){
   $('#home-sections').classList.add('hidden');
@@ -1077,7 +1135,7 @@ function renderComicCard(f){
     dlBtn.disabled = true;
     dlBtn.innerHTML = `<span>0%</span>`;
     try{
-      const blob = await driveFetchBlob(f.id, p=>{ dlBtn.innerHTML = `<span>${Math.round(p*100)}%</span>`; });
+      const blob = await driveFetchBlob(f.id, p=>{ dlBtn.innerHTML = `<span>${Math.round(p*100)}%</span>`; }, Number(f.size)||0);
       const ext = f._ext || guessExt(f);
       await idbSet('downloads', {id:f.id, name:f.name, size:f.size, ext, mimeType:f.mimeType, path: state.path.map(p=>p.name).join(' / '), blob, savedAt: Date.now()});
       dlBtn.innerHTML = `${ICONS.check}<span>Offline</span>`; dlBtn.classList.add('done');
@@ -1403,12 +1461,17 @@ async function openReader(fileMeta, forceLocal){
       state.reader.fromDownload = false;
       const ext = fileMeta._ext || guessExt(fileMeta) || fileMeta.name.split('.').pop().toLowerCase();
       if(ext === 'pdf'){
-        status.innerHTML = '<div class="spinner"></div><div>Abrindo páginas...</div>';
-        doc = await openComicPDF(driveMediaUrl(fileMeta.id));
-      } else {
-        const blob = await driveFetchBlob(fileMeta.id, p=>{
-          status.innerHTML = `<div class="spinner"></div><div>Baixando... ${Math.round(p*100)}%</div>`;
+        status.innerHTML = '<div class="spinner"></div><div>Carregando PDF... <span id="reader-status-pct">0%</span></div>';
+        doc = await openComicPDF(driveMediaUrl(fileMeta.id), p=>{
+          const pctEl = document.getElementById('reader-status-pct');
+          if(pctEl) pctEl.textContent = `${Math.round(p*100)}%`;
         });
+      } else {
+        status.innerHTML = '<div class="spinner"></div><div>Baixando... <span id="reader-status-pct">0%</span></div>';
+        const blob = await driveFetchBlob(fileMeta.id, p=>{
+          const pctEl = document.getElementById('reader-status-pct');
+          if(pctEl) pctEl.textContent = `${Math.round(p*100)}%`;
+        }, Number(fileMeta.size)||0);
         doc = await openComicFromBlob(fileMeta, blob);
       }
     }
@@ -1999,6 +2062,7 @@ Object.entries({
   'search-icon-slot': ICONS.search,
   'btn-refresh': ICONS.refresh,
   'btn-settings': ICONS.settings,
+  'btn-back': ICONS.chevLeft,
   'btn-close-reader': ICONS.close,
   'btn-reader-settings': ICONS.settings,
   'btn-download-reader': ICONS.download,
