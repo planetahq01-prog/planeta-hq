@@ -349,12 +349,65 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 }
 #toast.show{transform:translateX(-50%) translateY(0);}
 
+/* ============ SEÇÕES EM CARROSSEL (estilo Tomato) ============ */
+#home-sections{padding:8px 0 4px;}
+.home-section{margin-bottom:6px;}
+.home-section-title{
+  font-family:var(--font-body);
+  font-size:19px;font-weight:800;color:var(--paper);
+  padding:14px 16px 10px;letter-spacing:-.2px;
+}
+.carousel{
+  display:flex;gap:10px;overflow-x:auto;overflow-y:hidden;
+  scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;
+  padding:0 16px 14px;scrollbar-width:none;cursor:grab;
+}
+.carousel::-webkit-scrollbar{display:none;}
+.carousel.dragging{cursor:grabbing;scroll-snap-type:none;}
+.carousel.dragging *{pointer-events:none;}
+.carousel-card{
+  flex:0 0 138px;width:138px;scroll-snap-align:start;
+  display:flex;flex-direction:column;gap:6px;
+  background:none;border:none;padding:0;text-align:left;
+  color:var(--paper);font-family:var(--font-body);
+}
+.carousel-card .cc-cover{
+  position:relative;width:100%;aspect-ratio:2/3;border-radius:10px;overflow:hidden;
+  background:radial-gradient(120% 100% at 50% 0%, var(--ink-elevated), var(--ink));
+  box-shadow:0 8px 20px -10px rgba(0,0,0,.7);
+  transition:transform .15s ease;
+}
+@media(hover:hover){ .carousel-card:hover .cc-cover{transform:translateY(-3px);} }
+.carousel-card .cc-cover img{
+  position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;
+}
+.carousel-card .cc-name{
+  font-size:12px;font-weight:600;line-height:1.3;color:var(--paper);
+  display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
+  padding:0 2px;
+}
+.carousel-card .cc-sub{
+  font-size:10px;color:var(--text-muted);padding:0 2px;margin-top:-3px;
+}
+.carousel-card .cc-placeholder{
+  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
+  color:var(--paper-dim);opacity:.55;
+}
+.carousel-card .cc-placeholder svg{width:30px;height:30px;}
+.carousel .carousel-end{
+  flex:0 0 24px;
+}
+.cc-progress{
+  position:absolute;left:6px;right:6px;bottom:6px;height:4px;border-radius:4px;
+  background:rgba(0,0,0,.55);overflow:hidden;z-index:2;
+}
+.cc-progress i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--gold));border-radius:4px;}
+
 @media(min-width:700px){
   .grid{grid-template-columns:repeat(auto-fill,minmax(160px,1fr));}
 }
 </style>
-</head>
-<body>
+</head><body>
 <div id="app">
 
   <!-- ===================== TELA DE CONFIGURAÇÃO INICIAL ===================== -->
@@ -411,6 +464,7 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 
   <!-- ===================== BIBLIOTECA ===================== -->
   <div id="view-library" class="view hidden">
+    <div id="home-sections" class="hidden"></div>
     <div id="grid-library" class="grid"></div>
   </div>
 
@@ -476,16 +530,11 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
   </div>
 
   <div id="toast"></div>
-</div>
-
-<script>
+</div><script>
 /* =========================================================================
    PLANETA HQ — app de leitura de HQs digitais
-   Biblioteca lida em tempo real de uma pasta do Google Drive (pastas e
-   subpastas viram categorias/coleções, com capa ilustrativa tirada de uma
-   das HQs de dentro). Leitura online de PDF/CBZ/CBR (inclusive offline) e
-   download para leitura sem internet, guardado no IndexedDB do dispositivo.
-   Leitor com modo de rolagem contínua (padrão) ou página a página, e zoom.
+   Home com seções em carrossel horizontal (Continuar lendo, Coleção
+   Homem-Aranha, Recomendados, Recém atualizados).
    ========================================================================= */
 
 /* ---------------------------------------------------------------------
@@ -519,24 +568,24 @@ function escapeHtml(s){
    --------------------------------------------------------------------- */
 const CONFIG_KEY = 'planetahq_config';
 const READER_PREFS_KEY = 'planetahq_reader_prefs';
-let CONFIG = null; // { apiKey, rootFolderId }
+let CONFIG = null;
 
 const state = {
   currentTab: 'library',
-  path: [],            // pilha de {id, name} até a pasta atual
-  folderCache: {},     // folderId -> {folders:[], files:[]}
-  currentListContext: [], // lista (pasta atual/busca/baixados) usada p/ navegar entre HQs no leitor
+  path: [],
+  folderCache: {},
+  currentListContext: [],
   currentListIsLocal: false,
   reader: {
-    doc: null,          // ComicDocument atual
+    doc: null,
     fileMeta: null,
     pageIndex: 0,
     fromDownload: false,
-    mode: 'scroll',      // 'scroll' (padrão) | 'paginate'
-    fit: 'width',         // 'width' | 'height' (só no modo paginado)
+    mode: 'scroll',
+    fit: 'width',
     zoom: 1,
     scrollIO: null,
-    siblings: [],       // lista de HQs "irmãs" (mesma pasta/busca/baixados) p/ os botões de próx/anterior
+    siblings: [],
     siblingIndex: -1
   }
 };
@@ -559,10 +608,10 @@ function persistReaderPrefs(){
 }
 
 /* ---------------------------------------------------------------------
-   2) IndexedDB — armazenamento local (capas + downloads offline)
+   2) IndexedDB — armazenamento local (capas + downloads offline + progresso)
    --------------------------------------------------------------------- */
 const DB_NAME = 'planetahq_db';
-const DB_VERSION = 2;
+const DB_VERSION = 3;
 let dbPromise = null;
 
 function openDB(){
@@ -574,6 +623,7 @@ function openDB(){
       if(!db.objectStoreNames.contains('downloads')) db.createObjectStore('downloads', {keyPath:'id'});
       if(!db.objectStoreNames.contains('covers')) db.createObjectStore('covers', {keyPath:'id'});
       if(!db.objectStoreNames.contains('folderCovers')) db.createObjectStore('folderCovers', {keyPath:'id'});
+      if(!db.objectStoreNames.contains('progress')) db.createObjectStore('progress', {keyPath:'id'});
     };
     req.onsuccess = ()=>resolve(req.result);
     req.onerror = ()=>reject(req.error);
@@ -616,9 +666,7 @@ async function idbAll(store){
     };
     req.onerror = ()=>reject(req.error);
   });
-}
-
-/* ---------------------------------------------------------------------
+}/* ---------------------------------------------------------------------
    3) Google Drive API (somente leitura, via API key — pasta pública)
    --------------------------------------------------------------------- */
 function guessExt(f){
@@ -631,14 +679,6 @@ function guessExt(f){
   return null;
 }
 
-// ---- Limitador GLOBAL de chamadas simultâneas à API do Drive ----------
-// Sem isso, uma árvore de pastas grande dispara centenas de requisições em
-// paralelo (o limite de 4 em runLimited só vale por NÍVEL da árvore, então
-// vários níveis rodando ao mesmo tempo somam muito mais que 4 no total).
-// O Drive responde com 429/403 de limite de taxa para o excesso, e se esse
-// erro for ignorado, a pasta acaba contada como vazia — por isso a maioria
-// das contagens ficava errada. Este semáforo serializa o app inteiro para
-// no máximo N chamadas reais simultâneas.
 const DRIVE_MAX_CONCURRENT = 5;
 let driveActiveRequests = 0;
 const driveWaitQueue = [];
@@ -656,10 +696,6 @@ function driveReleaseSlot(){
 }
 function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
 
-// Faz uma chamada à API do Drive respeitando o semáforo global e, se o
-// Drive responder com erro de limite de taxa (429 ou 403 com motivo de
-// quota/rate), tenta de novo com backoff exponencial + jitter em vez de
-// desistir na primeira falha.
 async function driveFetchJson(url){
   const MAX_ATTEMPTS = 6;
   for(let attempt=1; attempt<=MAX_ATTEMPTS; attempt++){
@@ -684,10 +720,6 @@ async function driveFetchJson(url){
   }
 }
 
-// Evita disparar duas chamadas para a MESMA pasta ao mesmo tempo (acontece
-// quando a capa e a contagem de itens pedem a mesma pasta quase junto):
-// enquanto a primeira está em andamento, as demais esperam o resultado dela
-// em vez de gerar requisições duplicadas.
 const folderCacheInFlight = {};
 
 async function driveListFolder(folderId){
@@ -714,8 +746,6 @@ async function driveListFolderUncached(folderId){
     });
     if(pageToken) params.set('pageToken', pageToken);
     const data = await driveFetchJson(`https://www.googleapis.com/drive/v3/files?${params.toString()}`);
-    // Atalhos (shortcuts) apontam para outro arquivo/pasta real: resolvemos aqui
-    // para que o resto do app trate tudo de forma transparente.
     const resolved = (data.files || []).map(f=>{
       if(f.mimeType === 'application/vnd.google-apps.shortcut' && f.shortcutDetails){
         return {
@@ -737,15 +767,10 @@ async function driveListFolderUncached(folderId){
     .filter(f=>f.mimeType === 'application/vnd.google-apps.folder')
     .sort((a,b)=>a.name.localeCompare(b.name,'pt-BR'));
 
-  console.log(`[PlanetaHQ] Pasta ${folderId}: ${files.length} itens brutos.`, files.map(f=>({name:f.name, mimeType:f.mimeType})));
-
   const comics = files
     .map(f=>({...f, _ext: guessExt(f)}))
     .filter(f=>f._ext)
     .sort((a,b)=>a.name.localeCompare(b.name,'pt-BR', {numeric:true}));
-
-  const ignored = files.filter(f=>f.mimeType!=='application/vnd.google-apps.folder' && !guessExt(f));
-  if(ignored.length) console.log(`[PlanetaHQ] ${ignored.length} arquivo(s) ignorado(s) por tipo não reconhecido:`, ignored.map(f=>({name:f.name, mimeType:f.mimeType})));
 
   const result = {folders, files: comics};
   state.folderCache[folderId] = result;
@@ -753,10 +778,6 @@ async function driveListFolderUncached(folderId){
 }
 
 function driveMediaUrl(fileId){
-  // A listagem (metadados) do Drive passa por CORS sem problema, mas o download
-  // do conteúdo binário (alt=media) de PDFs/CBRs grandes costuma ser bloqueado
-  // pelo navegador (erro "Failed to fetch"), por isso passamos por um proxy
-  // quando um estiver configurado.
   return CONFIG.proxyUrl
     ? `${CONFIG.proxyUrl}?id=${encodeURIComponent(fileId)}&key=${encodeURIComponent(CONFIG.apiKey)}`
     : `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&key=${CONFIG.apiKey}`;
@@ -771,7 +792,7 @@ async function driveFetchBlob(fileId, onProgress){
     if(CONFIG.proxyUrl){
       throw new Error('Não foi possível contatar o proxy configurado. Verifique a URL nas configurações.');
     }
-    throw new Error('Falha de rede/CORS ao baixar o arquivo. Configure uma URL de proxy nas configurações (veja "Como conseguir isso?" na tela inicial).');
+    throw new Error('Falha de rede/CORS ao baixar o arquivo. Configure uma URL de proxy nas configurações.');
   }
   if(!res.ok) throw new Error(`Não foi possível baixar o arquivo (${res.status}).`);
   const total = Number(res.headers.get('Content-Length')) || 0;
@@ -790,7 +811,6 @@ async function driveFetchBlob(fileId, onProgress){
 
 /* ---------------------------------------------------------------------
    4) Leitura de arquivos — CBZ / CBR / PDF
-   Cada formato vira um "ComicDocument": {pageCount, getPage(i) -> URL}
    --------------------------------------------------------------------- */
 function naturalSort(a,b){
   return a.localeCompare(b, 'pt-BR', {numeric:true, sensitivity:'base'});
@@ -812,13 +832,6 @@ async function openComicCBZ(blob){
       urlCache[i] = url;
       return url;
     },
-    // IMPORTANTE: cada getPage() cria uma blob URL com URL.createObjectURL,
-    // que fica retida na memória do navegador até ser explicitamente
-    // revogada — mesmo depois do objeto "doc" ser descartado. Sem isso,
-    // cada HQ (ou cada capa gerada) lida ao longo da sessão vai acumulando
-    // memória permanentemente, deixando o app cada vez mais pesado até
-    // travar/fechar. dispose() deve ser chamado sempre que este documento
-    // deixar de ser usado.
     dispose(){
       Object.values(urlCache).forEach(u=>URL.revokeObjectURL(u));
       for(const k in urlCache) delete urlCache[k];
@@ -828,10 +841,6 @@ async function openComicCBZ(blob){
 
 let rarLibPromise = null;
 function ensureRarLib(){
-  // libarchive.js só é distribuído como módulo ES ("import {Archive} from ...").
-  // Por isso carregamos com import() dinâmico (em vez de <script> clássico, que
-  // nunca chegaria a definir a variável global e fazia a leitura de CBR
-  // baixados falhar silenciosamente) e expomos a classe em window.Archive.
   if(rarLibPromise) return rarLibPromise;
   const sources = [
     { main:'https://cdn.jsdelivr.net/npm/libarchive.js/main.js', worker:'https://cdn.jsdelivr.net/npm/libarchive.js/dist/worker-bundle.js' },
@@ -839,7 +848,6 @@ function ensureRarLib(){
     { main:'https://cdn.jsdelivr.net/npm/[email protected]/main.js', worker:'https://cdn.jsdelivr.net/npm/[email protected]/dist/worker-bundle.js' }
   ];
   rarLibPromise = (async()=>{
-    let lastErr;
     for(const src of sources){
       try{
         const mod = await import(/* @vite-ignore */ src.main);
@@ -848,9 +856,9 @@ function ensureRarLib(){
         window.Archive = ArchiveCls;
         ArchiveCls.init({ workerUrl: src.worker });
         return true;
-      }catch(e){ lastErr = e; console.warn('[PlanetaHQ] Falha ao carregar libarchive de', src.main, e); }
+      }catch(e){ console.warn('[PlanetaHQ] Falha ao carregar libarchive de', src.main, e); }
     }
-    throw new Error('Não foi possível carregar o suporte a CBR (todas as fontes falharam). Verifique sua conexão.');
+    throw new Error('Não foi possível carregar o suporte a CBR (todas as fontes falharam).');
   })();
   return rarLibPromise;
 }
@@ -873,8 +881,6 @@ async function openComicCBR(blob){
       urlCache[i] = url;
       return url;
     },
-    // Ver comentário em openComicCBZ: sem revogar, cada blob URL fica pinada
-    // na memória para sempre.
     dispose(){
       Object.values(urlCache).forEach(u=>URL.revokeObjectURL(u));
       for(const k in urlCache) delete urlCache[k];
@@ -884,11 +890,6 @@ async function openComicCBR(blob){
 
 async function openComicPDF(source){
   pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-  // Se "source" é uma URL (string), o pdf.js baixa só os pedaços do PDF que
-  // precisa pra cada página (via Range requests), em vez do arquivo inteiro —
-  // isso deixa a capa e a abertura da leitura bem mais rápidas.
-  // Se for um Blob (arquivo baixado offline), carrega tudo de uma vez, já
-  // que os bytes já estão no dispositivo mesmo.
   const loadingTask = typeof source === 'string'
     ? pdfjsLib.getDocument({url: source, rangeChunkSize: 1 << 16})
     : pdfjsLib.getDocument({data: await source.arrayBuffer()});
@@ -904,18 +905,11 @@ async function openComicPDF(source){
       canvas.width = viewport.width; canvas.height = viewport.height;
       await page.render({canvasContext: canvas.getContext('2d'), viewport}).promise;
       const url = canvas.toDataURL('image/jpeg', 0.9);
-      // Libera imediatamente o canvas (zera as dimensões): em iOS/WebView
-      // canvases grandes não coletados a tempo são uma fonte conhecida de
-      // pressão de memória.
       canvas.width = 0; canvas.height = 0;
       page.cleanup && page.cleanup();
       urlCache[i] = url;
       return url;
     },
-    // pdf.destroy() libera os buffers internos do pdf.js (fontes, streams,
-    // recursos do worker) para este documento. Sem chamar isso, cada PDF
-    // aberto — inclusive só para gerar a miniatura/capa de um card na grade —
-    // ficava retido na memória pelo resto da sessão.
     dispose(){
       for(const k in urlCache) delete urlCache[k];
       pdf.destroy();
@@ -938,15 +932,12 @@ function $(sel){ return document.querySelector(sel); }
 function el(tag, cls, text){ const e=document.createElement(tag); if(cls) e.className=cls; if(text!==undefined) e.textContent=text; return e; }
 function elHtml(tag, cls, html){ const e=document.createElement(tag); if(cls) e.className=cls; if(html!==undefined) e.innerHTML=html; return e; }
 
-// Roda uma lista de tarefas (funções que retornam Promise) com no máximo
-// `limit` rodando ao mesmo tempo. Evita disparar dezenas de downloads
-// simultâneos numa pasta grande, o que trava tudo numa conexão fraca.
 function runLimited(items, limit, worker){
   let next = 0;
   const runners = new Array(Math.min(limit, items.length)).fill(0).map(async ()=>{
     while(next < items.length){
       const i = next++;
-      try{ await worker(items[i], i); }catch(e){ /* erros já tratados dentro do worker */ }
+      try{ await worker(items[i], i); }catch(e){ }
     }
   });
   return Promise.all(runners);
@@ -962,9 +953,7 @@ function toast(msg){
   t.classList.add('show');
   clearTimeout(toast._t);
   toast._t = setTimeout(()=>t.classList.remove('show'), 2400);
-}
-
-/* ---------------------------------------------------------------------
+}/* ---------------------------------------------------------------------
    6) Biblioteca — navegação e renderização
    --------------------------------------------------------------------- */
 async function loadConfig(){
@@ -985,6 +974,9 @@ async function enterFolder(id, name, {reset=false}={}){
   state.path.push({id, name});
   renderBreadcrumb();
   await renderLibrary(id, false);
+  if(id === CONFIG.rootFolderId && !$('#search-input').value.trim()){
+    renderHomeSections();
+  }
 }
 function goToBreadcrumbIndex(idx){
   state.path = state.path.slice(0, idx+1);
@@ -1003,6 +995,7 @@ function renderBreadcrumb(){
 }
 
 async function renderLibrary(folderId, forceRefresh){
+  $('#home-sections').classList.add('hidden');
   const grid = $('#grid-library');
   grid.innerHTML = `<div class="empty-state"><div class="spinner" style="margin:0 auto 12px"></div>Carregando pasta...</div>`;
   try{
@@ -1098,14 +1091,9 @@ function renderComicCard(f){
   return card;
 }
 
-// Resolve a URL/dataURL da capa de um arquivo (cache -> miniatura do Drive ->
-// gerada manualmente a partir da 1ª página), sem tocar no DOM.
 async function resolveCoverSrc(f){
   const cached = await idbGet('covers', f.id);
   if(cached) return cached.dataUrl;
-  // Caminho rápido: o próprio Google Drive já gera e guarda uma miniatura
-  // pronta pra vários arquivos (principalmente PDF) — usar ela é instantâneo
-  // e não baixa nada do arquivo. Só cai no método manual se isso falhar.
   if(f.thumbnailLink){
     const bigger = f.thumbnailLink.replace(/=s\d+$/, '=s400');
     const ok = await new Promise(resolve=>{
@@ -1122,7 +1110,6 @@ async function resolveCoverSrc(f){
     if(localDl){
       doc = await openComicFromBlob(f, localDl.blob);
     } else if((f._ext || guessExt(f)) === 'pdf'){
-      // Só baixa os bytes da 1ª página do PDF (via Range requests), não o arquivo inteiro
       doc = await openComicPDF(driveMediaUrl(f.id));
     } else {
       const blob = await driveFetchBlob(f.id);
@@ -1131,19 +1118,13 @@ async function resolveCoverSrc(f){
     const pageUrl = await doc.getPage(0);
     const dataUrl = await toDataUrl(pageUrl);
     await idbSet('covers', {id: f.id, dataUrl});
-    // Esse "doc" foi aberto só para extrair a 1ª página como capa — sem
-    // descartar aqui, cada card exibido na grade (dezenas por pasta) deixava
-    // uma blob URL ou um documento pdf.js inteiro pendurado na memória para
-    // sempre, mesmo sem o usuário nunca ter aberto o leitor.
     if(doc.dispose) doc.dispose();
     return dataUrl;
   }catch(err){
     return null;
   }
 }
-// Monta o elemento visual da capa. Para pastas (folderMode), a arte inteira
-// aparece sem cortes (object-fit:contain) sobre um fundo desfocado da mesma
-// imagem, em vez de esticar/cortar a capa para preencher o card inteiro.
+
 function buildCoverNode(src, folderMode){
   if(folderMode){
     const wrap = el('div','folder-cover-wrap');
@@ -1155,11 +1136,10 @@ function buildCoverNode(src, folderMode){
   const img = el('img','cover'); img.src = src;
   return img;
 }
-// Substitui o placeholder de um card (comic ou pasta) pela capa real assim
-// que ela estiver pronta.
+
 async function attachCoverToEl(placeholder, f, folderMode){
   const src = await resolveCoverSrc(f);
-  if(!src) return; // mantém o placeholder se a capa não puder ser gerada
+  if(!src) return;
   const node = buildCoverNode(src, folderMode);
   if(placeholder.isConnected) placeholder.replaceWith(node);
 }
@@ -1168,9 +1148,6 @@ async function attachCoverAsync(card, f){
   await attachCoverToEl(placeholder, f, false);
 }
 
-// Encontra um arquivo de HQ representativo dentro de uma pasta (ou, se ela só
-// tiver subpastas, dentro da primeira subpasta, até 2 níveis) para usar como
-// capa ilustrativa do card da pasta. O resultado fica em cache permanente.
 async function resolveFolderCoverFile(folderId, depth){
   depth = depth || 0;
   const cached = await idbGet('folderCovers', folderId);
@@ -1192,14 +1169,7 @@ async function resolveFolderCoverFile(folderId, depth){
   }
   return file;
 }
-// Conta recursivamente quantos PDFs existem dentro de uma pasta, somando
-// também o conteúdo de todas as subpastas (CBZ/CBR não entram na contagem).
-// Reaproveita o cache de driveListFolder, então só gera chamadas novas à
-// API na primeira vez que cada (sub)pasta é vista na sessão.
-// IMPORTANTE: se alguma (sub)pasta falhar ao carregar (rede, limite de taxa
-// do Drive, etc.), o erro é PROPAGADO em vez de virar "0" silenciosamente —
-// era exatamente isso (contar falha como 0) que fazia a maioria das pastas
-// mostrar número errado.
+
 async function countPdfsRecursive(folderId){
   const listing = await driveListFolder(folderId);
   let total = listing.files.filter(f=>f._ext==='pdf').length;
@@ -1209,10 +1179,6 @@ async function countPdfsRecursive(folderId){
   });
   return total + subtotals.reduce((a,b)=>a+b, 0);
 }
-// Tenta contar uma pasta com algumas tentativas extras antes de desistir de
-// vez — o retry fino de cada requisição individual já mora em driveFetchJson;
-// isso aqui é uma segunda camada para o caso raro de a árvore inteira falhar
-// (ex.: perda de conexão momentânea).
 async function countPdfsWithRetry(folderId, attempts){
   attempts = attempts || 3;
   let lastErr;
@@ -1222,9 +1188,6 @@ async function countPdfsWithRetry(folderId, attempts){
   }
   throw lastErr;
 }
-// Atualiza o texto de contagem de um card de pasta. Em caso de falha
-// definitiva (mesmo após os retries), NÃO mostra um número — mostra um
-// aviso clicável para tentar de novo, pra nunca exibir uma contagem errada.
 async function refreshFolderCount(countEl, folderId){
   if(!countEl) return;
   countEl.textContent = '...';
@@ -1251,7 +1214,7 @@ async function attachFolderCoverAsync(card, folderObj){
     if(!file) return;
     card.classList.add('has-cover');
     await attachCoverToEl(placeholder, file, true);
-  }catch(e){ /* mantém o ícone de pasta */ }
+  }catch(e){ }
 }
 
 async function toDataUrl(url){
@@ -1263,6 +1226,89 @@ async function toDataUrl(url){
     reader.onload = ()=>resolve(reader.result);
     reader.readAsDataURL(blob);
   });
+}
+
+/* ---------------------------------------------------------------------
+   6.5) BUSCA
+   --------------------------------------------------------------------- */
+function normalizeStr(s){
+  return String(s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+}
+
+async function searchLibrary(normTerm, token, isStale){
+  const folderResults = [];
+  const fileResults = [];
+  const seenFolders = new Set();
+  const seenFiles = new Set();
+  async function walk(folderId){
+    if(isStale(token)) return;
+    let listing;
+    try{ listing = await driveListFolder(folderId); }catch(e){ return; }
+    listing.folders.forEach(sub=>{
+      if(!seenFolders.has(sub.id) && normalizeStr(sub.name).includes(normTerm)){
+        seenFolders.add(sub.id);
+        folderResults.push(sub);
+      }
+    });
+    listing.files.forEach(f=>{
+      if(!seenFiles.has(f.id) && normalizeStr(f.name).includes(normTerm)){
+        seenFiles.add(f.id);
+        fileResults.push(f);
+      }
+    });
+    await runLimited(listing.folders, 4, sub=>walk(sub.id));
+  }
+  await walk(CONFIG.rootFolderId);
+  folderResults.sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
+  fileResults.sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
+  return {folders: folderResults, files: fileResults};
+}
+
+function openFolderFromSearch(f){
+  $('#search-input').value = '';
+  state.path = [{id: CONFIG.rootFolderId, name:'Biblioteca'}];
+  enterFolder(f.id, f.name);
+}
+
+let searchToken = 0;
+let searchDebounceTimer = null;$('#search-input').addEventListener('input', e=>{
+  const term = e.target.value.trim();
+  clearTimeout(searchDebounceTimer);
+  if(!term){
+    searchToken++;
+    renderLibrary(state.path[state.path.length-1].id, false);
+    if(state.path[state.path.length-1].id === CONFIG.rootFolderId) renderHomeSections();
+    return;
+  }
+  searchDebounceTimer = setTimeout(()=>runSearch(term), 300);
+});
+
+async function runSearch(term){
+  const myToken = ++searchToken;
+  $('#home-sections').classList.add('hidden');
+  const grid = $('#grid-library');
+  grid.innerHTML = `<div class="empty-state"><div class="spinner" style="margin:0 auto 12px"></div>Buscando em toda a biblioteca...</div>`;
+  const {folders, files} = await searchLibrary(normalizeStr(term), myToken, t=>t!==searchToken);
+  if(myToken !== searchToken) return;
+  state.currentListContext = files;
+  state.currentListIsLocal = false;
+  grid.innerHTML = '';
+  if(folders.length===0 && files.length===0){
+    grid.innerHTML = `<div class="empty-state">${ICONS.search}<h3>Nada encontrado</h3>Nenhuma pasta ou HQ com esse nome na biblioteca.</div>`;
+    return;
+  }
+  const folderCards = folders.map(f=>{
+    const card = renderFolderCard(f, {fromSearch:true});
+    grid.appendChild(card);
+    return {card, f};
+  });
+  const comicCards = files.map(f=>{
+    const card = renderComicCard(f);
+    grid.appendChild(card);
+    return {card, f};
+  });
+  runLimited(folderCards, 2, ({card, f})=>attachFolderCoverAsync(card, f));
+  runLimited(comicCards, 3, ({card, f})=>attachCoverAsync(card, f));
 }
 
 /* ---------------------------------------------------------------------
@@ -1306,25 +1352,30 @@ async function renderDownloads(){
     attachCoverToEl(ph, {id: it.id, name: it.name, _ext: it.ext, mimeType: it.mimeType});
     grid.appendChild(card);
   });
-}
-
-/* ---------------------------------------------------------------------
+}/* ---------------------------------------------------------------------
    8) Leitor
    --------------------------------------------------------------------- */
+async function saveProgress(fileMeta, pageIndex, pageCount){
+  if(!fileMeta || !fileMeta.id || !pageCount) return;
+  const pct = Math.min(100, Math.round(((pageIndex+1)/pageCount)*100));
+  if(pct < 5) return;
+  await idbSet('progress', {
+    id: fileMeta.id, name: fileMeta.name, mimeType: fileMeta.mimeType,
+    size: fileMeta.size, _ext: fileMeta._ext || guessExt(fileMeta),
+    thumbnailLink: fileMeta.thumbnailLink,
+    pageIndex, pageCount, pct,
+    path: state.path.map(p=>p.name).join(' / '),
+    updatedAt: Date.now()
+  });
+}
+
 async function openReader(fileMeta, forceLocal){
   $('#view-reader').classList.remove('hidden');
   $('#reader-settings').classList.add('hidden');
   $('#reader-title').textContent = fileMeta.name.replace(/\.(pdf|cbz|cbr)$/i,'');
   const status = $('#reader-status');
   const img = $('#reader-img');
-  // Limpa qualquer HQ anterior JÁ, antes de começar a carregar a nova — sem
-  // isso, a HQ anterior (imagens já renderizadas) fica visível por baixo do
-  // spinner enquanto a nova carrega.
   if(state.reader.scrollIO){ state.reader.scrollIO.disconnect(); state.reader.scrollIO = null; }
-  // Descarta o documento anterior (revoga as blob URLs de suas páginas /
-  // destroi o pdf.js interno) ANTES de abrir o próximo. Isso é essencial ao
-  // navegar entre capítulos/HQs (btn-prev-chapter / btn-next-chapter), que
-  // antes acumulavam um documento inteiro por HQ aberta na sessão.
   if(state.reader.doc && state.reader.doc.dispose) state.reader.doc.dispose();
   state.reader.doc = null;
   img.src = '';
@@ -1352,7 +1403,6 @@ async function openReader(fileMeta, forceLocal){
       state.reader.fromDownload = false;
       const ext = fileMeta._ext || guessExt(fileMeta) || fileMeta.name.split('.').pop().toLowerCase();
       if(ext === 'pdf'){
-        // PDF: abre direto por streaming, sem esperar o arquivo inteiro baixar
         status.innerHTML = '<div class="spinner"></div><div>Abrindo páginas...</div>';
         doc = await openComicPDF(driveMediaUrl(fileMeta.id));
       } else {
@@ -1365,6 +1415,12 @@ async function openReader(fileMeta, forceLocal){
     state.reader.doc = doc;
     state.reader.fileMeta = fileMeta;
     state.reader.pageIndex = 0;
+
+    try{
+      const saved = await idbGet('progress', fileMeta.id);
+      if(saved && saved.pageIndex < doc.pageCount) state.reader.pageIndex = saved.pageIndex;
+    }catch(e){}
+
     updateDownloadButtonReader();
     status.classList.add('hidden');
     await rebuildReaderView();
@@ -1374,8 +1430,6 @@ async function openReader(fileMeta, forceLocal){
   }
 }
 
-// (Re)monta a área de leitura de acordo com o modo escolhido (rolagem ou
-// página a página), reaproveitando o documento já aberto.
 async function rebuildReaderView(){
   const doc = state.reader.doc;
   if(!doc) return;
@@ -1396,7 +1450,6 @@ async function rebuildReaderView(){
   }
 }
 
-/* ---- Modo página a página ---- */
 async function showPage(i){
   const doc = state.reader.doc;
   if(!doc || i<0 || i>=doc.pageCount) return;
@@ -1405,6 +1458,7 @@ async function showPage(i){
   $('#reader-img').src = url;
   $('#page-count').textContent = `${i+1} / ${doc.pageCount}`;
   $('#page-slider').value = i+1;
+  saveProgress(state.reader.fileMeta, i, doc.pageCount);
 }
 function nextPage(){ showPage(state.reader.pageIndex+1); }
 function prevPage(){ showPage(state.reader.pageIndex-1); }
@@ -1430,7 +1484,6 @@ function applyFitAndZoom(){
   $('#nav-next').style.pointerEvents = z>1 ? 'none' : '';
 }
 
-/* ---- Modo rolagem contínua (padrão) ---- */
 async function buildScrollReader(doc){
   const container = $('#reader-scroll');
   container.innerHTML = '';
@@ -1447,7 +1500,7 @@ async function buildScrollReader(doc){
     pageEls.push(pageDiv);
   }
   applyScrollZoom();
-  $('#page-count').textContent = `1 / ${doc.pageCount}`;
+  $('#page-count').textContent = `${state.reader.pageIndex+1} / ${doc.pageCount}`;
 
   const io = new IntersectionObserver((entries)=>{
     entries.forEach(entry=>{
@@ -1457,23 +1510,21 @@ async function buildScrollReader(doc){
         if(entry.intersectionRatio > 0.5){
           state.reader.pageIndex = idx;
           $('#page-count').textContent = `${idx+1} / ${doc.pageCount}`;
+          saveProgress(state.reader.fileMeta, idx, doc.pageCount);
         }
       } else {
-        // Fora da faixa observada (900px de margem): descarrega a imagem já
-        // decodificada e volta ao skeleton. A blob URL/dataURL continua em
-        // urlCache dentro do "doc", então voltar a rolar até aqui é
-        // instantâneo — só o bitmap decodificado na tela é liberado. Sem
-        // isso, uma HQ de 100+ páginas mantinha TODAS as páginas já vistas
-        // decodificadas na memória ao mesmo tempo, o que é a principal causa
-        // do app ficar cada vez mais pesado (e travar/fechar) quanto mais
-        // tempo fica aberto lendo.
         unloadScrollPage(pageEls[idx]);
       }
     });
   }, {root: container, rootMargin:'900px 0px', threshold:[0, 0.5]});
   pageEls.forEach(p=>io.observe(p));
   state.reader.scrollIO = io;
+
+  if(state.reader.pageIndex > 0){
+    setTimeout(()=>{ pageEls[state.reader.pageIndex].scrollIntoView({block:'start'}); }, 50);
+  }
 }
+
 async function loadScrollPage(doc, i, pageDiv){
   if(pageDiv.dataset.loaded) return;
   pageDiv.dataset.loaded = '1';
@@ -1503,10 +1554,7 @@ function applyScrollZoom(){
   inner.style.transformOrigin = '50% 0';
   inner.style.willChange = 'transform';
   inner.style.transform = z > 1 ? `scale(${z})` : 'none';
-}
-
-/* ---- Zoom (comum aos dois modos) ---- */
-function updateZoomLabel(){
+}function updateZoomLabel(){
   const label = $('#rs-zoom-value');
   if(label) label.textContent = Math.round(state.reader.zoom*100)+'%';
 }
@@ -1545,15 +1593,19 @@ async function openAdjacentComic(delta){
 }
 
 function closeReader(){
+  if(state.reader.doc && state.reader.fileMeta){
+    saveProgress(state.reader.fileMeta, state.reader.pageIndex, state.reader.doc.pageCount);
+  }
   $('#view-reader').classList.add('hidden');
   $('#reader-settings').classList.add('hidden');
   if(state.reader.scrollIO){ state.reader.scrollIO.disconnect(); state.reader.scrollIO = null; }
   if(state.reader.doc && state.reader.doc.dispose) state.reader.doc.dispose();
   state.reader.doc = null;
-  // Solta as imagens já renderizadas na tela (senão o navegador continua
-  // com os bitmaps decodificados na memória mesmo com o leitor escondido).
   $('#reader-img').src = '';
   $('#reader-scroll').innerHTML = '';
+  if(state.currentTab === 'library' && state.path[state.path.length-1] && state.path[state.path.length-1].id === CONFIG.rootFolderId){
+    renderHomeSections();
+  }
 }
 
 async function updateDownloadButtonReader(){
@@ -1580,7 +1632,6 @@ $('#btn-download-reader').onclick = async ()=>{
   updateDownloadButtonReader();
 };
 
-/* Navegação do leitor: toques nas laterais, teclado, swipe, pinça e roda */
 $('#nav-prev').onclick = prevPage;
 $('#nav-next').onclick = nextPage;
 $('#btn-prev-chapter').onclick = ()=>openAdjacentComic(-1);
@@ -1594,6 +1645,7 @@ document.addEventListener('keydown', e=>{
   if(e.key==='ArrowRight') nextPage();
   if(e.key==='ArrowLeft') prevPage();
 });
+
 (function swipeSetup(){
   const stage = $('#reader-stage');
   let startX = null;
@@ -1605,6 +1657,7 @@ document.addEventListener('keydown', e=>{
     startX = null;
   }, {passive:true});
 })();
+
 (function zoomGestureSetup(){
   const root = $('#view-reader');
   let pinchStartDist = null, pinchStartZoom = 1;
@@ -1635,7 +1688,6 @@ document.addEventListener('keydown', e=>{
   }, {passive:false});
 })();
 
-/* Painel de configurações do leitor */
 $('#btn-reader-settings').onclick = (e)=>{ e.stopPropagation(); $('#reader-settings').classList.toggle('hidden'); };
 document.addEventListener('click', (e)=>{
   const panel = $('#reader-settings');
@@ -1671,95 +1723,246 @@ function syncReaderSettingsUI(){
   document.querySelectorAll('#mode-segmented button').forEach(b=>b.classList.toggle('active', b.dataset.mode===state.reader.mode));
   document.querySelectorAll('#fit-segmented button').forEach(b=>b.classList.toggle('active', b.dataset.fit===state.reader.fit));
   $('#fit-row').classList.toggle('hidden', state.reader.mode==='scroll');
+}/* ---------------------------------------------------------------------
+   9) HOME — seções em carrossel estilo Tomato
+   --------------------------------------------------------------------- */
+const ARANHA_PRIORITY = [
+  'amazing spider-man','amazing spiderman','amazing spider man',
+  'ultimate spider-man','ultimate spiderman','ultimate spider man',
+  'spectacular spider-man','spectacular spiderman','spectacular spider man',
+  'web of spider-man','web of spiderman',
+  'superior spider-man','superior spiderman',
+  'spider-man','spiderman',
+  'miles morales','spider-verse','spiderverse'
+];
+function aranhaRank(name){
+  const n = normalizeStr(name.replace(/\.(pdf|cbz|cbr)$/i,''));
+  for(let i=0;i<ARANHA_PRIORITY.length;i++){
+    if(n === ARANHA_PRIORITY[i]) return i;
+  }
+  for(let i=0;i<ARANHA_PRIORITY.length;i++){
+    if(n.startsWith(ARANHA_PRIORITY[i])) return i + 0.5;
+  }
+  return 999;
 }
 
-/* ---------------------------------------------------------------------
-   9) Busca (varre toda a árvore de pastas do Drive, não só o que já foi aberto)
-   --------------------------------------------------------------------- */
-function normalizeStr(s){
-  return String(s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
-}
-// Percorre recursivamente todas as (sub)pastas a partir da raiz configurada,
-// procurando PASTAS e ARQUIVOS cujo nome contenha o termo buscado. Usa o
-// cache de driveListFolder, então pastas já visitadas não geram nova requisição.
-async function searchLibrary(normTerm, token, isStale){
-  const folderResults = [];
-  const fileResults = [];
-  const seenFolders = new Set();
-  const seenFiles = new Set();
+async function collectAranhaFolders(token, isStale){
+  const found = [];
+  const seen = new Set();
   async function walk(folderId){
     if(isStale(token)) return;
     let listing;
     try{ listing = await driveListFolder(folderId); }catch(e){ return; }
     listing.folders.forEach(sub=>{
-      if(!seenFolders.has(sub.id) && normalizeStr(sub.name).includes(normTerm)){
-        seenFolders.add(sub.id);
-        folderResults.push(sub);
-      }
-    });
-    listing.files.forEach(f=>{
-      if(!seenFiles.has(f.id) && normalizeStr(f.name).includes(normTerm)){
-        seenFiles.add(f.id);
-        fileResults.push(f);
+      if(seen.has(sub.id)) return;
+      const n = normalizeStr(sub.name);
+      if(n.includes('aranha') || n.includes('spider')){
+        seen.add(sub.id);
+        found.push(sub);
       }
     });
     await runLimited(listing.folders, 4, sub=>walk(sub.id));
   }
   await walk(CONFIG.rootFolderId);
-  folderResults.sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
-  fileResults.sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
-  return {folders: folderResults, files: fileResults};
+  found.sort((a,b)=>{
+    const ra = aranhaRank(a.name), rb = aranhaRank(b.name);
+    if(ra !== rb) return ra - rb;
+    return a.name.localeCompare(b.name,'pt-BR',{numeric:true});
+  });
+  return found;
 }
 
-// Ao clicar numa PASTA encontrada pela busca, entra nela direto a partir da
-// raiz (a busca não guarda o caminho completo de ancestrais, então o
-// breadcrumb passa a mostrar só "Biblioteca / <pasta encontrada>").
-function openFolderFromSearch(f){
-  $('#search-input').value = '';
-  state.path = [{id: CONFIG.rootFolderId, name:'Biblioteca'}];
-  enterFolder(f.id, f.name);
-}
-
-let searchToken = 0;
-let searchDebounceTimer = null;
-$('#search-input').addEventListener('input', e=>{
-  const term = e.target.value.trim();
-  clearTimeout(searchDebounceTimer);
-  if(!term){
-    searchToken++; // cancela qualquer busca em andamento
-    renderLibrary(state.path[state.path.length-1].id, false);
-    return;
+async function collectAllComics(token, isStale){
+  const all = [];
+  const seen = new Set();
+  async function walk(folderId){
+    if(isStale(token)) return;
+    let listing;
+    try{ listing = await driveListFolder(folderId); }catch(e){ return; }
+    listing.files.forEach(f=>{
+      if(seen.has(f.id)) return;
+      seen.add(f.id);
+      all.push(f);
+    });
+    await runLimited(listing.folders, 4, sub=>walk(sub.id));
   }
-  searchDebounceTimer = setTimeout(()=>runSearch(term), 300);
-});
+  await walk(CONFIG.rootFolderId);
+  return all;
+}
 
-async function runSearch(term){
+function buildCarouselCard(item, opts){
+  opts = opts || {};
+  const isFolder = !!opts.isFolder;
+  const btn = el('button','carousel-card');
+  btn.dataset.id = item.id;
+
+  const cover = el('div','cc-cover');
+  cover.appendChild(elHtml('div','cc-placeholder', isFolder ? ICONS.folder : ICONS.page));
+  if(opts.progressPct){
+    cover.appendChild(elHtml('div','cc-progress', `<i style="width:${opts.progressPct}%"></i>`));
+  }
+  btn.appendChild(cover);
+
+  btn.appendChild(el('div','cc-name', item.name.replace(/\.(pdf|cbz|cbr)$/i,'')));
+  if(opts.sub) btn.appendChild(el('div','cc-sub', opts.sub));
+  else if(!isFolder && opts.size) btn.appendChild(el('div','cc-sub', fmtSize(Number(opts.size))));
+
+  (async ()=>{
+    try{
+      let src;
+      if(isFolder){
+        const file = await resolveFolderCoverFile(item.id);
+        if(!file) return;
+        src = await resolveCoverSrc(file);
+      } else {
+        src = await resolveCoverSrc(item);
+      }
+      if(!src) return;
+      const img = el('img','');
+      img.src = src; img.alt = '';
+      const ph = cover.querySelector('.cc-placeholder');
+      if(ph) ph.replaceWith(img);
+    }catch(e){}
+  })();
+
+  btn.onclick = ()=>{
+    if(isFolder) enterFolder(item.id, item.name);
+    else openReader(item);
+  };
+  return btn;
+}
+
+function buildHomeSection(title, items, builder){
+  if(!items || items.length===0) return null;
+  const section = el('div','home-section');
+  section.appendChild(el('div','home-section-title', title));
+  const carousel = el('div','carousel');
+  items.forEach(it=>{
+    const card = builder(it);
+    if(card) carousel.appendChild(card);
+  });
+  carousel.appendChild(el('div','carousel-end'));
+  attachCarouselDrag(carousel);
+  section.appendChild(carousel);
+  return section;
+}
+
+function attachCarouselDrag(carousel){
+  let isDown=false, startX=0, startScroll=0, moved=false;
+  carousel.addEventListener('mousedown', e=>{
+    isDown=true; moved=false;
+    startX = e.pageX; startScroll = carousel.scrollLeft;
+    carousel.classList.add('dragging');
+  });
+  window.addEventListener('mouseup', ()=>{
+    if(!isDown) return;
+    isDown=false; carousel.classList.remove('dragging');
+  });
+  carousel.addEventListener('mousemove', e=>{
+    if(!isDown) return;
+    const dx = e.pageX - startX;
+    if(Math.abs(dx) > 4) moved = true;
+    carousel.scrollLeft = startScroll - dx;
+  });
+  carousel.addEventListener('click', e=>{
+    if(moved){ e.preventDefault(); e.stopPropagation(); moved=false; }
+  }, true);
+}
+
+const ARANHA_CACHE_KEY = 'planetahq_aranha_cache_v1';
+let aranhaCachePromise = null;
+async function getAranhaFolders(){
+  if(aranhaCachePromise) return aranhaCachePromise;
+  aranhaCachePromise = (async ()=>{
+    try{
+      const raw = localStorage.getItem(ARANHA_CACHE_KEY);
+      if(raw){
+        const c = JSON.parse(raw);
+        if(c.savedAt && Date.now()-c.savedAt < 6*3600*1000 && Array.isArray(c.folders)) return c.folders;
+      }
+    }catch(e){}
+    const token = ++searchToken;
+    const folders = await collectAranhaFolders(token, t=>t!==searchToken);
+    try{
+      localStorage.setItem(ARANHA_CACHE_KEY, JSON.stringify({savedAt: Date.now(), folders}));
+    }catch(e){}
+    return folders;
+  })();
+  return aranhaCachePromise;
+}
+
+function hashStr(s){
+  let h = 2166136261;
+  for(let i=0;i<s.length;i++){ h ^= s.charCodeAt(i); h = Math.imul(h, 16777619); }
+  return (h>>>0);
+}
+
+async function renderHomeSections(){
+  const wrap = $('#home-sections');
+  if(!wrap) return;
+  wrap.innerHTML = `<div class="home-section"><div class="home-section-title">Carregando seções…</div></div>`;
+  wrap.classList.remove('hidden');
+
   const myToken = ++searchToken;
-  const grid = $('#grid-library');
-  grid.innerHTML = `<div class="empty-state"><div class="spinner" style="margin:0 auto 12px"></div>Buscando em toda a biblioteca...</div>`;
-  const {folders, files} = await searchLibrary(normalizeStr(term), myToken, t=>t!==searchToken);
-  if(myToken !== searchToken) return; // usuário já digitou outra coisa nesse meio-tempo
-  state.currentListContext = files;
-  state.currentListIsLocal = false;
-  grid.innerHTML = '';
-  if(folders.length===0 && files.length===0){
-    grid.innerHTML = `<div class="empty-state">${ICONS.search}<h3>Nada encontrado</h3>Nenhuma pasta ou HQ com esse nome na biblioteca.</div>`;
-    return;
-  }
-  const folderCards = folders.map(f=>{
-    const card = renderFolderCard(f, {fromSearch:true});
-    grid.appendChild(card);
-    return {card, f};
-  });
-  const comicCards = files.map(f=>{
-    const card = renderComicCard(f);
-    grid.appendChild(card);
-    return {card, f};
-  });
-  runLimited(folderCards, 2, ({card, f})=>attachFolderCoverAsync(card, f));
-  runLimited(comicCards, 3, ({card, f})=>attachCoverAsync(card, f));
-}
+  const isStale = t=>t!==searchToken;
 
+  let continueItems = [];
+  try{
+    const allProg = await idbAll('progress');
+    continueItems = allProg
+      .filter(p=>p.pct >= 5 && p.pct < 98)
+      .sort((a,b)=>b.updatedAt-a.updatedAt)
+      .slice(0, 20);
+  }catch(e){}
+
+  let aranhaFolders = [];
+  try{ aranhaFolders = await getAranhaFolders(); }catch(e){}
+  if(isStale(myToken)) return;
+
+  let allComics = [];
+  try{ allComics = await collectAllComics(myToken, isStale); }catch(e){}
+  if(isStale(myToken)) return;
+
+  const recent = [...allComics]
+    .filter(f=>f.modifiedTime)
+    .sort((a,b)=> new Date(b.modifiedTime) - new Date(a.modifiedTime))
+    .slice(0, 20);
+
+  const daySeed = Math.floor(Date.now()/(24*3600*1000));
+  const recommended = [...allComics]
+    .map(f=>({f, k: hashStr(f.id + ':' + daySeed)}))
+    .sort((a,b)=>a.k-b.k)
+    .slice(0, 20)
+    .map(x=>x.f);
+
+  if(isStale(myToken)) return;
+
+  wrap.innerHTML = '';
+  let anySection = false;
+
+  const secContinue = buildHomeSection('Continuar lendo', continueItems, (it)=>{
+    return buildCarouselCard(it, { isFolder:false, progressPct: it.pct, sub: `${it.pct}% · pág. ${it.pageIndex+1}/${it.pageCount}` });
+  });
+  if(secContinue){ wrap.appendChild(secContinue); anySection = true; }
+
+  const secAranha = buildHomeSection('🕷️ Coleção Homem-Aranha', aranhaFolders, (it)=>{
+    return buildCarouselCard(it, { isFolder:true });
+  });
+  if(secAranha){ wrap.appendChild(secAranha); anySection = true; }
+
+  const secRec = buildHomeSection('Recomendados', recommended, (it)=>{
+    return buildCarouselCard(it, { isFolder:false, size: it.size });
+  });
+  if(secRec){ wrap.appendChild(secRec); anySection = true; }
+
+  const secNew = buildHomeSection('Recém atualizados', recent, (it)=>{
+    const d = it.modifiedTime ? new Date(it.modifiedTime).toLocaleDateString('pt-BR') : '';
+    return buildCarouselCard(it, { isFolder:false, size: it.size, sub: d });
+  });
+  if(secNew){ wrap.appendChild(secNew); anySection = true; }
+
+  if(!anySection) wrap.classList.add('hidden');
+}
 
 /* ---------------------------------------------------------------------
    10) Abas, atualizar, configurações
@@ -1776,8 +1979,11 @@ document.querySelectorAll('.tab').forEach(tab=>{
   };
 });
 $('#btn-refresh').onclick = ()=>{
+  localStorage.removeItem(ARANHA_CACHE_KEY);
+  aranhaCachePromise = null;
   const current = state.path[state.path.length-1];
   if(current) renderLibrary(current.id, true);
+  if(current && current.id === CONFIG.rootFolderId) renderHomeSections();
 };
 $('#btn-settings').onclick = ()=>{
   if(confirm('Apagar a configuração da biblioteca (chave de API e pasta)? Seus downloads offline serão mantidos.')){
@@ -1789,7 +1995,6 @@ $('#btn-settings').onclick = ()=>{
 /* ---------------------------------------------------------------------
    11) Inicialização
    --------------------------------------------------------------------- */
-// Ícones estáticos da interface (fora dos cards, que são montados dinamicamente)
 Object.entries({
   'search-icon-slot': ICONS.search,
   'btn-refresh': ICONS.refresh,
