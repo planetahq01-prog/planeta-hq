@@ -2233,6 +2233,7 @@ function writeHomeCache(key, arrProp, list){
   try{ localStorage.setItem(key, JSON.stringify({savedAt: Date.now(), [arrProp]: list})); }catch(e){}
 }
 
+let aranhaToken = 0;
 let aranhaCachePromise = null;
 async function getAranhaFolders(forceRefresh){
   if(forceRefresh) aranhaCachePromise = null;
@@ -2240,20 +2241,21 @@ async function getAranhaFolders(forceRefresh){
   aranhaCachePromise = (async ()=>{
     const cached = readHomeCache(ARANHA_CACHE_KEY, 'folders');
     if(cached && Date.now()-cached.savedAt < HOME_CACHE_MAX_AGE) return cached.folders;
-    const token = ++searchToken;
-    const folders = await collectAranhaFolders(token, t=>t!==searchToken);
+    const token = ++aranhaToken;
+    const folders = await collectAranhaFolders(token, t=>t!==aranhaToken);
     writeHomeCache(ARANHA_CACHE_KEY, 'folders', folders);
     return folders;
   })();
   return aranhaCachePromise;
 }
 
+let libraryIndexToken = 0;
 let libraryIndexPromise = null;
 async function refreshLibraryIndex(){
   if(libraryIndexPromise) return libraryIndexPromise;
   libraryIndexPromise = (async ()=>{
-    const token = ++searchToken;
-    const {comics, folders} = await collectAllComics(token, t=>t!==searchToken);
+    const token = ++libraryIndexToken;
+    const {comics, folders} = await collectAllComics(token, t=>t!==libraryIndexToken);
     writeHomeCache(ALLCOMICS_CACHE_KEY, 'comics', comics);
     writeHomeCache(ALLFOLDERS_CACHE_KEY, 'folders', folders);
     return {comics, folders};
@@ -2339,12 +2341,13 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, allComics}){
   wrap.classList.toggle('hidden', !anySection);
 }
 
+let homeToken = 0;
 async function renderHomeSections(forceRefresh){
   const wrap = $('#home-sections');
   if(!wrap) return;
 
-  const myToken = ++searchToken;
-  const isStale = t=>t!==searchToken;
+  const myToken = ++homeToken;
+  const isStale = t=>t!==homeToken;
 
   // 1) Se já temos algo em cache (mesmo desatualizado), pinta na hora — a
   // sensação é de carregamento instantâneo — e atualiza tudo em segundo
