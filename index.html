@@ -1414,8 +1414,37 @@ async function refreshFolderCount(countEl, folderId){
     };
   }
 }
+/* ---------------------------------------------------------------------
+   6.6) CAPAS MANUAIS DE PASTA (override por nome)
+   --------------------------------------------------------------------- */
+const FOLDER_COVER_OVERRIDES_KEY = 'planetahq_foldercover_overrides_v1';
+// Capas fixadas manualmente. A chave é o nome da pasta normalizado
+// (sem acento, minúsculo) — assim funciona não importa em qual pasta-pai
+// a pasta esteja, sem precisar saber o ID dela no Google Drive.
+const DEFAULT_FOLDER_COVER_OVERRIDES = {
+  [normalizeStr('Marvel Sagas')]: 'https://i.postimg.cc/T116SVT6/1789154397694.png',
+  [normalizeStr('MARVEL INDIVIDUAL')]: 'https://i.postimg.cc/Y9h7DNpT/1789164828878.jpg'
+};
+function loadFolderCoverOverrides(){
+  try{
+    const raw = localStorage.getItem(FOLDER_COVER_OVERRIDES_KEY);
+    const stored = raw ? JSON.parse(raw) : {};
+    return Object.assign({}, DEFAULT_FOLDER_COVER_OVERRIDES, stored);
+  }catch(e){ return DEFAULT_FOLDER_COVER_OVERRIDES; }
+}
+function getFolderCoverOverride(name){
+  if(!name) return null;
+  return loadFolderCoverOverrides()[normalizeStr(name)] || null;
+}
+
 async function attachFolderCoverAsync(card, folderObj){
   const placeholder = card.querySelector('.cover-placeholder');
+  const override = getFolderCoverOverride(folderObj.name);
+  if(override){
+    card.classList.add('has-cover');
+    if(placeholder.isConnected) placeholder.replaceWith(buildCoverNode(override, false));
+    return;
+  }
   try{
     const file = await resolveFolderCoverFile(folderObj.id);
     if(!file) return;
@@ -2209,9 +2238,14 @@ function buildCarouselCard(item, opts){
     try{
       let src;
       if(isFolder){
-        const file = await resolveFolderCoverFile(item.id);
-        if(!file) return;
-        src = await resolveCoverSrc(file);
+        const override = getFolderCoverOverride(item.name);
+        if(override){
+          src = override;
+        } else {
+          const file = await resolveFolderCoverFile(item.id);
+          if(!file) return;
+          src = await resolveCoverSrc(file);
+        }
       } else {
         src = await resolveCoverSrc(item);
       }
