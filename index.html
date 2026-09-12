@@ -382,7 +382,10 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
   display:flex;align-items:center;gap:8px;flex-wrap:wrap;
 }
 .home-section-title .title-logo{
-  height:22px;width:auto;display:inline-block;vertical-align:middle;object-fit:contain;
+  height:40px;width:auto;display:inline-block;vertical-align:middle;object-fit:contain;
+}
+.home-section-title .title-logo.title-logo-lg{
+  height:56px;
 }
 .carousel{
   display:flex;gap:10px;overflow-x:auto;overflow-y:hidden;
@@ -2577,7 +2580,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, all
   if(secContinue){ wrap.appendChild(secContinue); anySection = true; }
 
   const secAranha = buildHomeSection(
-    '🕷️ Coleção <img class="title-logo" src="https://i.postimg.cc/x1cRhdkq/XRecorder-17092024-211205-removebg-preview.png" alt="Homem-Aranha">',
+    '🕷️ Coleção <img class="title-logo title-logo-lg" src="https://i.postimg.cc/x1cRhdkq/XRecorder-17092024-211205-removebg-preview.png" alt="Homem-Aranha">',
     aranhaFolders,
     (it)=>{
       return buildCarouselCard(it, { isFolder:true });
