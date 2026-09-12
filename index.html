@@ -379,6 +379,10 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
   font-family:var(--font-body);
   font-size:19px;font-weight:800;color:var(--paper);
   padding:14px 16px 10px;letter-spacing:-.2px;
+  display:flex;align-items:center;gap:8px;flex-wrap:wrap;
+}
+.home-section-title .title-logo{
+  height:22px;width:auto;display:inline-block;vertical-align:middle;object-fit:contain;
 }
 .carousel{
   display:flex;gap:10px;overflow-x:auto;overflow-y:hidden;
@@ -2329,10 +2333,10 @@ function buildCarouselCard(item, opts){
   return btn;
 }
 
-function buildHomeSection(title, items, builder){
+function buildHomeSection(titleHtml, items, builder){
   if(!items || items.length===0) return null;
   const section = el('div','home-section');
-  section.appendChild(el('div','home-section-title', title));
+  section.appendChild(elHtml('div','home-section-title', titleHtml));
   const carousel = el('div','carousel');
   items.forEach(it=>{
     const card = builder(it);
@@ -2572,14 +2576,22 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, all
   });
   if(secContinue){ wrap.appendChild(secContinue); anySection = true; }
 
-  const secAranha = buildHomeSection('🕷️ Coleção Homem-Aranha', aranhaFolders, (it)=>{
-    return buildCarouselCard(it, { isFolder:true });
-  });
+  const secAranha = buildHomeSection(
+    '🕷️ Coleção <img class="title-logo" src="https://i.postimg.cc/x1cRhdkq/XRecorder-17092024-211205-removebg-preview.png" alt="Homem-Aranha">',
+    aranhaFolders,
+    (it)=>{
+      return buildCarouselCard(it, { isFolder:true });
+    }
+  );
   if(secAranha){ wrap.appendChild(secAranha); anySection = true; }
 
-  const secXMen = buildHomeSection('Coleção X-Men', xmenFolders, (it)=>{
-    return buildCarouselCard(it, { isFolder:true });
-  });
+  const secXMen = buildHomeSection(
+    'Coleção <img class="title-logo" src="https://i.postimg.cc/cJzP2j41/x-men-seeklogo.png" alt="X-Men">',
+    xmenFolders,
+    (it)=>{
+      return buildCarouselCard(it, { isFolder:true });
+    }
+  );
   if(secXMen){ wrap.appendChild(secXMen); anySection = true; }
 
   const secRec = buildHomeSection('Recomendados', recommended, (it)=>{
