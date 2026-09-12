@@ -3,6 +3,8 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#0d0c12">
+<link rel="manifest" href="./manifest.json">
 <title>Planeta HQ</title>
 
 <!-- Fontes -->
@@ -2673,6 +2675,14 @@ async function boot(){
 }
 
 boot();
+
+if('serviceWorker' in navigator){
+  window.addEventListener('load', ()=>{
+    navigator.serviceWorker.register('./sw.js').catch(err=>{
+      console.warn('Falha ao registrar service worker (app pode não funcionar offline):', err);
+    });
+  });
+}
 </script>
 </body>
 </html>
