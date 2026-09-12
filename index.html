@@ -1559,21 +1559,42 @@ async function resolveCoverFallback(f){
       if(doc.dispose) doc.dispose();
       cacheResolvedCover(f.id, dataUrl);
       return dataUrl;
-    }catch(err){ /* segue tentando gerar via rede abaixo */ }
+    }catch(err){ console.error('[PlanetaHQ] capa: falha ao gerar a partir do download local —', f.name, err); }
   }
   const ext = f._ext || guessExt(f);
   let dataUrl = null;
+
+  // 1ª tentativa: rápida e econômica, sem baixar o arquivo inteiro (range
+  // requests). Numa fila própria e bem mais restrita (ver
+  // NETWORK_COVER_MAX_CONCURRENT) pra não subir vários workers do pdf.js
+  // ao mesmo tempo e pesar o app.
   try{
-    if(ext === 'pdf'){
-      // Mesmo truque do leitor: pdf.js busca só os bytes da 1ª página via
-      // range requests, sem baixar o PDF inteiro. Numa fila própria e bem
-      // mais restrita (ver NETWORK_COVER_MAX_CONCURRENT) pra não subir
-      // vários workers do pdf.js ao mesmo tempo e pesar o app.
-      dataUrl = await networkCoverQueue(()=>renderPdfCoverThumb(driveMediaUrl(f.id)));
-    } else if(ext === 'cbz'){
-      dataUrl = await networkCoverQueue(()=>extractCbzCoverPartial(f));
+    if(ext === 'pdf') dataUrl = await networkCoverQueue(()=>renderPdfCoverThumb(driveMediaUrl(f.id)));
+    else if(ext === 'cbz') dataUrl = await networkCoverQueue(()=>extractCbzCoverPartial(f));
+  }catch(err){
+    console.error('[PlanetaHQ] capa: tentativa rápida (range) falhou —', f.name, err);
+  }
+
+  // 2ª tentativa, GARANTIDA: se a rápida falhar por qualquer motivo (rede
+  // que não aceita range request, arquivo com estrutura fora do comum,
+  // etc.), baixa o arquivo inteiro e gera a capa dele — o mesmo caminho
+  // já usado (e comprovadamente funcional) pra abrir/baixar a HQ. Fica
+  // mais lento e gasta mais dado nessa HQ especificamente, mas a capa
+  // realmente aparece, que é o que importa.
+  if(!dataUrl && (ext === 'pdf' || ext === 'cbz')){
+    try{
+      dataUrl = await networkCoverQueue(async ()=>{
+        const blob = await driveFetchBlob(f.id, null, Number(f.size)||0);
+        const doc = await openComicFromBlob(f, blob);
+        const pageUrl = await toDataUrl(await doc.getPage(0));
+        if(doc.dispose) doc.dispose();
+        return pageUrl;
+      });
+    }catch(err){
+      console.error('[PlanetaHQ] capa: download completo também falhou —', f.name, err);
     }
-  }catch(err){ /* sem capa mesmo — placeholder some, sem travar a UI */ }
+  }
+
   cacheResolvedCover(f.id, dataUrl);
   return dataUrl;
 }
@@ -1716,6 +1737,7 @@ function buildCoverNode(src, f){
   if(f){
     img.onerror = async ()=>{
       img.onerror = null;
+      console.warn('[PlanetaHQ] capa: thumbnailLink do Drive falhou, tentando gerar —', f.name);
       const fallback = await resolveCoverFallback(f);
       if(fallback) img.src = fallback;
       else img.remove();
