@@ -5,29 +5,37 @@
   sendo resolvida pelo próprio app via IndexedDB — este arquivo não mexe
   nisso, só cuida de fazer a tela inicial carregar offline.
 
-  IMPORTANTE (v2): antes, requisições de HQs/capas/API do Drive não eram
-  interceptadas por este arquivo, então o navegador aplicava as regras de
-  cache HTTP padrão dele a essas respostas — na prática, guardando em disco
-  os PDFs/CBZs abertos (mesmo sem "Baixar"), o que fazia o armazenamento do
-  app crescer sem parar com o uso. Agora essas requisições são explicitamente
-  refeitas com `cache: 'no-store'`, então nunca ficam gravadas no disco só
-  por terem sido abertas para leitura — só o que o app salva de propósito no
-  IndexedDB (a aba "Baixados") permanece.
+  IMPORTANTE (v4) — causa raiz real do armazenamento disparado:
+  a verificação "isAppShellAsset" comparava `req.url.endsWith(u.replace('./',''))`.
+  Para o item './' da lista, isso virava `req.url.endsWith('')` — e QUALQUER
+  string termina com uma string vazia. Ou seja, TODA requisição (cada HQ
+  aberta, cada capa, cada chamada à API do Drive) era tratada como "parte da
+  casca do app" e caía no branch que guarda a resposta pra sempre no Cache
+  Storage, sem nenhum limite. Isso explica o crescimento rápido mesmo com a
+  aba "Baixados" vazia, e também por que a correção da v2/v3 (usar
+  `cache: 'no-store'` pra tudo que não é casca) nunca chegava a rodar de
+  verdade — o código dela era inalcançável por causa desse bug.
+  Agora a lista de assets da casca é comparada por URL absoluta exata (sem
+  heurística de sufixo), então só os poucos arquivos realmente listados
+  entram nesse cache — tudo o mais (Drive, HQs, capas) vai com
+  `cache: 'no-store'`, sem deixar resíduo em disco.
 
   Sempre que você editar o index.html, aumente o número da versão abaixo
   (v1 -> v2 -> v3...) para forçar os dispositivos a buscarem a versão nova.
 */
-const CACHE_VERSION = 'v3';
+const CACHE_VERSION = 'v4';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
-  './',
   './index.html',
   './manifest.json',
   'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
   'https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700;800&display=swap'
 ];
+// URLs absolutas resolvidas uma única vez, pra comparar por igualdade exata
+// (nunca mais por sufixo/heurística) na hora de decidir o que é "casca".
+const APP_SHELL_URLS = new Set(APP_SHELL.map((u) => new URL(u, self.location.href).href));
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
@@ -69,9 +77,10 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  const isAppShellAsset = APP_SHELL.some((u) => req.url === u || req.url.endsWith(u.replace('./', '')));
-
-  if (isAppShellAsset) {
+  // Comparação por URL absoluta EXATA — nunca mais por sufixo/heurística
+  // (foi justamente uma heurística de sufixo mal feita que causava o bug
+  // de armazenamento descrito no comentário lá em cima).
+  if (APP_SHELL_URLS.has(req.url)) {
     // Bibliotecas e fontes mudam raramente: cache primeiro, rede como respaldo.
     event.respondWith(
       caches.match(req).then((cached) => {
@@ -87,12 +96,10 @@ self.addEventListener('fetch', (event) => {
   }
 
   // Tudo o mais (chamadas à API do Google Drive, conteúdo de HQs, capas,
-  // etc.): segue pra rede, mas agora de forma explícita com
-  // `cache: 'no-store'`, pra garantir que o navegador nunca grave esses
-  // bytes no cache HTTP em disco. Isso é o que impedia HQs abertas (não
-  // baixadas) de ficarem ocupando espaço pra sempre — não queremos servir
-  // dados antigos da sua biblioteca a partir de um cache, nem deixar
-  // resíduo em disco de algo que você só abriu pra ler.
+  // etc.): vai pra rede com `cache: 'no-store'`, garantindo que o navegador
+  // nunca grave esses bytes em disco — nem no cache HTTP nativo, nem em
+  // Cache Storage. Isso é o que impede HQs abertas (não baixadas) de
+  // ficarem ocupando espaço pra sempre.
   event.respondWith(
     fetch(req, { cache: 'no-store' }).catch((err) => {
       throw err;
