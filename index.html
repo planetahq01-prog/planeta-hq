@@ -1425,7 +1425,9 @@ const FOLDER_COVER_OVERRIDES_KEY = 'planetahq_foldercover_overrides_v1';
 // a pasta esteja, sem precisar saber o ID dela no Google Drive.
 const DEFAULT_FOLDER_COVER_OVERRIDES = {
   [normalizeStr('Marvel Sagas')]: 'https://i.postimg.cc/T116SVT6/1789154397694.png',
-  [normalizeStr('MARVEL INDIVIDUAL')]: 'https://i.postimg.cc/Y9h7DNpT/1789164828878.jpg'
+  [normalizeStr('MARVEL INDIVIDUAL')]: 'https://i.postimg.cc/Y9h7DNpT/1789164828878.jpg',
+  [normalizeStr('MANGÁS')]: 'https://i.postimg.cc/BZXd5Jgr/dragon-ball-z-vol-1-sj-edition.jpg',
+  [normalizeStr('QUADRINHOS VARIADOS')]: 'https://i.postimg.cc/rwK0M0Nq/IMG-20260911-230542.jpg'
 };
 function loadFolderCoverOverrides(){
   try{
@@ -2177,6 +2179,7 @@ const ARANHA_EXCLUDED_FOLDERS = [
   'No Limiar do Aranhaverso (2022)',
   'No Limiar do Aranhaverso (2023)',
   'O Espantoso Homem-Aranha (2016)',
+  'O Vingador Homem-Aranha (2011)',
   'Ultimate Homem-Aranha V2'
 ].map(normalizeStr);
 
@@ -2214,6 +2217,40 @@ async function collectAranhaFolders(token, isStale){
     return a.name.localeCompare(b.name,'pt-BR',{numeric:true});
   });
   return filtered;
+}
+
+// Acha uma subpasta em qualquer nível da árvore cujo nome (ignorando
+// acento/caixa/pontuação) bata com um dos nomes-alvo. Usado pra achar a
+// pasta "X - MEN" independente de estar dentro de "Marvel Sagas" ou de
+// mudar de lugar no futuro.
+function normalizeForFolderMatch(s){
+  return normalizeStr(s).replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ');
+}
+async function findFolderRecursive(startId, targetNames, token, isStale){
+  let result = null;
+  async function walk(folderId){
+    if(result || isStale(token)) return;
+    let listing;
+    try{ listing = await driveListFolder(folderId); }catch(e){ return; }
+    for(const sub of listing.folders){
+      if(targetNames.includes(normalizeForFolderMatch(sub.name))){ result = sub; return; }
+    }
+    await runLimited(listing.folders, 6, sub=>walk(sub.id));
+  }
+  await walk(startId);
+  return result;
+}
+
+// Coleção X-Men: diferente da do Homem-Aranha (que varre a biblioteca
+// inteira procurando "aranha"/"spider" em qualquer pasta), aqui a seção é
+// simplesmente TODO o conteúdo direto de dentro da pasta "X - MEN" — sem
+// filtro nem exclusão.
+async function collectXMenFolders(token, isStale){
+  const xmenFolder = await findFolderRecursive(CONFIG.rootFolderId, ['x men','xmen'], token, isStale);
+  if(!xmenFolder || isStale(token)) return [];
+  let listing;
+  try{ listing = await driveListFolder(xmenFolder.id); }catch(e){ return []; }
+  return listing.folders.slice().sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
 }
 
 async function collectAllComics(token, isStale){
@@ -2334,7 +2371,8 @@ function attachCarouselDrag(carousel){
   }, true);
 }
 
-const ARANHA_CACHE_KEY = 'planetahq_aranha_cache_v1';
+const ARANHA_CACHE_KEY = 'planetahq_aranha_cache_v2';
+const XMEN_CACHE_KEY = 'planetahq_xmen_cache_v1';
 const ALLCOMICS_CACHE_KEY = 'planetahq_allcomics_cache_v1';
 const HOME_CACHE_MAX_AGE = 6*3600*1000;
 
@@ -2365,6 +2403,22 @@ async function getAranhaFolders(forceRefresh){
     return folders;
   })();
   return aranhaCachePromise;
+}
+
+let xmenToken = 0;
+let xmenCachePromise = null;
+async function getXMenFolders(forceRefresh){
+  if(forceRefresh) xmenCachePromise = null;
+  if(xmenCachePromise) return xmenCachePromise;
+  xmenCachePromise = (async ()=>{
+    const cached = readHomeCache(XMEN_CACHE_KEY, 'folders');
+    if(cached && Date.now()-cached.savedAt < HOME_CACHE_MAX_AGE) return cached.folders;
+    const token = ++xmenToken;
+    const folders = await collectXMenFolders(token, t=>t!==xmenToken);
+    writeHomeCache(XMEN_CACHE_KEY, 'folders', folders);
+    return folders;
+  })();
+  return xmenCachePromise;
 }
 
 let libraryIndexToken = 0;
@@ -2508,7 +2562,7 @@ function buildRecommended(allComics){
   return picked.concat(filler);
 }
 
-function paintHomeSections(wrap, {continueItems, aranhaFolders, allComics}){
+function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, allComics}){
   const recommended = buildRecommended(allComics);
   wrap.innerHTML = '';
   let anySection = false;
@@ -2522,6 +2576,11 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, allComics}){
     return buildCarouselCard(it, { isFolder:true });
   });
   if(secAranha){ wrap.appendChild(secAranha); anySection = true; }
+
+  const secXMen = buildHomeSection('Coleção X-Men', xmenFolders, (it)=>{
+    return buildCarouselCard(it, { isFolder:true });
+  });
+  if(secXMen){ wrap.appendChild(secXMen); anySection = true; }
 
   const secRec = buildHomeSection('Recomendados', recommended, (it)=>{
     return buildCarouselCard(it, { isFolder:false, size: it.size });
@@ -2543,16 +2602,18 @@ async function renderHomeSections(forceRefresh){
   // sensação é de carregamento instantâneo — e atualiza tudo em segundo
   // plano logo em seguida, sem travar a tela.
   const cachedAranha = !forceRefresh && readHomeCache(ARANHA_CACHE_KEY, 'folders');
+  const cachedXMen = !forceRefresh && readHomeCache(XMEN_CACHE_KEY, 'folders');
   const cachedComics = !forceRefresh && readHomeCache(ALLCOMICS_CACHE_KEY, 'comics');
   const continueItemsFast = await getContinueItems();
   if(isStale(myToken)) return;
 
   let paintedFast = false;
-  if(cachedAranha || cachedComics){
+  if(cachedAranha || cachedXMen || cachedComics){
     wrap.classList.remove('hidden');
     paintHomeSections(wrap, {
       continueItems: continueItemsFast,
       aranhaFolders: cachedAranha ? cachedAranha.folders : [],
+      xmenFolders: cachedXMen ? cachedXMen.folders : [],
       allComics: cachedComics ? cachedComics.comics : []
     });
     paintedFast = true;
@@ -2563,14 +2624,15 @@ async function renderHomeSections(forceRefresh){
 
   // 2) Busca (ou revalida) tudo em paralelo — antes isso era sequencial,
   // agora roda ao mesmo tempo, o que já corta bastante o tempo de espera.
-  const [continueItems, aranhaFolders, allComics] = await Promise.all([
+  const [continueItems, aranhaFolders, xmenFolders, allComics] = await Promise.all([
     getContinueItems(),
     getAranhaFolders(forceRefresh).catch(()=>paintedFast && cachedAranha ? cachedAranha.folders : []),
+    getXMenFolders(forceRefresh).catch(()=>paintedFast && cachedXMen ? cachedXMen.folders : []),
     getAllComicsCached(forceRefresh).catch(()=>paintedFast && cachedComics ? cachedComics.comics : [])
   ]);
   if(isStale(myToken)) return;
 
-  paintHomeSections(wrap, {continueItems, aranhaFolders, allComics});
+  paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, allComics});
 }
 
 /* ---------------------------------------------------------------------
@@ -2612,9 +2674,11 @@ $('#sort-select').addEventListener('change', e=>{
 
 $('#btn-refresh').onclick = ()=>{
   localStorage.removeItem(ARANHA_CACHE_KEY);
+  localStorage.removeItem(XMEN_CACHE_KEY);
   localStorage.removeItem(ALLCOMICS_CACHE_KEY);
   localStorage.removeItem(ALLFOLDERS_CACHE_KEY);
   aranhaCachePromise = null;
+  xmenCachePromise = null;
   libraryIndexPromise = null;
   const current = state.path[state.path.length-1];
   if(current) renderLibrary(current.id, true);
