@@ -450,6 +450,17 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 @media(min-width:700px){
   .grid{grid-template-columns:repeat(auto-fill,minmax(160px,1fr));}
 }
+#debug-panel{
+  position:fixed;inset:0;z-index:999;background:var(--ink-bg,#0b0b10);
+  padding:16px;display:flex;flex-direction:column;
+}
+#debug-panel.hidden{display:none;}
+.debug-panel-head{display:flex;align-items:center;gap:10px;}
+.debug-panel-head strong{flex:1;font-size:16px;}
+#debug-panel-text{
+  flex:1;width:100%;background:#000;color:#7CFC7C;font-family:monospace;font-size:12px;
+  border:1px solid var(--ink-border,#333);border-radius:8px;padding:10px;resize:none;white-space:pre-wrap;
+}
 </style>
 </head><body>
 <div id="app">
@@ -497,7 +508,17 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
         <input type="text" id="search-input" placeholder="Buscar na biblioteca (ex.: Batman)...">
       </div>
       <button class="icon-btn" id="btn-refresh" title="Atualizar pasta"></button>
+      <button class="icon-btn" id="btn-debug" title="Diagnóstico"></button>
       <button class="icon-btn" id="btn-settings" title="Configurações"></button>
+    </div>
+    <div id="debug-panel" class="hidden">
+      <div class="debug-panel-head">
+        <strong>Diagnóstico</strong>
+        <button id="btn-debug-copy" class="btn-primary" style="padding:8px 14px;">Copiar tudo</button>
+        <button id="btn-debug-close" class="icon-btn"></button>
+      </div>
+      <p style="font-size:13px;opacity:.75;margin:4px 0 10px;">Toque em "Copiar tudo" e cole numa mensagem pra enviar. Se estiver vazio, tente entrar de novo na pasta com problema antes de abrir isso aqui.</p>
+      <textarea id="debug-panel-text" readonly></textarea>
     </div>
     <div class="tabs">
       <button class="tab active" data-tab="library">Biblioteca</button>
@@ -621,6 +642,7 @@ const ICONS = {
   download: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
   check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
   close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+  bug: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="6" width="8" height="14" rx="4"/><path d="M8 12H2M22 12h-6M8 8 4 5M16 8l4-3M8 17l-4 2M16 17l4 2M12 6V3"/></svg>',
   chevLeft: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="15 18 9 12 15 6"/></svg>',
   chevRight: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>',
   zoomIn: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/><line x1="11" y1="8" x2="11" y2="14"/><line x1="8" y1="11" x2="14" y2="11"/></svg>',
@@ -1288,6 +1310,35 @@ function networkCoverQueue(task){
 // raro (mesmo card não é observado 2x) e inofensivo.
 const coverMemoryCache = new Map();
 
+/* ---------------------------------------------------------------------
+   6.06) Painel de diagnóstico
+   Quem usa o app pelo celular não tem como abrir o console do navegador
+   pra ver por que uma capa (ou qualquer outra coisa) falhou. Este painel
+   guarda os erros relevantes em memória e deixa a pessoa copiar tudo de
+   uma vez pra enviar como mensagem. Também captura QUALQUER erro não
+   tratado da página (window.onerror / unhandledrejection), não só os de
+   capa — assim, se o problema for outra coisa, ainda aparece aqui.
+   --------------------------------------------------------------------- */
+const debugLog = [];
+function formatDebugArg(a){
+  if(a instanceof Error) return (a.message || String(a)) + (a.stack ? '\n' + a.stack : '');
+  if(typeof a === 'object'){ try{ return JSON.stringify(a); }catch(e){ return String(a); } }
+  return String(a);
+}
+function pushDebugLog(prefix, args){
+  const line = `[${new Date().toLocaleTimeString('pt-BR')}] ${prefix} ${args.map(formatDebugArg).join(' ')}`;
+  debugLog.push(line);
+  if(debugLog.length > 200) debugLog.shift();
+}
+function logErr(...args){ console.error(...args); pushDebugLog('ERRO', args); }
+function logWarn(...args){ console.warn(...args); pushDebugLog('AVISO', args); }
+window.addEventListener('error', (e)=>{
+  pushDebugLog('ERRO NÃO TRATADO', [e.message, e.filename ? `(${e.filename}:${e.lineno})` : '', e.error]);
+});
+window.addEventListener('unhandledrejection', (e)=>{
+  pushDebugLog('PROMESSA REJEITADA', [e.reason]);
+});
+
 const coverObserver = ('IntersectionObserver' in window) ? new IntersectionObserver((entries)=>{
   entries.forEach(entry=>{
     if(!entry.isIntersecting) return;
@@ -1559,7 +1610,7 @@ async function resolveCoverFallback(f){
       if(doc.dispose) doc.dispose();
       cacheResolvedCover(f.id, dataUrl);
       return dataUrl;
-    }catch(err){ console.error('[PlanetaHQ] capa: falha ao gerar a partir do download local —', f.name, err); }
+    }catch(err){ logErr('[PlanetaHQ] capa: falha ao gerar a partir do download local —', f.name, err); }
   }
   const ext = f._ext || guessExt(f);
   let dataUrl = null;
@@ -1572,7 +1623,7 @@ async function resolveCoverFallback(f){
     if(ext === 'pdf') dataUrl = await networkCoverQueue(()=>renderPdfCoverThumb(driveMediaUrl(f.id)));
     else if(ext === 'cbz') dataUrl = await networkCoverQueue(()=>extractCbzCoverPartial(f));
   }catch(err){
-    console.error('[PlanetaHQ] capa: tentativa rápida (range) falhou —', f.name, err);
+    logErr('[PlanetaHQ] capa: tentativa rápida (range) falhou —', f.name, err);
   }
 
   // 2ª tentativa, GARANTIDA: se a rápida falhar por qualquer motivo (rede
@@ -1591,7 +1642,7 @@ async function resolveCoverFallback(f){
         return pageUrl;
       });
     }catch(err){
-      console.error('[PlanetaHQ] capa: download completo também falhou —', f.name, err);
+      logErr('[PlanetaHQ] capa: download completo também falhou —', f.name, err);
     }
   }
 
@@ -1737,7 +1788,7 @@ function buildCoverNode(src, f){
   if(f){
     img.onerror = async ()=>{
       img.onerror = null;
-      console.warn('[PlanetaHQ] capa: thumbnailLink do Drive falhou, tentando gerar —', f.name);
+      logWarn('[PlanetaHQ] capa: thumbnailLink do Drive falhou, tentando gerar —', f.name);
       const fallback = await resolveCoverFallback(f);
       if(fallback) img.src = fallback;
       else img.remove();
@@ -3166,6 +3217,26 @@ $('#btn-settings').onclick = ()=>{
     location.reload();
   }
 };
+$('#btn-debug').onclick = ()=>{
+  $('#debug-panel-text').value = debugLog.length ? debugLog.join('\n\n') : '(sem erros registrados até agora)';
+  $('#debug-panel').classList.remove('hidden');
+};
+$('#btn-debug-close').onclick = ()=>{
+  $('#debug-panel').classList.add('hidden');
+};
+$('#btn-debug-copy').onclick = async ()=>{
+  const text = $('#debug-panel-text').value;
+  try{
+    await navigator.clipboard.writeText(text);
+    toast('Copiado! Cole numa mensagem.');
+  }catch(e){
+    // Sem permissão de clipboard (comum fora de HTTPS): seleciona o texto
+    // pra pessoa copiar manualmente (segurar > Copiar).
+    const ta = $('#debug-panel-text');
+    ta.focus(); ta.select();
+    toast('Selecionei o texto — toque em "Copiar"');
+  }
+};
 
 /* ---------------------------------------------------------------------
    11) Inicialização
@@ -3173,6 +3244,8 @@ $('#btn-settings').onclick = ()=>{
 Object.entries({
   'search-icon-slot': ICONS.search,
   'btn-refresh': ICONS.refresh,
+  'btn-debug': ICONS.bug,
+  'btn-debug-close': ICONS.close,
   'btn-settings': ICONS.settings,
   'btn-back': ICONS.chevLeft,
   'btn-close-reader': ICONS.close,
