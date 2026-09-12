@@ -60,23 +60,32 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 
 /* ---- Topbar ---- */
 .topbar{
-  display:flex;align-items:center;gap:14px;
-  padding:14px 16px;background-color:var(--ink);
+  display:flex;flex-direction:column;gap:10px;
+  padding:12px 16px;background-color:var(--ink);
   background-image:radial-gradient(rgba(255,255,255,.05) 1px, transparent 1px);
   background-size:12px 12px;
   border-bottom:1px solid var(--ink-border);
   position:sticky;top:0;z-index:20;
 }
+/* Linha 1: logo + botões de ação. Linha 2: busca em largura total.
+   Antes tudo ficava numa linha só; com 3 botões de ícone (atualizar,
+   diagnóstico, configurações) sobrando pouquíssimo espaço pro campo de
+   busca em telas de celular comuns (às vezes só 60-70px de largura), o
+   que fazia parecer que a busca "não funcionava" — na real dava pra
+   digitar, só que a caixa era estreita e fácil de errar o toque nela ou
+   num botão vizinho sem querer. Botão dedicado, linha inteira, resolve. */
+.topbar-top{display:flex;align-items:center;gap:10px;}
+.topbar-top .wordmark{flex:1;min-width:0;}
 .wordmark{
   font-family:var(--font-display);
   font-size:22px;letter-spacing:.5px;color:var(--paper);
-  white-space:nowrap;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
 .wordmark span{color:var(--accent);text-shadow:0 0 18px rgba(255,77,94,.45);}
 .search-box{
-  flex:1;display:flex;align-items:center;background:var(--ink-soft);
+  width:100%;display:flex;align-items:center;background:var(--ink-soft);
   border:1px solid var(--ink-border);border-radius:999px;
-  padding:9px 14px;gap:8px;min-width:0;
+  padding:11px 14px;gap:8px;min-width:0;
 }
 .search-box .search-icon{display:flex;color:var(--text-muted);flex-shrink:0;}
 .search-box .search-icon svg{width:16px;height:16px;}
@@ -455,6 +464,29 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
   padding:16px;display:flex;flex-direction:column;
 }
 #debug-panel.hidden{display:none;}
+/* ---- Tela de carregamento inicial (0% -> 100%) ---- */
+#view-loading{
+  position:fixed;inset:0;z-index:1000;
+  display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;
+  background:radial-gradient(ellipse 900px 500px at 50% -10%, #241f38 0%, var(--ink) 55%) var(--ink);
+  padding:24px;text-align:center;
+}
+#view-loading.hidden{display:none;}
+#view-loading .loading-word{
+  font-family:var(--font-display);font-size:30px;letter-spacing:.5px;color:var(--paper);
+}
+#view-loading .loading-word span{color:var(--accent);text-shadow:0 0 18px rgba(255,77,94,.45);}
+#view-loading .loading-track{
+  width:min(280px,80vw);height:8px;border-radius:999px;
+  background:var(--ink-soft);border:1px solid var(--ink-border);overflow:hidden;
+}
+#view-loading .loading-fill{
+  height:100%;width:0%;border-radius:999px;
+  background:linear-gradient(90deg,var(--accent),var(--gold));
+  transition:width .25s ease;
+}
+#view-loading .loading-pct{font-size:13px;color:var(--paper);font-weight:700;letter-spacing:.3px;}
+#view-loading .loading-sub{font-size:12px;color:var(--text-muted);max-width:260px;}
 .debug-panel-head{display:flex;align-items:center;gap:10px;}
 .debug-panel-head strong{flex:1;font-size:16px;}
 #debug-panel-text{
@@ -499,17 +531,33 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
     </div>
   </div>
 
+  <!-- ===================== TELA DE CARREGAMENTO (0% → 100%) =====================
+       Fica por cima de tudo (o chrome/biblioteca já carrega por baixo, só não
+       aparece ainda) enquanto: 1) as seções da Home (Aranha/X-Men/Mangás/
+       Recomendados) e a pasta raiz são buscadas, e 2) as capas e logos que
+       ficariam visíveis na primeira tela terminam de carregar. Só some quando
+       chega em 100%, pra evitar aquela primeira impressão de tela pela metade
+       com esqueletos cinza por toda parte. -->
+  <div id="view-loading" class="hidden">
+    <div class="loading-word">PLANETA <span>HQ</span></div>
+    <div class="loading-track"><div class="loading-fill" id="loading-fill"></div></div>
+    <div class="loading-pct" id="loading-pct">0%</div>
+    <div class="loading-sub">Carregando sua biblioteca…</div>
+  </div>
+
   <!-- ===================== TOPO + ABAS (aparecem depois de configurado) ===================== -->
   <div id="chrome" class="hidden">
     <div class="topbar">
-      <div class="wordmark">PLANETA <span>HQ</span></div>
+      <div class="topbar-top">
+        <div class="wordmark">PLANETA <span>HQ</span></div>
+        <button class="icon-btn" id="btn-refresh" title="Atualizar pasta"></button>
+        <button class="icon-btn" id="btn-debug" title="Diagnóstico"></button>
+        <button class="icon-btn" id="btn-settings" title="Configurações"></button>
+      </div>
       <div class="search-box">
         <span class="search-icon" id="search-icon-slot"></span>
-        <input type="text" id="search-input" placeholder="Buscar na biblioteca (ex.: Batman)...">
+        <input type="text" id="search-input" placeholder="Buscar na biblioteca (ex.: Batman)..." autocomplete="off" autocorrect="off" spellcheck="false">
       </div>
-      <button class="icon-btn" id="btn-refresh" title="Atualizar pasta"></button>
-      <button class="icon-btn" id="btn-debug" title="Diagnóstico"></button>
-      <button class="icon-btn" id="btn-settings" title="Configurações"></button>
     </div>
     <div id="debug-panel" class="hidden">
       <div class="debug-panel-head">
@@ -1308,7 +1356,24 @@ function networkCoverQueue(task){
 // tentativa. Guarda só string (dataURL) ou null — nunca Promises, então
 // duas chamadas simultâneas pro mesmo id ainda podem gerar 2x, mas isso é
 // raro (mesmo card não é observado 2x) e inofensivo.
+// Antes era um Map comum, sem limite — cada capa vista na sessão ficava
+// pra sempre na memória (RAM) até a aba fechar, então quanto mais a
+// pessoa navegava, mais pesado o app ficava. Agora tem um teto: quando
+// passa de COVER_MEMORY_CACHE_MAX entradas, descarta as mais antigas
+// (a imagem persistida no IndexedDB continua lá, então a capa só
+// recarrega — instantaneamente do disco — se for vista de novo).
+const COVER_MEMORY_CACHE_MAX = 300;
 const coverMemoryCache = new Map();
+const _coverMemoryCacheSet = coverMemoryCache.set.bind(coverMemoryCache);
+coverMemoryCache.set = function(key, value){
+  if(coverMemoryCache.has(key)) coverMemoryCache.delete(key);
+  _coverMemoryCacheSet(key, value);
+  while(coverMemoryCache.size > COVER_MEMORY_CACHE_MAX){
+    const oldestKey = coverMemoryCache.keys().next().value;
+    coverMemoryCache.delete(oldestKey);
+  }
+  return coverMemoryCache;
+};
 
 /* ---------------------------------------------------------------------
    6.06) Painel de diagnóstico
@@ -1374,7 +1439,106 @@ function toast(msg){
   t.classList.add('show');
   clearTimeout(toast._t);
   toast._t = setTimeout(()=>t.classList.remove('show'), 2400);
-}/* ---------------------------------------------------------------------
+}
+
+/* ---------------------------------------------------------------------
+   6.02) Tela de carregamento inicial (0% -> 100%)
+   A biblioteca/home já carrega por baixo (o "chrome" fica visível), mas
+   esta tela cobre tudo por cima até: 1) os dados da pasta raiz + seções
+   da Home chegarem, e 2) as capas/logos que apareceriam na primeira tela
+   terminarem de carregar de verdade — só aí a pessoa vê a tela pronta,
+   em vez de esqueletos cinza piscando.
+   --------------------------------------------------------------------- */
+let loadingProgressPct = 0;
+function setLoadingProgress(pct){
+  loadingProgressPct = Math.max(loadingProgressPct, Math.min(100, pct));
+  const fill = $('#loading-fill');
+  const txt = $('#loading-pct');
+  if(fill) fill.style.width = loadingProgressPct + '%';
+  if(txt) txt.textContent = Math.round(loadingProgressPct) + '%';
+}
+function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
+
+// Espera os dois logos de seção (Aranha/X-Men, vindos de fora via
+// postimg.cc) carregarem — ou desiste depois de maxWaitMs pra não travar
+// a tela de carregamento se aquele host estiver lento/fora do ar.
+function waitForHomeLogos(maxWaitMs){
+  const logos = Array.from(document.querySelectorAll('#home-sections .title-logo'));
+  if(!logos.length) return Promise.resolve();
+  return Promise.race([
+    Promise.all(logos.map(img=> img.complete ? Promise.resolve() : new Promise(res=>{
+      img.addEventListener('load', res, {once:true});
+      img.addEventListener('error', res, {once:true});
+    }))),
+    sleep(maxWaitMs)
+  ]);
+}
+
+// Acompanha os esqueletos (placeholders cinza-animado) das capas ainda
+// carregando na pasta raiz e nas seções da Home, e avança a barra
+// proporcionalmente conforme eles vão sumindo. Some quando não sobrar
+// nenhum — ou depois de maxWaitMs, pra uma rede lenta não prender a
+// pessoa pra sempre na tela de carregamento.
+function waitForVisibleCovers(maxWaitMs, onProgress){
+  return new Promise(resolve=>{
+    const selector = '#grid-library .cover-placeholder.skeleton, #home-sections .cover-placeholder.skeleton, #home-sections .cc-placeholder.skeleton';
+    const initial = Math.max(1, document.querySelectorAll(selector).length);
+    const start = Date.now();
+    const tick = ()=>{
+      const remaining = document.querySelectorAll(selector).length;
+      const doneFrac = 1 - Math.min(1, remaining / initial);
+      if(onProgress) onProgress(doneFrac);
+      if(remaining === 0 || Date.now() - start > maxWaitMs){ resolve(); return; }
+      setTimeout(tick, 150);
+    };
+    tick();
+  });
+}
+
+// Sequência completa do primeiro carregamento: mostra a tela de 0%,
+// deixa o chrome/biblioteca carregar por baixo (escondido atrás da
+// tela), e só esconde a tela quando os dados + capas visíveis
+// terminarem (ou no limite de tempo de segurança, pra nunca travar a
+// pessoa numa tela de carregamento eterna se algo der errado na rede).
+async function runInitialLoad(){
+  const overlay = $('#view-loading');
+  loadingProgressPct = 0;
+  setLoadingProgress(0);
+  overlay.classList.remove('hidden');
+  $('#chrome').classList.remove('hidden');
+  $('#view-library').classList.remove('hidden');
+
+  const hardStop = setTimeout(()=>{ setLoadingProgress(100); overlay.classList.add('hidden'); }, 20000);
+
+  // Fase 1 (0% -> 60%): busca a pasta raiz + as seções da Home. Duração
+  // real é desconhecida, então a barra avança sozinha até 50% enquanto
+  // espera, e só passa disso quando os dados realmente chegarem.
+  const fakeTimer = setInterval(()=>{
+    if(loadingProgressPct < 50) setLoadingProgress(loadingProgressPct + 2);
+  }, 180);
+  try{
+    await enterFolder(CONFIG.rootFolderId, 'Biblioteca', {reset:true});
+  }catch(e){
+    logErr('[PlanetaHQ] Falha no carregamento inicial', e);
+  }finally{
+    clearInterval(fakeTimer);
+  }
+  setLoadingProgress(60);
+
+  // Fase 2 (60% -> 100%): logos das seções + capinhas visíveis na
+  // primeira tela.
+  try{
+    await Promise.all([
+      waitForHomeLogos(4000),
+      waitForVisibleCovers(7000, frac=> setLoadingProgress(60 + frac*35))
+    ]);
+  }catch(e){}
+  setLoadingProgress(100);
+  clearTimeout(hardStop);
+  await sleep(200);
+  overlay.classList.add('hidden');
+}
+/* ---------------------------------------------------------------------
    6) Biblioteca — navegação e renderização
    --------------------------------------------------------------------- */
 async function loadConfig(){
@@ -1910,15 +2074,46 @@ async function attachFolderCoverAsync(card, folderObj){
   }catch(e){ placeholder.classList.remove('skeleton'); }
 }
 
-async function toDataUrl(url){
-  if(url.startsWith('data:')) return url;
-  const res = await fetch(url);
-  const blob = await res.blob();
-  return new Promise(resolve=>{
-    const reader = new FileReader();
-    reader.onload = ()=>resolve(reader.result);
-    reader.readAsDataURL(blob);
-  });
+// Sempre devolve uma MINIATURA pequena (max largura ~400px, JPEG ~0.75),
+// nunca a imagem original. Antes esta função só convertia pra base64 sem
+// redimensionar — quando a fonte era uma página de leitura (renderizada
+// em alta resolução pro leitor, ou a imagem original de dentro de um CBZ)
+// isso persistia capas de vários MB cada no IndexedDB pra sempre, o que
+// fazia o armazenamento do app pular de ~500MB pra vários GB só de
+// rolar a biblioteca. Também libera qualquer blob URL temporário criado
+// aqui (ou recebido de quem chamou), o que antes vazava memória a cada
+// capa gerada a partir de um CBZ.
+async function toDataUrl(url, maxWidth=400, quality=0.75){
+  const callerBlobUrl = url.startsWith('blob:') ? url : null;
+  let fetchedBlobUrl = null;
+  try{
+    let srcUrl = url;
+    if(!url.startsWith('data:') && !url.startsWith('blob:')){
+      const res = await fetch(url);
+      const blob = await res.blob();
+      srcUrl = fetchedBlobUrl = URL.createObjectURL(blob);
+    }
+    const img = await new Promise((resolve, reject)=>{
+      const im = new Image();
+      im.onload = ()=>resolve(im);
+      im.onerror = ()=>reject(new Error('Falha ao decodificar imagem para gerar a capa.'));
+      im.src = srcUrl;
+    });
+    const nw = img.naturalWidth || maxWidth;
+    const nh = img.naturalHeight || maxWidth;
+    const scale = Math.min(1, maxWidth / nw);
+    const w = Math.max(1, Math.round(nw * scale));
+    const h = Math.max(1, Math.round(nh * scale));
+    const canvas = document.createElement('canvas');
+    canvas.width = w; canvas.height = h;
+    canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+    const out = canvas.toDataURL('image/jpeg', quality);
+    canvas.width = 0; canvas.height = 0;
+    return out;
+  } finally {
+    if(fetchedBlobUrl){ try{ URL.revokeObjectURL(fetchedBlobUrl); }catch(e){} }
+    if(callerBlobUrl){ try{ URL.revokeObjectURL(callerBlobUrl); }catch(e){} }
+  }
 }
 
 /* ---------------------------------------------------------------------
@@ -3284,9 +3479,7 @@ async function boot(){
     return;
   }
   $('#view-setup').classList.add('hidden');
-  $('#chrome').classList.remove('hidden');
-  $('#view-library').classList.remove('hidden');
-  await enterFolder(CONFIG.rootFolderId, 'Biblioteca', {reset:true});
+  await runInitialLoad();
 }
 
 boot();
