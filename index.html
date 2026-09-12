@@ -719,6 +719,17 @@ const CONFIG_KEY = 'planetahq_config';
 const READER_PREFS_KEY = 'planetahq_reader_prefs';
 let CONFIG = null;
 
+// Configuração padrão embutida no app: quem abrir o app (link/instalação)
+// pela primeira vez entra direto na biblioteca compartilhada, sem precisar
+// preencher a tela de configuração manualmente. Isso não afeta quem já
+// tinha uma configuração diferente salva no próprio aparelho — o valor
+// salvo em localStorage sempre tem prioridade (ver boot()).
+const DEFAULT_CONFIG = {
+  apiKey: 'AIzaSyBUmhXMkyiimcQAMV3p9xIGjs-u2Zv8tdc',
+  rootFolderId: '11JGPcNE-t4R4G8NaefyATXW3cWeu2n8Y',
+  proxyUrl: 'https://proxy1.planetahq01.workers.dev/'
+};
+
 const state = {
   currentTab: 'library',
   path: [],
@@ -3542,11 +3553,21 @@ $('#btn-save-config').onclick = async ()=>{
 async function boot(){
   try{ history.replaceState({appNav:true, root:true}, ''); }catch(e){}
   navPushedCount = 0;
-  const hasConfig = await loadConfig();
+  let hasConfig = await loadConfig();
   if(!hasConfig){
-    $('#view-setup').classList.remove('hidden');
-    $('#chrome').classList.add('hidden');
-    return;
+    // Ninguém configurou nada neste aparelho ainda: usa a biblioteca
+    // padrão embutida (DEFAULT_CONFIG) e entra direto, sem mostrar a tela
+    // de configuração manual. Quem quiser apontar pra outra pasta/chave
+    // continua podendo fazer isso depois, via engrenagem > apagar
+    // configuração (aí sim volta a pedir os campos manualmente).
+    try{
+      saveConfig(DEFAULT_CONFIG.apiKey, DEFAULT_CONFIG.rootFolderId, DEFAULT_CONFIG.proxyUrl);
+    }catch(e){
+      // localStorage indisponível (ex.: navegação privada restrita) — segue
+      // com a config só na memória desta sessão, em vez de travar o boot.
+      CONFIG = {apiKey: DEFAULT_CONFIG.apiKey, rootFolderId: DEFAULT_CONFIG.rootFolderId, proxyUrl: DEFAULT_CONFIG.proxyUrl};
+    }
+    hasConfig = true;
   }
   $('#view-setup').classList.add('hidden');
   await runInitialLoad();
