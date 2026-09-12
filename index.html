@@ -652,6 +652,64 @@ const state = {
   }
 };
 
+/* ---------------------------------------------------------------------
+   Integração com o botão "Voltar" do sistema (Android/navegador)
+   ---------------------------------------------------------------------
+   A ideia: cada "nível" que o usuário entra dentro do app (abrir uma
+   subpasta, abrir o leitor, trocar para uma aba que não seja a
+   biblioteca) empilha uma entrada no histórico do navegador. Assim, o
+   botão físico de voltar primeiro "desempilha" esses níveis dentro do
+   app, e só fecha o app/sai da página quando não há mais nada para
+   desfazer (ou seja, na tela raiz da biblioteca).
+   ------------------------------------------------------------------- */
+let navPushedCount = 0;     // quantos níveis extras estão empilhados no histórico
+let navSuppressPop = false; // true enquanto nós mesmos disparamos history.go()
+let navProgrammaticTabSwitch = false; // true enquanto o popstate troca de aba sozinho
+
+function navPushLevel(){
+  try{ history.pushState({appNav:true}, ''); }catch(e){}
+  navPushedCount++;
+}
+function navConsumeLevels(n){
+  if(n<=0) return;
+  navSuppressPop = true;
+  try{ history.go(-n); }catch(e){ navSuppressPop = false; }
+  navPushedCount = Math.max(0, navPushedCount - n);
+}
+// Calcula quantos níveis o estado atual do app "deveria" ter empilhado.
+function navCurrentDepth(){
+  const readerOpen = !$('#view-reader').classList.contains('hidden');
+  const tabDepth = state.currentTab === 'library' ? 0 : 1;
+  const folderDepth = state.currentTab === 'library' ? Math.max(0, state.path.length - 1) : 0;
+  return (readerOpen ? 1 : 0) + tabDepth + folderDepth;
+}
+// Chamar depois de uma ação de UI que faz o usuário "voltar" (clique na
+// seta de voltar, no breadcrumb, no X do leitor, na aba biblioteca) —
+// reconcilia o histórico consumindo quantas entradas forem necessárias.
+function navSyncAfterBack(){
+  const target = navCurrentDepth();
+  if(target < navPushedCount) navConsumeLevels(navPushedCount - target);
+  else navPushedCount = target;
+}
+
+window.addEventListener('popstate', ()=>{
+  if(navSuppressPop){ navSuppressPop = false; return; }
+  // Botão físico/gesto de voltar de verdade: desfaz um nível.
+  if(!$('#view-reader').classList.contains('hidden')){
+    closeReader();
+  } else if(state.currentTab === 'library' && state.path.length > 1){
+    goToBreadcrumbIndex(state.path.length - 2);
+  } else if(state.currentTab !== 'library'){
+    const libTab = document.querySelector('.tab[data-tab="library"]');
+    if(libTab){
+      navProgrammaticTabSwitch = true;
+      libTab.click();
+      navProgrammaticTabSwitch = false;
+    }
+  }
+  navPushedCount = Math.max(0, navPushedCount - 1);
+});
+
 function loadReaderPrefs(){
   try{
     const raw = localStorage.getItem(READER_PREFS_KEY);
@@ -1203,6 +1261,10 @@ async function enterFolder(id, name, {reset=false}={}){
   if(id === CONFIG.rootFolderId){
     renderHomeSections();
   }
+  // Entrar numa subpasta é ir "mais fundo" no app: empilha um nível no
+  // histórico para que o botão de voltar suba um nível em vez de fechar
+  // o app. Não empilha ao (re)carregar a raiz da biblioteca.
+  if(id !== CONFIG.rootFolderId) navPushLevel();
 }
 function goToBreadcrumbIndex(idx){
   state.path = state.path.slice(0, idx+1);
@@ -1216,6 +1278,7 @@ function goToBreadcrumbIndex(idx){
 function goBack(){
   if(state.path.length<=1) return;
   goToBreadcrumbIndex(state.path.length-2);
+  navSyncAfterBack();
 }
 function renderBreadcrumb(){
   const bc = $('#breadcrumb');
@@ -1223,7 +1286,7 @@ function renderBreadcrumb(){
   state.path.forEach((p,idx)=>{
     if(idx>0) bc.appendChild(el('span','sep','/'));
     const b = el('button', idx===state.path.length-1 ? 'current':'', p.name);
-    b.onclick = ()=>goToBreadcrumbIndex(idx);
+    b.onclick = ()=>{ goToBreadcrumbIndex(idx); navSyncAfterBack(); };
     bc.appendChild(b);
   });
   const backBtn = $('#btn-back');
@@ -1608,7 +1671,7 @@ async function searchLibrary(normTerm, rawTerm, token, isStale){
 function openFolderFromSearch(f){
   $('#search-input').value = '';
   state.path = [{id: CONFIG.rootFolderId, name:'Biblioteca'}];
-  enterFolder(f.id, f.name);
+  enterFolder(f.id, f.name).then(navSyncAfterBack);
 }
 
 let searchToken = 0;
@@ -1841,7 +1904,11 @@ function buildFavButton(fileMeta, tag){
 }
 
 async function openReader(fileMeta, forceLocal){
+  const wasHidden = $('#view-reader').classList.contains('hidden');
   $('#view-reader').classList.remove('hidden');
+  // Só empilha um nível de histórico ao abrir o leitor pela primeira vez;
+  // trocar de capítulo/HQ com o leitor já aberto não deve empilhar de novo.
+  if(wasHidden) navPushLevel();
   $('#reader-settings').classList.add('hidden');
   $('#reader-title').textContent = fileMeta.name.replace(/\.(pdf|cbz|cbr)$/i,'');
   const status = $('#reader-status');
@@ -1903,7 +1970,7 @@ async function openReader(fileMeta, forceLocal){
     await rebuildReaderView();
   }catch(err){
     status.innerHTML = `<div>⚠ ${escapeHtml(err.message)}</div><button class="btn-secondary" id="btn-reader-close2">Fechar</button>`;
-    $('#btn-reader-close2').onclick = closeReader;
+    $('#btn-reader-close2').onclick = ()=>{ closeReader(); navSyncAfterBack(); };
   }
 }
 
@@ -2126,11 +2193,11 @@ $('#nav-prev').onclick = prevPage;
 $('#nav-next').onclick = nextPage;
 $('#btn-prev-chapter').onclick = ()=>openAdjacentComic(-1);
 $('#btn-next-chapter').onclick = ()=>openAdjacentComic(1);
-$('#btn-close-reader').onclick = closeReader;
+$('#btn-close-reader').onclick = ()=>{ closeReader(); navSyncAfterBack(); };
 $('#page-slider').addEventListener('input', e=>showPage(Number(e.target.value)-1));
 document.addEventListener('keydown', e=>{
   if($('#view-reader').classList.contains('hidden')) return;
-  if(e.key==='Escape'){ closeReader(); return; }
+  if(e.key==='Escape'){ closeReader(); navSyncAfterBack(); return; }
   if(state.reader.mode==='scroll') return;
   if(e.key==='ArrowRight') nextPage();
   if(e.key==='ArrowLeft') prevPage();
@@ -2727,6 +2794,7 @@ async function renderHomeSections(forceRefresh){
    --------------------------------------------------------------------- */
 document.querySelectorAll('.tab').forEach(tab=>{
   tab.onclick = ()=>{
+    const previousTab = state.currentTab;
     document.querySelectorAll('.tab').forEach(t=>t.classList.remove('active'));
     tab.classList.add('active');
     state.currentTab = tab.dataset.tab;
@@ -2738,6 +2806,12 @@ document.querySelectorAll('.tab').forEach(tab=>{
     if(state.currentTab==='downloads') renderDownloads();
     if(state.currentTab==='favorites') renderFavorites();
     if(state.currentTab==='history') renderHistory();
+    // Mantém o histórico do navegador sincronizado, exceto quando esta
+    // troca de aba foi disparada pelo próprio botão de voltar.
+    if(!navProgrammaticTabSwitch){
+      if(previousTab === 'library' && state.currentTab !== 'library') navPushLevel();
+      else if(previousTab !== 'library' && state.currentTab === 'library') navSyncAfterBack();
+    }
   };
 });
 function reRenderCurrentLibraryView(){
@@ -2813,6 +2887,8 @@ $('#btn-save-config').onclick = async ()=>{
 };
 
 async function boot(){
+  try{ history.replaceState({appNav:true, root:true}, ''); }catch(e){}
+  navPushedCount = 0;
   const hasConfig = await loadConfig();
   if(!hasConfig){
     $('#view-setup').classList.remove('hidden');
