@@ -1255,6 +1255,39 @@ function pumpCoverQueue(){
 }
 function scheduleCoverTask(task){ coverQueue.push(task); pumpCoverQueue(); }
 
+// Fila separada, bem mais restrita, só pra geração "pesada" de capa via
+// rede (abrir um PDF inteiro no pdf.js ou fazer as 3 idas-e-voltas de um
+// CBZ) — isso sobe worker do pdf.js e gasta CPU/memória de verdade, então
+// rodar 6 ao mesmo tempo (teto da fila de visibilidade acima) deixava o
+// app pesado/travando ao rolar a biblioteca. Aqui o teto é bem menor.
+const NETWORK_COVER_MAX_CONCURRENT = 2;
+let networkCoverActiveCount = 0;
+const networkCoverQueueTasks = [];
+function pumpNetworkCoverQueue(){
+  while(networkCoverActiveCount < NETWORK_COVER_MAX_CONCURRENT && networkCoverQueueTasks.length){
+    const {task, resolve, reject} = networkCoverQueueTasks.shift();
+    networkCoverActiveCount++;
+    Promise.resolve().then(task).then(resolve, reject).finally(()=>{
+      networkCoverActiveCount--; pumpNetworkCoverQueue();
+    });
+  }
+}
+function networkCoverQueue(task){
+  return new Promise((resolve, reject)=>{
+    networkCoverQueueTasks.push({task, resolve, reject});
+    pumpNetworkCoverQueue();
+  });
+}
+
+// Cache em memória (dura a sessão/aba atual) do resultado já resolvido de
+// cada capa — inclusive falhas (null), pra não ficar tentando gerar de
+// novo (e pesando o app) toda vez que a pessoa sai e volta pra
+// biblioteca. "Atualizar" na Home limpa esse cache pra permitir nova
+// tentativa. Guarda só string (dataURL) ou null — nunca Promises, então
+// duas chamadas simultâneas pro mesmo id ainda podem gerar 2x, mas isso é
+// raro (mesmo card não é observado 2x) e inofensivo.
+const coverMemoryCache = new Map();
+
 const coverObserver = ('IntersectionObserver' in window) ? new IntersectionObserver((entries)=>{
   entries.forEach(entry=>{
     if(!entry.isIntersecting) return;
@@ -1488,8 +1521,16 @@ function renderComicCard(f){
 }
 
 async function resolveCoverSrc(f){
-  const cached = await idbGet('covers', f.id);
-  if(cached) return cached.dataUrl;
+  if(coverMemoryCache.has(f.id)){
+    const memo = coverMemoryCache.get(f.id);
+    if(memo) return memo;
+    // memo === null: já tentamos gerar nesta sessão e não deu — mas se o
+    // Drive agora tiver thumbnailLink (ex.: listagem foi atualizada),
+    // ainda vale tentar a via rápida antes de desistir de novo.
+  } else {
+    const cached = await idbGet('covers', f.id);
+    if(cached){ coverMemoryCache.set(f.id, cached.dataUrl); return cached.dataUrl; }
+  }
   // Antes a gente pré-carregava a miniatura numa Image() escondida só
   // pra confirmar que ela existia, e SÓ DEPOIS criava a <img> de verdade
   // (que baixava a mesma miniatura de novo). Isso custava uma rodada
@@ -1515,28 +1556,70 @@ async function resolveCoverFallback(f){
     try{
       const doc = await openComicFromBlob(f, localDl.blob);
       const dataUrl = await toDataUrl(await doc.getPage(0));
-      await idbSet('covers', {id: f.id, dataUrl});
       if(doc.dispose) doc.dispose();
+      cacheResolvedCover(f.id, dataUrl);
       return dataUrl;
     }catch(err){ /* segue tentando gerar via rede abaixo */ }
   }
   const ext = f._ext || guessExt(f);
+  let dataUrl = null;
   try{
     if(ext === 'pdf'){
       // Mesmo truque do leitor: pdf.js busca só os bytes da 1ª página via
-      // range requests, sem baixar o PDF inteiro.
-      const doc = await openComicPDF(driveMediaUrl(f.id), null, Number(f.size)||0);
-      const dataUrl = await toDataUrl(await doc.getPage(0));
-      await idbSet('covers', {id: f.id, dataUrl});
-      doc.dispose();
-      return dataUrl;
-    }
-    if(ext === 'cbz'){
-      const dataUrl = await extractCbzCoverPartial(f);
-      if(dataUrl){ await idbSet('covers', {id: f.id, dataUrl}); return dataUrl; }
+      // range requests, sem baixar o PDF inteiro. Numa fila própria e bem
+      // mais restrita (ver NETWORK_COVER_MAX_CONCURRENT) pra não subir
+      // vários workers do pdf.js ao mesmo tempo e pesar o app.
+      dataUrl = await networkCoverQueue(()=>renderPdfCoverThumb(driveMediaUrl(f.id)));
+    } else if(ext === 'cbz'){
+      dataUrl = await networkCoverQueue(()=>extractCbzCoverPartial(f));
     }
   }catch(err){ /* sem capa mesmo — placeholder some, sem travar a UI */ }
-  return null;
+  cacheResolvedCover(f.id, dataUrl);
+  return dataUrl;
+}
+
+// Guarda o resultado (capa ou null) na memória da sessão pra nunca mais
+// precisar reprocessar essa HQ enquanto o app estiver aberto, e tenta
+// persistir no IndexedDB pra sobreviver a um recarregamento — mas isso é
+// só um bônus: se o idbSet falhar (ex.: cota de armazenamento do
+// aparelho cheia), a capa que acabamos de gerar continua valendo pra
+// sessão atual em vez de ser jogada fora. Antes, uma falha aqui derrubava
+// a resposta inteira e a pessoa via a capa sumir de novo do nada.
+function cacheResolvedCover(id, dataUrl){
+  coverMemoryCache.set(id, dataUrl);
+  if(dataUrl) idbSet('covers', {id, dataUrl}).catch(()=>{});
+}
+
+// Renderização leve de capa a partir de um PDF remoto: só a página 1, em
+// resolução de miniatura (não a qualidade de leitura), e descarta o
+// documento/worker do pdf.js assim que termina — ao contrário do leitor
+// (openComicPDF), que mantém tudo vivo pra navegar entre páginas.
+async function renderPdfCoverThumb(url){
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  const pdf = await pdfjsLib.getDocument({
+    url,
+    rangeChunkSize: 1 << 18,
+    disableAutoFetch: true,
+    disableStream: false,
+    disableRange: false,
+    cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
+    cMapPacked: true
+  }).promise;
+  try{
+    const page = await pdf.getPage(1);
+    const base = page.getViewport({scale: 1});
+    const targetWidth = 400; // mesma resolução usada nas miniaturas do Drive (=s400)
+    const viewport = page.getViewport({scale: targetWidth / base.width});
+    const canvas = document.createElement('canvas');
+    canvas.width = viewport.width; canvas.height = viewport.height;
+    await page.render({canvasContext: canvas.getContext('2d'), viewport}).promise;
+    const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
+    canvas.width = 0; canvas.height = 0;
+    page.cleanup && page.cleanup();
+    return dataUrl;
+  } finally {
+    pdf.destroy();
+  }
 }
 
 // Gera a capa de um CBZ lendo só o essencial pela rede via HTTP Range,
@@ -3041,6 +3124,7 @@ $('#sort-select').addEventListener('change', e=>{
 });
 
 $('#btn-refresh').onclick = ()=>{
+  coverMemoryCache.clear();
   localStorage.removeItem(ARANHA_CACHE_KEY);
   localStorage.removeItem(XMEN_CACHE_KEY);
   localStorage.removeItem(MANGA_CACHE_KEY);
