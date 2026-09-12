@@ -1267,10 +1267,17 @@ const coverObserver = ('IntersectionObserver' in window) ? new IntersectionObser
 // Agenda a capa de `node` pra carregar só quando ele estiver perto da
 // tela. Sem suporte a IntersectionObserver (raríssimo), cai pro
 // comportamento antigo (carrega direto, só respeitando o teto de fila).
+// Se `node` ainda não estiver no DOM (alguns chamadores observam antes
+// de inserir o card), espera o próximo frame — senão o navegador pode
+// nunca calcular a interseção e a capa fica pra sempre sem carregar.
 function lazyLoadCover(node, task){
   node._coverTask = task;
-  if(coverObserver) coverObserver.observe(node);
-  else scheduleCoverTask(task);
+  const start = ()=>{
+    if(coverObserver) coverObserver.observe(node);
+    else scheduleCoverTask(task);
+  };
+  if(node.isConnected) start();
+  else requestAnimationFrame(()=> requestAnimationFrame(start));
 }
 function fmtSize(bytes){
   if(!bytes) return '';
@@ -1522,7 +1529,7 @@ async function cacheCoverFromDoc(fileId, doc){
 
 function buildCoverNode(src, f){
   const img = el('img','cover');
-  img.loading = 'lazy'; img.decoding = 'async'; img.alt = '';
+  img.decoding = 'async'; img.alt = '';
   img.onload = ()=> img.classList.add('loaded');
   if(f){
     img.onerror = async ()=>{
@@ -2523,7 +2530,7 @@ function buildCarouselCard(item, opts){
       }
       if(!src){ if(ph) ph.classList.remove('skeleton'); return; }
       const img = el('img','');
-      img.loading = 'lazy'; img.decoding = 'async'; img.alt = '';
+      img.decoding = 'async'; img.alt = '';
       img.onload = ()=> img.classList.add('loaded');
       img.src = src;
       if(ph) ph.replaceWith(img);
