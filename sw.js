@@ -20,10 +20,13 @@
   entram nesse cache — tudo o mais (Drive, HQs, capas) vai com
   `cache: 'no-store'`, sem deixar resíduo em disco.
 
+  v5: adicionado o worker do pdf.js (pdf.worker.min.js) à casca — sem ele
+  em cache, ler PDF (mesmo um já baixado offline) falhava sem internet.
+
   Sempre que você editar o index.html, aumente o número da versão abaixo
   (v1 -> v2 -> v3...) para forçar os dispositivos a buscarem a versão nova.
 */
-const CACHE_VERSION = 'v4';
+const CACHE_VERSION = 'v5';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
@@ -31,6 +34,10 @@ const APP_SHELL = [
   './manifest.json',
   'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
+  // O worker do pdf.js — sem ele em cache, ler qualquer PDF (inclusive um já
+  // baixado na aba "Baixados") falha assim que o aparelho está offline, com
+  // o erro "Setting up fake worker failed: Cannot load script at: ...".
+  'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js',
   'https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700;800&display=swap'
 ];
 // URLs absolutas resolvidas uma única vez, pra comparar por igualdade exata
