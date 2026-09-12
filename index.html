@@ -382,7 +382,7 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
   display:flex;align-items:center;gap:8px;flex-wrap:wrap;
 }
 .home-section-title .title-logo{
-  height:40px;width:auto;display:inline-block;vertical-align:middle;object-fit:contain;
+  height:32px;width:auto;display:inline-block;vertical-align:middle;object-fit:contain;
 }
 .home-section-title .title-logo.title-logo-lg{
   height:56px;
@@ -811,13 +811,26 @@ async function driveFetchJson(url){
   const MAX_ATTEMPTS = 6;
   for(let attempt=1; attempt<=MAX_ATTEMPTS; attempt++){
     await driveAcquireSlot();
-    let res, errBody;
+    let res, errBody, networkErr;
     try{
       res = await fetch(url);
       if(res.ok) return await res.json();
       errBody = await res.text().catch(()=> '');
+    } catch(e){
+      networkErr = e;
     } finally {
       driveReleaseSlot();
+    }
+    // Falha de rede (sem resposta nenhuma, ex.: sinal fraco/instável no
+    // celular) — antes isso derrubava a chamada na hora, sem tentar de
+    // novo. Agora usa o mesmo backoff das outras tentativas.
+    if(networkErr){
+      if(attempt < MAX_ATTEMPTS){
+        const backoff = Math.min(8000, 400 * (2 ** (attempt-1))) + Math.random()*300;
+        await sleep(backoff);
+        continue;
+      }
+      throw new Error('Falha de rede ao contatar o Google Drive. Verifique sua conexão.');
     }
     const isRateLimit = res.status === 429 ||
       (res.status === 403 && /rateLimitExceeded|userRateLimitExceeded|quotaExceeded/i.test(errBody));
@@ -956,6 +969,44 @@ async function driveFetchBlob(fileId, onProgress, knownSize){
 }
 
 /* ---------------------------------------------------------------------
+   3.5) Cache de páginas com limite (LRU)
+   Antes, cada leitor (CBZ/CBR/PDF) guardava a URL de TODA página já vista
+   num objeto simples, pra sempre, até a HQ ser fechada — em HQs longas
+   (100+ páginas) isso ia acumulando imagens decodificadas/URLs de blob na
+   memória sem limite, podendo deixar o app pesado ou travar em aparelhos
+   com pouca RAM, especialmente no modo de rolagem contínua. Este cache
+   mantém só as páginas mais recentes; ao estourar o limite, libera a mais
+   antiga (revogando a URL de blob, se for o caso) — reabrir uma página
+   liberada só custa recalculá-la de novo, sem afetar a leitura.
+   --------------------------------------------------------------------- */
+function createPageCache(maxEntries){
+  maxEntries = maxEntries || 24;
+  const map = new Map();
+  return {
+    get(i){
+      if(!map.has(i)) return undefined;
+      const entry = map.get(i);
+      map.delete(i); map.set(i, entry); // marca como usado recentemente
+      return entry.value;
+    },
+    set(i, value, isObjectUrl){
+      if(map.has(i)) map.delete(i);
+      map.set(i, {value, isObjectUrl: !!isObjectUrl});
+      while(map.size > maxEntries){
+        const oldestKey = map.keys().next().value;
+        const oldest = map.get(oldestKey);
+        if(oldest && oldest.isObjectUrl){ try{ URL.revokeObjectURL(oldest.value); }catch(e){} }
+        map.delete(oldestKey);
+      }
+    },
+    disposeAll(){
+      map.forEach(entry=>{ if(entry.isObjectUrl){ try{ URL.revokeObjectURL(entry.value); }catch(e){} } });
+      map.clear();
+    }
+  };
+}
+
+/* ---------------------------------------------------------------------
    4) Leitura de arquivos — CBZ / CBR / PDF
    --------------------------------------------------------------------- */
 function naturalSort(a,b){
@@ -968,19 +1019,19 @@ async function openComicCBZ(blob){
     .filter(n=>!zip.files[n].dir && /\.(jpe?g|png|webp|gif)$/i.test(n))
     .sort(naturalSort);
   if(names.length === 0) throw new Error('Nenhuma imagem encontrada dentro do CBZ.');
-  const urlCache = {};
+  const cache = createPageCache(24);
   return {
     pageCount: names.length,
     async getPage(i){
-      if(urlCache[i]) return urlCache[i];
+      const cached = cache.get(i);
+      if(cached) return cached;
       const fileBlob = await zip.files[names[i]].async('blob');
       const url = URL.createObjectURL(fileBlob);
-      urlCache[i] = url;
+      cache.set(i, url, true);
       return url;
     },
     dispose(){
-      Object.values(urlCache).forEach(u=>URL.revokeObjectURL(u));
-      for(const k in urlCache) delete urlCache[k];
+      cache.disposeAll();
     }
   };
 }
@@ -1017,19 +1068,19 @@ async function openComicCBR(blob){
     .filter(f=>/\.(jpe?g|png|webp|gif)$/i.test(f.file.name))
     .sort((a,b)=>naturalSort(a.file.name, b.file.name));
   if(entries.length === 0) throw new Error('Nenhuma imagem encontrada dentro do CBR.');
-  const urlCache = {};
+  const cache = createPageCache(24);
   return {
     pageCount: entries.length,
     async getPage(i){
-      if(urlCache[i]) return urlCache[i];
+      const cached = cache.get(i);
+      if(cached) return cached;
       const f = await entries[i].file.extract();
       const url = URL.createObjectURL(f);
-      urlCache[i] = url;
+      cache.set(i, url, true);
       return url;
     },
     dispose(){
-      Object.values(urlCache).forEach(u=>URL.revokeObjectURL(u));
-      for(const k in urlCache) delete urlCache[k];
+      cache.disposeAll();
     }
   };
 }
@@ -1059,11 +1110,12 @@ async function openComicPDF(source, onProgress, knownSize){
     };
   }
   const pdf = await loadingTask.promise;
-  const urlCache = {};
+  const cache = createPageCache(24);
   return {
     pageCount: pdf.numPages,
     async getPage(i){
-      if(urlCache[i]) return urlCache[i];
+      const cached = cache.get(i);
+      if(cached) return cached;
       const page = await pdf.getPage(i+1);
       const viewport = page.getViewport({scale: 2});
       const canvas = document.createElement('canvas');
@@ -1072,11 +1124,11 @@ async function openComicPDF(source, onProgress, knownSize){
       const url = canvas.toDataURL('image/jpeg', 0.9);
       canvas.width = 0; canvas.height = 0;
       page.cleanup && page.cleanup();
-      urlCache[i] = url;
+      cache.set(i, url, false);
       return url;
     },
     dispose(){
-      for(const k in urlCache) delete urlCache[k];
+      cache.disposeAll();
       pdf.destroy();
     }
   };
@@ -1124,8 +1176,16 @@ function toast(msg){
 async function loadConfig(){
   const raw = localStorage.getItem(CONFIG_KEY);
   if(raw){
-    CONFIG = JSON.parse(raw);
-    return true;
+    try{
+      CONFIG = JSON.parse(raw);
+      return true;
+    }catch(e){
+      // Configuração corrompida (ex.: gravação incompleta) travava o boot
+      // inteiro do app numa tela branca, sem chance de reconfigurar. Agora
+      // descarta o valor inválido e volta pra tela de configuração.
+      console.warn('[PlanetaHQ] Configuração salva estava corrompida, resetando.', e);
+      localStorage.removeItem(CONFIG_KEY);
+    }
   }
   return false;
 }
@@ -1436,12 +1496,15 @@ const DEFAULT_FOLDER_COVER_OVERRIDES = {
   [normalizeStr('MANGÁS')]: 'https://i.postimg.cc/BZXd5Jgr/dragon-ball-z-vol-1-sj-edition.jpg',
   [normalizeStr('QUADRINHOS VARIADOS')]: 'https://i.postimg.cc/rwK0M0Nq/IMG-20260911-230542.jpg'
 };
+let folderCoverOverridesCache = null;
 function loadFolderCoverOverrides(){
+  if(folderCoverOverridesCache) return folderCoverOverridesCache;
   try{
     const raw = localStorage.getItem(FOLDER_COVER_OVERRIDES_KEY);
     const stored = raw ? JSON.parse(raw) : {};
-    return Object.assign({}, DEFAULT_FOLDER_COVER_OVERRIDES, stored);
-  }catch(e){ return DEFAULT_FOLDER_COVER_OVERRIDES; }
+    folderCoverOverridesCache = Object.assign({}, DEFAULT_FOLDER_COVER_OVERRIDES, stored);
+  }catch(e){ folderCoverOverridesCache = DEFAULT_FOLDER_COVER_OVERRIDES; }
+  return folderCoverOverridesCache;
 }
 function getFolderCoverOverride(name){
   if(!name) return null;
@@ -2351,30 +2414,39 @@ function buildHomeSection(titleHtml, items, builder){
   return section;
 }
 
+// Estado de arrasto compartilhado por todos os carrosséis — evita ter um
+// listener de 'pointerup' na window por carrossel (o que antes acumulava
+// pra sempre a cada vez que a home era repintada, prendendo elementos
+// antigos na memória e deixando o app cada vez mais pesado com o tempo).
+let carouselDragState = null;
+window.addEventListener('pointerup', ()=>{
+  if(carouselDragState){
+    carouselDragState.carousel.classList.remove('dragging');
+    carouselDragState = null;
+  }
+});
 function attachCarouselDrag(carousel){
   // Arrastar com o mouse é só um recurso extra de desktop. Em telas de toque
   // o navegador já rola nativamente e já gera cliques nativos — por isso
   // ignoramos totalmente interações do tipo 'touch'/'pen' aqui, evitando que
   // qualquer tremido do dedo seja interpretado como "arrasto" e cancele o clique.
-  let isDown=false, startX=0, startScroll=0, moved=false;
+  let startX=0, startScroll=0;
   carousel.addEventListener('pointerdown', e=>{
     if(e.pointerType && e.pointerType !== 'mouse') return;
-    isDown=true; moved=false;
+    carouselDragState = {carousel, moved:false};
     startX = e.clientX; startScroll = carousel.scrollLeft;
     carousel.classList.add('dragging');
   });
-  window.addEventListener('pointerup', e=>{
-    if(!isDown) return;
-    isDown=false; carousel.classList.remove('dragging');
-  });
   carousel.addEventListener('pointermove', e=>{
-    if(!isDown || (e.pointerType && e.pointerType !== 'mouse')) return;
+    if(!carouselDragState || carouselDragState.carousel !== carousel || (e.pointerType && e.pointerType !== 'mouse')) return;
     const dx = e.clientX - startX;
-    if(Math.abs(dx) > 4) moved = true;
+    if(Math.abs(dx) > 4) carouselDragState.moved = true;
     carousel.scrollLeft = startScroll - dx;
   });
   carousel.addEventListener('click', e=>{
-    if(moved){ e.preventDefault(); e.stopPropagation(); moved=false; }
+    if(carouselDragState && carouselDragState.carousel === carousel && carouselDragState.moved){
+      e.preventDefault(); e.stopPropagation(); carouselDragState.moved = false;
+    }
   }, true);
 }
 
