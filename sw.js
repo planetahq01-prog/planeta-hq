@@ -5,10 +5,19 @@
   sendo resolvida pelo próprio app via IndexedDB — este arquivo não mexe
   nisso, só cuida de fazer a tela inicial carregar offline.
 
+  IMPORTANTE (v2): antes, requisições de HQs/capas/API do Drive não eram
+  interceptadas por este arquivo, então o navegador aplicava as regras de
+  cache HTTP padrão dele a essas respostas — na prática, guardando em disco
+  os PDFs/CBZs abertos (mesmo sem "Baixar"), o que fazia o armazenamento do
+  app crescer sem parar com o uso. Agora essas requisições são explicitamente
+  refeitas com `cache: 'no-store'`, então nunca ficam gravadas no disco só
+  por terem sido abertas para leitura — só o que o app salva de propósito no
+  IndexedDB (a aba "Baixados") permanece.
+
   Sempre que você editar o index.html, aumente o número da versão abaixo
   (v1 -> v2 -> v3...) para forçar os dispositivos a buscarem a versão nova.
 */
-const CACHE_VERSION = 'v1';
+const CACHE_VERSION = 'v2';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
@@ -77,7 +86,16 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Tudo o mais (chamadas à API do Google Drive, capas, etc.) segue direto
-  // pra rede sem passar pelo service worker — não queremos servir dados
-  // antigos da sua biblioteca a partir de um cache.
+  // Tudo o mais (chamadas à API do Google Drive, conteúdo de HQs, capas,
+  // etc.): segue pra rede, mas agora de forma explícita com
+  // `cache: 'no-store'`, pra garantir que o navegador nunca grave esses
+  // bytes no cache HTTP em disco. Isso é o que impedia HQs abertas (não
+  // baixadas) de ficarem ocupando espaço pra sempre — não queremos servir
+  // dados antigos da sua biblioteca a partir de um cache, nem deixar
+  // resíduo em disco de algo que você só abriu pra ler.
+  event.respondWith(
+    fetch(req, { cache: 'no-store' }).catch((err) => {
+      throw err;
+    })
+  );
 });

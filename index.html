@@ -140,6 +140,8 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
   gap:10px;
   padding:12px;
 }
+.downloads-usage{padding:12px 16px 0;}
+.downloads-usage .bar-label{font-size:12px;color:var(--text-muted);}
 .card{
   background:var(--paper);color:var(--ink);
   display:flex;flex-direction:column;overflow:hidden;
@@ -599,6 +601,7 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 
   <!-- ===================== BAIXADOS ===================== -->
   <div id="view-downloads" class="view hidden">
+    <div id="downloads-usage" class="downloads-usage"></div>
     <div id="grid-downloads" class="grid"></div>
   </div>
 
@@ -843,6 +846,16 @@ const DB_NAME = 'planetahq_db';
 const DB_VERSION = 4;
 let dbPromise = null;
 
+// Ponto único de gravação em 'downloads'. Sem teto: o que a pessoa baixa de
+// propósito (aba "Baixados") fica salvo integralmente, sem limite de
+// tamanho — o único problema original era HQs NÃO baixadas ocupando espaço
+// via cache HTTP do navegador (corrigido no service worker e nos fetch()
+// com cache:'no-store'), não os downloads em si.
+async function saveDownloadWithCap(fileMeta, blob, ext, pathStr){
+  const size = Number(fileMeta.size) || blob.size || 0;
+  await idbSet('downloads', {id:fileMeta.id, name:fileMeta.name, size, ext, mimeType:fileMeta.mimeType, path: pathStr, blob, savedAt: Date.now()});
+}
+
 function openDB(){
   if(dbPromise) return dbPromise;
   dbPromise = new Promise((resolve, reject)=>{
@@ -1080,7 +1093,11 @@ async function driveFetchBlob(fileId, onProgress, knownSize){
   const url = driveMediaUrl(fileId);
   let res;
   try{
-    res = await fetch(url);
+    // cache:'no-store' — nunca deixar o navegador guardar em disco os bytes
+    // de uma HQ só porque ela foi aberta/baixada; quem decide o que fica
+    // salvo é exclusivamente o idbSet('downloads', ...) feito por quem chama
+    // esta função, não o cache HTTP do navegador.
+    res = await fetch(url, {cache:'no-store'});
   }catch(networkErr){
     if(CONFIG.proxyUrl){
       throw new Error('Não foi possível contatar o proxy configurado. Verifique a URL nas configurações.');
@@ -1722,7 +1739,7 @@ function renderComicCard(f){
     try{
       const blob = await driveFetchBlob(f.id, p=>{ dlBtn.innerHTML = `<span>${Math.round(p*100)}%</span>`; }, Number(f.size)||0);
       const ext = f._ext || guessExt(f);
-      await idbSet('downloads', {id:f.id, name:f.name, size:f.size, ext, mimeType:f.mimeType, path: state.path.map(p=>p.name).join(' / '), blob, savedAt: Date.now()});
+      await saveDownloadWithCap(f, blob, ext, state.path.map(p=>p.name).join(' / '));
       dlBtn.innerHTML = `${ICONS.check}<span>Offline</span>`; dlBtn.classList.add('done');
       toast('Disponível offline');
       openComicFromBlob(f, blob).then(doc=>{ cacheCoverFromDoc(f.id, doc); doc.dispose && doc.dispose(); }).catch(()=>{});
@@ -1865,7 +1882,7 @@ async function renderPdfCoverThumb(url){
 // (raríssimo em CBZ) — nesses casos desiste silenciosamente.
 async function fetchRange(url, start, end){
   const headers = { Range: start < 0 ? `bytes=${start}` : `bytes=${start}-${end}` };
-  const res = await fetch(url, {headers});
+  const res = await fetch(url, {headers, cache:'no-store'});
   if(!res.ok && res.status !== 206) throw new Error('range fetch falhou: ' + res.status);
   return new Uint8Array(await res.arrayBuffer());
 }
@@ -2247,9 +2264,16 @@ async function runSearch(term){
 /* ---------------------------------------------------------------------
    7) Baixados
    --------------------------------------------------------------------- */
+function renderDownloadsUsage(totalBytes){
+  const box = $('#downloads-usage');
+  if(!box) return;
+  box.innerHTML = `<div class="bar-label">${fmtSize(totalBytes)} usados em HQs baixadas (sem limite)</div>`;
+}
+
 async function renderDownloads(){
   const grid = $('#grid-downloads');
   const items = (await idbAll('downloads')).filter(it=>(it.ext||guessExt(it))!=='cbr');
+  renderDownloadsUsage(items.reduce((sum,it)=>sum+(Number(it.size)||0),0));
   grid.innerHTML = '';
   if(items.length===0){
     grid.innerHTML = `<div class="empty-state">${ICONS.download}<h3>Nada baixado ainda</h3>Toque em "Baixar" em qualquer HQ da biblioteca para ler offline.</div>`;
@@ -2697,7 +2721,7 @@ $('#btn-download-reader').onclick = async ()=>{
     try{
       const blob = await driveFetchBlob(meta.id);
       const ext = meta._ext || guessExt(meta) || meta.name.split('.').pop().toLowerCase();
-      await idbSet('downloads', {id:meta.id, name:meta.name, size: meta.size||0, ext, mimeType: meta.mimeType, path: state.path.map(p=>p.name).join(' / '), blob, savedAt: Date.now()});
+      await saveDownloadWithCap(meta, blob, ext, state.path.map(p=>p.name).join(' / '));
       toast('Disponível offline');
     }catch(err){ toast('Erro ao baixar: '+err.message); }
   }
