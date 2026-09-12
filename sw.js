@@ -17,7 +17,7 @@
   Sempre que você editar o index.html, aumente o número da versão abaixo
   (v1 -> v2 -> v3...) para forçar os dispositivos a buscarem a versão nova.
 */
-const CACHE_VERSION = 'v2';
+const CACHE_VERSION = 'v3';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [

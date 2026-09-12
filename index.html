@@ -1761,7 +1761,11 @@ async function resolveCoverSrc(f){
     // ainda vale tentar a via rápida antes de desistir de novo.
   } else {
     const cached = await idbGet('covers', f.id);
-    if(cached){ coverMemoryCache.set(f.id, cached.dataUrl); return cached.dataUrl; }
+    if(cached){
+      coverMemoryCache.set(f.id, cached.dataUrl);
+      idbSet('covers', {id: f.id, dataUrl: cached.dataUrl, ts: Date.now()}).catch(()=>{}); // marca uso recente (LRU)
+      return cached.dataUrl;
+    }
   }
   // Antes a gente pré-carregava a miniatura numa Image() escondida só
   // pra confirmar que ela existia, e SÓ DEPOIS criava a <img> de verdade
@@ -1838,9 +1842,50 @@ async function resolveCoverFallback(f){
 // aparelho cheia), a capa que acabamos de gerar continua valendo pra
 // sessão atual em vez de ser jogada fora. Antes, uma falha aqui derrubava
 // a resposta inteira e a pessoa via a capa sumir de novo do nada.
+// Teto do cache de capas geradas (armazenadas como dataURL no IndexedDB,
+// nas gavetas 'covers' e 'folderCovers'). Diferente dos "Baixados" (sem
+// limite, por escolha da pessoa), este é um cache técnico interno que o
+// app cria sozinho só de a pessoa navegar pela biblioteca — sem teto, ele
+// cresce pra sempre porque nunca se apaga uma capa antiga sozinho. Mantido
+// bem menor que o tamanho de qualquer HQ de verdade, pra nunca pesar.
+const MAX_COVERS_BYTES = 150 * 1024 * 1024; // ~150MB
+
+// Evita rodar a limpeza a cada capa salva (custaria uma varredura da
+// gaveta inteira toda hora); agenda uma única passada por "rajada" de
+// gravações (ex.: rolar rapidamente por uma pasta cheia de HQs).
+let coversTrimScheduled = false;
+function scheduleCoversTrim(){
+  if(coversTrimScheduled) return;
+  coversTrimScheduled = true;
+  setTimeout(async ()=>{
+    coversTrimScheduled = false;
+    try{ await trimCoversCache(); }catch(e){}
+  }, 4000);
+}
+
+// Remove as capas menos recentemente usadas (por `ts`) até voltar a caber
+// no teto. `ts` é atualizado tanto ao salvar quanto ao reaproveitar uma
+// capa já salva (ver resolveCoverSrc), então o que sai primeiro é sempre
+// o que a pessoa não vê/abre há mais tempo — não necessariamente o mais
+// antigo em termos de data de criação.
+async function trimCoversCache(){
+  const items = await idbAll('covers');
+  let total = items.reduce((s,it)=>s + (it.dataUrl ? it.dataUrl.length : 0), 0);
+  if(total <= MAX_COVERS_BYTES) return;
+  items.sort((a,b)=>(a.ts||0)-(b.ts||0));
+  for(const it of items){
+    if(total <= MAX_COVERS_BYTES) break;
+    await idbDelete('covers', it.id);
+    total -= (it.dataUrl ? it.dataUrl.length : 0);
+  }
+}
+
 function cacheResolvedCover(id, dataUrl){
   coverMemoryCache.set(id, dataUrl);
-  if(dataUrl) idbSet('covers', {id, dataUrl}).catch(()=>{});
+  if(dataUrl){
+    idbSet('covers', {id, dataUrl, ts: Date.now()}).catch(()=>{});
+    scheduleCoversTrim();
+  }
 }
 
 // Renderização leve de capa a partir de um PDF remoto: só a página 1, em
@@ -1958,7 +2003,8 @@ async function cacheCoverFromDoc(fileId, doc){
     const existing = await idbGet('covers', fileId);
     if(existing) return;
     const dataUrl = await toDataUrl(await doc.getPage(0));
-    await idbSet('covers', {id: fileId, dataUrl});
+    await idbSet('covers', {id: fileId, dataUrl, ts: Date.now()});
+    scheduleCoversTrim();
   }catch(e){ /* melhor esforço — não afeta a leitura */ }
 }
 
@@ -3510,9 +3556,26 @@ boot();
 
 if('serviceWorker' in navigator){
   window.addEventListener('load', ()=>{
-    navigator.serviceWorker.register('./sw.js').catch(err=>{
+    navigator.serviceWorker.register('./sw.js').then(reg=>{
+      // Força checar se há uma versão nova agora, em vez de esperar o
+      // navegador decidir sozinho quando checar de novo — importante
+      // pra correções de armazenamento (como esta) valerem imediatamente,
+      // sem depender da pessoa fechar e reabrir o app manualmente.
+      reg.update().catch(()=>{});
+    }).catch(err=>{
       console.warn('Falha ao registrar service worker (app pode não funcionar offline):', err);
     });
+  });
+  // Quando uma versão nova do service worker assume o controle da página
+  // (após instalar e ativar), recarrega uma única vez pra já rodar sob a
+  // versão nova — sem isso, a aba aberta continuaria usando as regras de
+  // rede da versão antiga até a pessoa fechar e reabrir o app por conta
+  // própria.
+  let swRefreshed = false;
+  navigator.serviceWorker.addEventListener('controllerchange', ()=>{
+    if(swRefreshed) return;
+    swRefreshed = true;
+    location.reload();
   });
 }
 </script>
