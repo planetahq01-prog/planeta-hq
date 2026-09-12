@@ -1499,23 +1499,122 @@ async function resolveCoverSrc(f){
   return resolveCoverFallback(f);
 }
 
-// Sem miniatura do Drive (ou ela falhou ao carregar): última tentativa é
-// gerar a capa a partir do arquivo já baixado localmente, se houver. NUNCA
-// baixa o arquivo inteiro só pra gerar capa — isso disputava banda com
-// downloads/leituras de verdade e deixava tudo lento. A capa real fica
-// pronta sozinha na primeira vez que a HQ é aberta ou baixada (ver
-// cacheCoverFromDoc), já que nesse caso o arquivo é buscado de qualquer
-// forma.
+// Sem miniatura do Drive (ou ela falhou ao carregar): primeiro tenta achar
+// a HQ já baixada localmente; se não tiver, gera a capa buscando só o
+// necessário da rede (nunca o arquivo inteiro — ver funções abaixo).
+//
+// Bug corrigido: o thumbnailLink que o Drive devolve na listagem é
+// conhecido por falhar (403/404) justamente no cenário deste app —
+// acesso via API key, sem OAuth/sessão logada (ver
+// issuetracker.google.com/issues/229184403 e /issues/188567656). Como o
+// único fallback antes exigia um download local já existente, HQs em
+// PDF/CBZ que a pessoa nunca tinha aberto ficavam sem capa alguma.
 async function resolveCoverFallback(f){
   const localDl = await idbGet('downloads', f.id);
-  if(!localDl) return null;
+  if(localDl){
+    try{
+      const doc = await openComicFromBlob(f, localDl.blob);
+      const dataUrl = await toDataUrl(await doc.getPage(0));
+      await idbSet('covers', {id: f.id, dataUrl});
+      if(doc.dispose) doc.dispose();
+      return dataUrl;
+    }catch(err){ /* segue tentando gerar via rede abaixo */ }
+  }
+  const ext = f._ext || guessExt(f);
   try{
-    const doc = await openComicFromBlob(f, localDl.blob);
-    const dataUrl = await toDataUrl(await doc.getPage(0));
-    await idbSet('covers', {id: f.id, dataUrl});
-    if(doc.dispose) doc.dispose();
-    return dataUrl;
-  }catch(err){ return null; }
+    if(ext === 'pdf'){
+      // Mesmo truque do leitor: pdf.js busca só os bytes da 1ª página via
+      // range requests, sem baixar o PDF inteiro.
+      const doc = await openComicPDF(driveMediaUrl(f.id), null, Number(f.size)||0);
+      const dataUrl = await toDataUrl(await doc.getPage(0));
+      await idbSet('covers', {id: f.id, dataUrl});
+      doc.dispose();
+      return dataUrl;
+    }
+    if(ext === 'cbz'){
+      const dataUrl = await extractCbzCoverPartial(f);
+      if(dataUrl){ await idbSet('covers', {id: f.id, dataUrl}); return dataUrl; }
+    }
+  }catch(err){ /* sem capa mesmo — placeholder some, sem travar a UI */ }
+  return null;
+}
+
+// Gera a capa de um CBZ lendo só o essencial pela rede via HTTP Range,
+// sem baixar o zip inteiro: 1) fim do arquivo pra achar o diretório
+// central (EOCD), 2) o diretório central em si (pra achar a 1ª imagem
+// em ordem natural), 3) só os bytes daquela imagem. Não cobre ZIP64
+// (raríssimo em CBZ) — nesses casos desiste silenciosamente.
+async function fetchRange(url, start, end){
+  const headers = { Range: start < 0 ? `bytes=${start}` : `bytes=${start}-${end}` };
+  const res = await fetch(url, {headers});
+  if(!res.ok && res.status !== 206) throw new Error('range fetch falhou: ' + res.status);
+  return new Uint8Array(await res.arrayBuffer());
+}
+function findEOCD(buf){
+  for(let i = buf.length - 22; i >= 0; i--){
+    if(buf[i]===0x50 && buf[i+1]===0x4b && buf[i+2]===0x05 && buf[i+3]===0x06) return i;
+  }
+  return -1;
+}
+async function extractCbzCoverPartial(f){
+  const url = driveMediaUrl(f.id);
+  const size = Number(f.size) || 0;
+  if(!size) return null;
+
+  const tailSize = Math.min(size, 65557); // tamanho máximo teórico do EOCD + comentário
+  const tail = await fetchRange(url, -tailSize);
+  const eocdOffset = findEOCD(tail);
+  if(eocdOffset === -1) return null;
+  const eocd = new DataView(tail.buffer, tail.byteOffset + eocdOffset, 22);
+  const cdSize = eocd.getUint32(12, true);
+  const cdOffset = eocd.getUint32(16, true);
+  if(cdOffset === 0xFFFFFFFF || cdSize === 0xFFFFFFFF) return null; // zip64, não suportado
+
+  const cd = await fetchRange(url, cdOffset, cdOffset + cdSize - 1);
+  const cdView = new DataView(cd.buffer, cd.byteOffset, cd.byteLength);
+  const decoder = new TextDecoder();
+  const entries = [];
+  let p = 0;
+  while(p + 46 <= cd.length && cdView.getUint32(p, true) === 0x02014b50){
+    const method = cdView.getUint16(p+10, true);
+    const compSize = cdView.getUint32(p+20, true);
+    const nameLen = cdView.getUint16(p+28, true);
+    const extraLen = cdView.getUint16(p+30, true);
+    const commentLen = cdView.getUint16(p+32, true);
+    const localOffset = cdView.getUint32(p+42, true);
+    const name = decoder.decode(cd.subarray(p+46, p+46+nameLen));
+    if(/\.(jpe?g|png|webp|gif)$/i.test(name)) entries.push({name, method, compSize, localOffset});
+    p += 46 + nameLen + extraLen + commentLen;
+  }
+  if(entries.length === 0) return null;
+  entries.sort((a,b)=>naturalSort(a.name, b.name));
+  const first = entries[0];
+  if(first.localOffset === 0xFFFFFFFF) return null;
+
+  const margin = 512; // folga pra nome+campo extra do cabeçalho local
+  const chunkEnd = Math.min(size-1, first.localOffset + 30 + margin + first.compSize);
+  const chunk = await fetchRange(url, first.localOffset, chunkEnd);
+  const lv = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+  if(lv.getUint32(0, true) !== 0x04034b50) return null;
+  const nameLen2 = lv.getUint16(26, true);
+  const extraLen2 = lv.getUint16(28, true);
+  const dataStart = 30 + nameLen2 + extraLen2;
+  const compData = chunk.subarray(dataStart, dataStart + first.compSize);
+
+  let imgBytes;
+  if(first.method === 0){
+    imgBytes = compData;
+  } else if(first.method === 8){
+    const stream = new Blob([compData]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+    imgBytes = new Uint8Array(await new Response(stream).arrayBuffer());
+  } else {
+    return null; // método de compressão incomum em CBZ, não tratado
+  }
+  const mime = /\.png$/i.test(first.name) ? 'image/png'
+    : /\.webp$/i.test(first.name) ? 'image/webp'
+    : /\.gif$/i.test(first.name) ? 'image/gif'
+    : 'image/jpeg';
+  return await toDataUrl(URL.createObjectURL(new Blob([imgBytes], {type: mime})));
 }
 
 async function cacheCoverFromDoc(fileId, doc){
