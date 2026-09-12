@@ -152,11 +152,18 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 }
 .card .cover{
   width:100%;aspect-ratio:2/3;object-fit:cover;background:var(--ink-elevated);display:block;
+  opacity:0;
 }
+.card .cover.loaded{opacity:1;transition:opacity .28s ease;}
 .card .cover-placeholder{
   width:100%;aspect-ratio:2/3;background:linear-gradient(160deg,#efe8d4,var(--paper));
   display:flex;flex-direction:column;align-items:center;justify-content:center;gap:6px;
   color:var(--ink);opacity:.55;padding:10px;
+}
+.card .cover-placeholder.skeleton{
+  color:transparent;
+  background:linear-gradient(100deg,#e4dcc4 25%,#f5efdd 45%,#e4dcc4 65%);
+  background-size:200% 100%;animation:shimmer 1.3s infinite linear;
 }
 .card .cover-placeholder svg{width:28px;height:28px;opacity:.7;}
 .card .cover-placeholder .ph-name{
@@ -410,7 +417,9 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 @media(hover:hover){ .carousel-card:hover .cc-cover{transform:translateY(-3px);} }
 .carousel-card .cc-cover img{
   position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;
+  opacity:0;
 }
+.carousel-card .cc-cover img.loaded{opacity:1;transition:opacity .28s ease;}
 .carousel-card .cc-name{
   font-size:12px;font-weight:600;line-height:1.3;color:var(--paper);
   display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;
@@ -422,6 +431,11 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 .carousel-card .cc-placeholder{
   position:absolute;inset:0;display:flex;align-items:center;justify-content:center;
   color:var(--paper-dim);opacity:.55;
+}
+.carousel-card .cc-placeholder.skeleton{
+  color:transparent;
+  background:linear-gradient(100deg, var(--ink-elevated) 25%, rgba(255,255,255,.08) 45%, var(--ink-elevated) 65%);
+  background-size:200% 100%;animation:shimmer 1.3s infinite linear;
 }
 .carousel-card .cc-placeholder svg{width:30px;height:30px;}
 .carousel .carousel-end{
@@ -594,7 +608,7 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 /* =========================================================================
    PLANETA HQ — app de leitura de HQs digitais
    Home com seções em carrossel horizontal (Continuar lendo, Coleção
-   Homem-Aranha, Recomendados).
+   Homem-Aranha, Coleção X-Men, Coleção Mangás, Recomendados).
    ========================================================================= */
 
 /* ---------------------------------------------------------------------
@@ -1217,6 +1231,47 @@ function runLimited(items, limit, worker){
   });
   return Promise.all(runners);
 }
+
+/* ---------------------------------------------------------------------
+   6.05) Carregamento preguiçoso de capas
+   Antes, toda capa de uma pasta (mesmo fora da tela) começava a carregar
+   na hora, disputando banda/CPU com o que o usuário via de verdade. Agora
+   só disparamos a resolução da capa quando o card chega perto da tela
+   (IntersectionObserver), e mesmo assim com um teto global de conexões
+   simultâneas — então telas com muita coisa abrem mais rápido e gastam
+   bem menos dado.
+   --------------------------------------------------------------------- */
+const COVER_MAX_CONCURRENT = 6;
+let coverActiveCount = 0;
+const coverQueue = [];
+function pumpCoverQueue(){
+  while(coverActiveCount < COVER_MAX_CONCURRENT && coverQueue.length){
+    const task = coverQueue.shift();
+    coverActiveCount++;
+    Promise.resolve().then(task).catch(()=>{}).finally(()=>{
+      coverActiveCount--; pumpCoverQueue();
+    });
+  }
+}
+function scheduleCoverTask(task){ coverQueue.push(task); pumpCoverQueue(); }
+
+const coverObserver = ('IntersectionObserver' in window) ? new IntersectionObserver((entries)=>{
+  entries.forEach(entry=>{
+    if(!entry.isIntersecting) return;
+    coverObserver.unobserve(entry.target);
+    const task = entry.target._coverTask;
+    if(task) scheduleCoverTask(task);
+  });
+}, {rootMargin:'500px 200px', threshold:0.01}) : null;
+
+// Agenda a capa de `node` pra carregar só quando ele estiver perto da
+// tela. Sem suporte a IntersectionObserver (raríssimo), cai pro
+// comportamento antigo (carrega direto, só respeitando o teto de fila).
+function lazyLoadCover(node, task){
+  node._coverTask = task;
+  if(coverObserver) coverObserver.observe(node);
+  else scheduleCoverTask(task);
+}
 function fmtSize(bytes){
   if(!bytes) return '';
   const mb = bytes/1024/1024;
@@ -1348,8 +1403,8 @@ async function renderLibrary(folderId, forceRefresh){
       grid.appendChild(card);
       return {card, f};
     });
-    runLimited(folderCards, 2, ({card, f})=>attachFolderCoverAsync(card, f));
-    runLimited(comicCards, 3, ({card, f})=>attachCoverAsync(card, f));
+    folderCards.forEach(({card, f})=>lazyLoadCover(card, ()=>attachFolderCoverAsync(card, f)));
+    comicCards.forEach(({card, f})=>lazyLoadCover(card, ()=>attachCoverAsync(card, f)));
     // Confere em segundo plano (baixa prioridade, sem travar nada) quais
     // pastas recém-vistas realmente têm conteúdo, e some com as vazias.
     runLimited(folderCards.filter(({f})=>getCachedFolderOk(f.id)===undefined), 2, async ({card, f})=>{
@@ -1366,7 +1421,7 @@ function renderFolderCard(f, opts){
   const card = el('div','card folder');
   card.dataset.id = f.id;
   const cover = el('div','folder-cover');
-  const ph = elHtml('div','cover-placeholder', ICONS.folder);
+  const ph = elHtml('div','cover-placeholder skeleton', ICONS.folder);
   cover.appendChild(ph);
   card.appendChild(cover);
   card.appendChild(el('div','label', f.name));
@@ -1377,7 +1432,7 @@ function renderFolderCard(f, opts){
 function renderComicCard(f){
   const card = el('div','card comic');
   card.dataset.id = f.id;
-  const ph = elHtml('div','cover-placeholder', `${ICONS.page}<span class="ph-name">${escapeHtml(f.name.split('.')[0].slice(0,40))}</span>`);
+  const ph = elHtml('div','cover-placeholder skeleton', `${ICONS.page}<span class="ph-name">${escapeHtml(f.name.split('.')[0].slice(0,40))}</span>`);
   card.appendChild(ph);
   card.appendChild(buildFavButton(f));
   card.appendChild(el('div','label', f.name.replace(/\.(pdf|cbz|cbr)$/i,'')));
@@ -1428,33 +1483,32 @@ function renderComicCard(f){
 async function resolveCoverSrc(f){
   const cached = await idbGet('covers', f.id);
   if(cached) return cached.dataUrl;
-  if(f.thumbnailLink){
-    const bigger = f.thumbnailLink.replace(/=s\d+$/, '=s400');
-    const ok = await new Promise(resolve=>{
-      const img = new Image();
-      img.onload = ()=>resolve(true);
-      img.onerror = ()=>resolve(false);
-      img.src = bigger;
-    });
-    if(ok) return bigger;
-  }
-  // Se não achamos capa pronta (nem no cache, nem miniatura do Drive), NÃO
-  // baixamos o arquivo inteiro só pra gerar uma capa — isso disputava banda
-  // com downloads/leituras de verdade e deixava tudo lento. A capa real
-  // fica pronta sozinha na primeira vez que a HQ é aberta ou baixada
-  // (ver cacheCoverFromDoc), já que nesse caso o arquivo é buscado de
-  // qualquer forma.
+  // Antes a gente pré-carregava a miniatura numa Image() escondida só
+  // pra confirmar que ela existia, e SÓ DEPOIS criava a <img> de verdade
+  // (que baixava a mesma miniatura de novo). Isso custava uma rodada
+  // inteira de rede à toa. Agora devolvemos a URL direto — se ela falhar,
+  // quem chama trata isso no onerror da própria <img> (ver buildCoverNode).
+  if(f.thumbnailLink) return f.thumbnailLink.replace(/=s\d+$/, '=s400');
+  return resolveCoverFallback(f);
+}
+
+// Sem miniatura do Drive (ou ela falhou ao carregar): última tentativa é
+// gerar a capa a partir do arquivo já baixado localmente, se houver. NUNCA
+// baixa o arquivo inteiro só pra gerar capa — isso disputava banda com
+// downloads/leituras de verdade e deixava tudo lento. A capa real fica
+// pronta sozinha na primeira vez que a HQ é aberta ou baixada (ver
+// cacheCoverFromDoc), já que nesse caso o arquivo é buscado de qualquer
+// forma.
+async function resolveCoverFallback(f){
   const localDl = await idbGet('downloads', f.id);
-  if(localDl){
-    try{
-      const doc = await openComicFromBlob(f, localDl.blob);
-      const dataUrl = await toDataUrl(await doc.getPage(0));
-      await idbSet('covers', {id: f.id, dataUrl});
-      if(doc.dispose) doc.dispose();
-      return dataUrl;
-    }catch(err){ return null; }
-  }
-  return null;
+  if(!localDl) return null;
+  try{
+    const doc = await openComicFromBlob(f, localDl.blob);
+    const dataUrl = await toDataUrl(await doc.getPage(0));
+    await idbSet('covers', {id: f.id, dataUrl});
+    if(doc.dispose) doc.dispose();
+    return dataUrl;
+  }catch(err){ return null; }
 }
 
 async function cacheCoverFromDoc(fileId, doc){
@@ -1466,27 +1520,31 @@ async function cacheCoverFromDoc(fileId, doc){
   }catch(e){ /* melhor esforço — não afeta a leitura */ }
 }
 
-function buildCoverNode(src, folderMode){
-  if(folderMode){
-    const wrap = el('div','folder-cover-wrap');
-    const bg = el('img','folder-cover-bg'); bg.src = src; bg.alt = '';
-    const fg = el('img','folder-cover-fg'); fg.src = src; fg.alt = '';
-    wrap.appendChild(bg); wrap.appendChild(fg);
-    return wrap;
+function buildCoverNode(src, f){
+  const img = el('img','cover');
+  img.loading = 'lazy'; img.decoding = 'async'; img.alt = '';
+  img.onload = ()=> img.classList.add('loaded');
+  if(f){
+    img.onerror = async ()=>{
+      img.onerror = null;
+      const fallback = await resolveCoverFallback(f);
+      if(fallback) img.src = fallback;
+      else img.remove();
+    };
   }
-  const img = el('img','cover'); img.src = src;
+  img.src = src;
   return img;
 }
 
-async function attachCoverToEl(placeholder, f, folderMode){
+async function attachCoverToEl(placeholder, f){
   const src = await resolveCoverSrc(f);
-  if(!src) return;
-  const node = buildCoverNode(src, folderMode);
+  if(!src){ placeholder.classList.remove('skeleton'); return; }
+  const node = buildCoverNode(src, f);
   if(placeholder.isConnected) placeholder.replaceWith(node);
 }
 async function attachCoverAsync(card, f){
   const placeholder = card.querySelector('.cover-placeholder');
-  await attachCoverToEl(placeholder, f, false);
+  await attachCoverToEl(placeholder, f);
 }
 
 async function resolveFolderCoverFile(folderId, depth){
@@ -1579,15 +1637,15 @@ async function attachFolderCoverAsync(card, folderObj){
   const override = getFolderCoverOverride(folderObj.name);
   if(override){
     card.classList.add('has-cover');
-    if(placeholder.isConnected) placeholder.replaceWith(buildCoverNode(override, false));
+    if(placeholder.isConnected) placeholder.replaceWith(buildCoverNode(override));
     return;
   }
   try{
     const file = await resolveFolderCoverFile(folderObj.id);
-    if(!file) return;
+    if(!file){ placeholder.classList.remove('skeleton'); return; }
     card.classList.add('has-cover');
-    await attachCoverToEl(placeholder, file, false);
-  }catch(e){ }
+    await attachCoverToEl(placeholder, file);
+  }catch(e){ placeholder.classList.remove('skeleton'); }
 }
 
 async function toDataUrl(url){
@@ -1725,8 +1783,8 @@ async function runSearch(term){
     grid.appendChild(card);
     return {card, f};
   });
-  runLimited(folderCards, 2, ({card, f})=>attachFolderCoverAsync(card, f));
-  runLimited(comicCards, 3, ({card, f})=>attachCoverAsync(card, f));
+  folderCards.forEach(({card, f})=>lazyLoadCover(card, ()=>attachFolderCoverAsync(card, f)));
+  comicCards.forEach(({card, f})=>lazyLoadCover(card, ()=>attachCoverAsync(card, f)));
 }
 
 /* ---------------------------------------------------------------------
@@ -1745,7 +1803,7 @@ async function renderDownloads(){
   state.currentListIsLocal = true;
   items.forEach(it=>{
     const card = el('div','card comic');
-    const ph = elHtml('div','cover-placeholder', `${ICONS.page}<span class="ph-name">${escapeHtml(it.name.split('.')[0].slice(0,40))}</span>`);
+    const ph = elHtml('div','cover-placeholder skeleton', `${ICONS.page}<span class="ph-name">${escapeHtml(it.name.split('.')[0].slice(0,40))}</span>`);
     card.appendChild(ph);
     card.appendChild(buildFavButton({id: it.id, name: it.name, mimeType: it.mimeType, size: it.size, _ext: it.ext}));
     card.appendChild(el('div','label', it.name.replace(/\.(pdf|cbz|cbr)$/i,'')));
@@ -1768,8 +1826,8 @@ async function renderDownloads(){
       renderDownloads();
       toast('Removido dos baixados');
     };
-    attachCoverToEl(ph, {id: it.id, name: it.name, _ext: it.ext, mimeType: it.mimeType});
     grid.appendChild(card);
+    lazyLoadCover(card, ()=>attachCoverToEl(ph, {id: it.id, name: it.name, _ext: it.ext, mimeType: it.mimeType}));
   });
 }
 
@@ -1792,7 +1850,7 @@ async function renderFavorites(){
     grid.appendChild(card);
   });
   const comicCards = [...grid.querySelectorAll('.card')].map((card,i)=>({card, f: items[i]}));
-  runLimited(comicCards, 3, ({card, f})=>attachCoverAsync(card, {id: f.id, name: f.name, mimeType: f.mimeType, thumbnailLink: f.thumbnailLink, _ext: f._ext}));
+  comicCards.forEach(({card, f})=>lazyLoadCover(card, ()=>attachCoverAsync(card, {id: f.id, name: f.name, mimeType: f.mimeType, thumbnailLink: f.thumbnailLink, _ext: f._ext})));
 }
 
 /* ---------------------------------------------------------------------
@@ -1822,7 +1880,7 @@ async function renderHistory(){
   state.currentListIsLocal = false;
   items.forEach(it=>{
     const card = el('div','card comic');
-    const ph = elHtml('div','cover-placeholder', `${ICONS.page}<span class="ph-name">${escapeHtml(it.name.split('.')[0].slice(0,40))}</span>`);
+    const ph = elHtml('div','cover-placeholder skeleton', `${ICONS.page}<span class="ph-name">${escapeHtml(it.name.split('.')[0].slice(0,40))}</span>`);
     card.appendChild(ph);
     card.appendChild(buildFavButton({id: it.id, name: it.name, mimeType: it.mimeType, size: it.size, _ext: it._ext, thumbnailLink: it.thumbnailLink}));
     card.appendChild(el('div','label', it.name.replace(/\.(pdf|cbz|cbr)$/i,'')));
@@ -1845,8 +1903,8 @@ async function renderHistory(){
       renderHistory();
       toast('Removido do histórico');
     };
-    attachCoverToEl(ph, {id: it.id, name: it.name, _ext: it._ext, mimeType: it.mimeType, thumbnailLink: it.thumbnailLink});
     grid.appendChild(card);
+    lazyLoadCover(card, ()=>attachCoverToEl(ph, {id: it.id, name: it.name, _ext: it._ext, mimeType: it.mimeType, thumbnailLink: it.thumbnailLink}));
   });
 }
 
@@ -2390,6 +2448,17 @@ async function collectXMenFolders(token, isStale){
   return listing.folders.slice().sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
 }
 
+// Coleção Mangás: mesma lógica da X-Men — acha a pasta "MANGÁS" e usa
+// TODO o conteúdo direto de dentro dela (Akira, Cavaleiros do Zodíaco,
+// Ashita no Joe etc.) como a seção, sem filtro nem exclusão.
+async function collectMangaFolders(token, isStale){
+  const mangaFolder = await findFolderRecursive(CONFIG.rootFolderId, ['mangas','manga'], token, isStale);
+  if(!mangaFolder || isStale(token)) return [];
+  let listing;
+  try{ listing = await driveListFolder(mangaFolder.id); }catch(e){ return []; }
+  return listing.folders.slice().sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
+}
+
 async function collectAllComics(token, isStale){
   const all = [];
   const allFolders = [];
@@ -2425,7 +2494,7 @@ function buildCarouselCard(item, opts){
   btn.dataset.id = item.id;
 
   const cover = el('div','cc-cover');
-  cover.appendChild(elHtml('div','cc-placeholder', isFolder ? ICONS.folder : ICONS.page));
+  cover.appendChild(elHtml('div','cc-placeholder skeleton', isFolder ? ICONS.folder : ICONS.page));
   if(opts.progressPct){
     cover.appendChild(elHtml('div','cc-progress', `<i style="width:${opts.progressPct}%"></i>`));
   }
@@ -2436,7 +2505,8 @@ function buildCarouselCard(item, opts){
   if(opts.sub) btn.appendChild(el('div','cc-sub', opts.sub));
   else if(!isFolder && opts.size) btn.appendChild(el('div','cc-sub', fmtSize(Number(opts.size))));
 
-  (async ()=>{
+  const loadCover = async ()=>{
+    const ph = cover.querySelector('.cc-placeholder');
     try{
       let src;
       if(isFolder){
@@ -2445,19 +2515,21 @@ function buildCarouselCard(item, opts){
           src = override;
         } else {
           const file = await resolveFolderCoverFile(item.id);
-          if(!file) return;
+          if(!file){ if(ph) ph.classList.remove('skeleton'); return; }
           src = await resolveCoverSrc(file);
         }
       } else {
         src = await resolveCoverSrc(item);
       }
-      if(!src) return;
+      if(!src){ if(ph) ph.classList.remove('skeleton'); return; }
       const img = el('img','');
-      img.src = src; img.alt = '';
-      const ph = cover.querySelector('.cc-placeholder');
+      img.loading = 'lazy'; img.decoding = 'async'; img.alt = '';
+      img.onload = ()=> img.classList.add('loaded');
+      img.src = src;
       if(ph) ph.replaceWith(img);
-    }catch(e){}
-  })();
+    }catch(e){ if(ph) ph.classList.remove('skeleton'); }
+  };
+  lazyLoadCover(btn, loadCover);
 
   btn.onclick = ()=>{
     if(isFolder) enterFolder(item.id, item.name);
@@ -2519,6 +2591,7 @@ function attachCarouselDrag(carousel){
 
 const ARANHA_CACHE_KEY = 'planetahq_aranha_cache_v2';
 const XMEN_CACHE_KEY = 'planetahq_xmen_cache_v1';
+const MANGA_CACHE_KEY = 'planetahq_manga_cache_v1';
 const ALLCOMICS_CACHE_KEY = 'planetahq_allcomics_cache_v1';
 const HOME_CACHE_MAX_AGE = 6*3600*1000;
 
@@ -2565,6 +2638,22 @@ async function getXMenFolders(forceRefresh){
     return folders;
   })();
   return xmenCachePromise;
+}
+
+let mangaToken = 0;
+let mangaCachePromise = null;
+async function getMangaFolders(forceRefresh){
+  if(forceRefresh) mangaCachePromise = null;
+  if(mangaCachePromise) return mangaCachePromise;
+  mangaCachePromise = (async ()=>{
+    const cached = readHomeCache(MANGA_CACHE_KEY, 'folders');
+    if(cached && Date.now()-cached.savedAt < HOME_CACHE_MAX_AGE) return cached.folders;
+    const token = ++mangaToken;
+    const folders = await collectMangaFolders(token, t=>t!==mangaToken);
+    writeHomeCache(MANGA_CACHE_KEY, 'folders', folders);
+    return folders;
+  })();
+  return mangaCachePromise;
 }
 
 let libraryIndexToken = 0;
@@ -2708,7 +2797,7 @@ function buildRecommended(allComics){
   return picked.concat(filler);
 }
 
-function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, allComics}){
+function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, mangaFolders, allComics}){
   const recommended = buildRecommended(allComics);
   wrap.innerHTML = '';
   let anySection = false;
@@ -2736,6 +2825,15 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, all
   );
   if(secXMen){ wrap.appendChild(secXMen); anySection = true; }
 
+  const secManga = buildHomeSection(
+    '🎌 Coleção Mangás',
+    mangaFolders,
+    (it)=>{
+      return buildCarouselCard(it, { isFolder:true });
+    }
+  );
+  if(secManga){ wrap.appendChild(secManga); anySection = true; }
+
   const secRec = buildHomeSection('Recomendados', recommended, (it)=>{
     return buildCarouselCard(it, { isFolder:false, size: it.size });
   });
@@ -2757,17 +2855,19 @@ async function renderHomeSections(forceRefresh){
   // plano logo em seguida, sem travar a tela.
   const cachedAranha = !forceRefresh && readHomeCache(ARANHA_CACHE_KEY, 'folders');
   const cachedXMen = !forceRefresh && readHomeCache(XMEN_CACHE_KEY, 'folders');
+  const cachedManga = !forceRefresh && readHomeCache(MANGA_CACHE_KEY, 'folders');
   const cachedComics = !forceRefresh && readHomeCache(ALLCOMICS_CACHE_KEY, 'comics');
   const continueItemsFast = await getContinueItems();
   if(isStale(myToken)) return;
 
   let paintedFast = false;
-  if(cachedAranha || cachedXMen || cachedComics){
+  if(cachedAranha || cachedXMen || cachedManga || cachedComics){
     wrap.classList.remove('hidden');
     paintHomeSections(wrap, {
       continueItems: continueItemsFast,
       aranhaFolders: cachedAranha ? cachedAranha.folders : [],
       xmenFolders: cachedXMen ? cachedXMen.folders : [],
+      mangaFolders: cachedManga ? cachedManga.folders : [],
       allComics: cachedComics ? cachedComics.comics : []
     });
     paintedFast = true;
@@ -2778,15 +2878,16 @@ async function renderHomeSections(forceRefresh){
 
   // 2) Busca (ou revalida) tudo em paralelo — antes isso era sequencial,
   // agora roda ao mesmo tempo, o que já corta bastante o tempo de espera.
-  const [continueItems, aranhaFolders, xmenFolders, allComics] = await Promise.all([
+  const [continueItems, aranhaFolders, xmenFolders, mangaFolders, allComics] = await Promise.all([
     getContinueItems(),
     getAranhaFolders(forceRefresh).catch(()=>paintedFast && cachedAranha ? cachedAranha.folders : []),
     getXMenFolders(forceRefresh).catch(()=>paintedFast && cachedXMen ? cachedXMen.folders : []),
+    getMangaFolders(forceRefresh).catch(()=>paintedFast && cachedManga ? cachedManga.folders : []),
     getAllComicsCached(forceRefresh).catch(()=>paintedFast && cachedComics ? cachedComics.comics : [])
   ]);
   if(isStale(myToken)) return;
 
-  paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, allComics});
+  paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, mangaFolders, allComics});
 }
 
 /* ---------------------------------------------------------------------
@@ -2836,10 +2937,12 @@ $('#sort-select').addEventListener('change', e=>{
 $('#btn-refresh').onclick = ()=>{
   localStorage.removeItem(ARANHA_CACHE_KEY);
   localStorage.removeItem(XMEN_CACHE_KEY);
+  localStorage.removeItem(MANGA_CACHE_KEY);
   localStorage.removeItem(ALLCOMICS_CACHE_KEY);
   localStorage.removeItem(ALLFOLDERS_CACHE_KEY);
   aranhaCachePromise = null;
   xmenCachePromise = null;
+  mangaCachePromise = null;
   libraryIndexPromise = null;
   const current = state.path[state.path.length-1];
   if(current) renderLibrary(current.id, true);
