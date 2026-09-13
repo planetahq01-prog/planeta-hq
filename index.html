@@ -3409,7 +3409,11 @@ async function crawlLibrarySections(token, isStale, errorState){
   async function walk(folderId, path){
     if(isStale(token)) return;
     let listing;
-    try{ listing = await driveListFolder(folderId); }catch(e){ if(errorState) errorState.hadError = true; return; }
+    try{ listing = await driveListFolder(folderId); }catch(e){
+      if(errorState){ errorState.hadError = true; errorState.lastError = e; }
+      logErr('[PlanetaHQ] Falha ao listar pasta durante a varredura da Home', folderId, e);
+      return;
+    }
     listing.files.forEach(f=>{
       if(seenComics.has(f.id)) return;
       seenComics.add(f.id);
@@ -3423,7 +3427,7 @@ async function crawlLibrarySections(token, isStale, errorState){
     await runLimited(listing.folders, 6, sub=>walk(sub.id, [...path, sub.name]));
   }
   await walk(CONFIG.rootFolderId, []);
-  if(isStale(token)) return {comics: [], folders: [], aranhaFolders: [], xmenFolders: [], mangaFolders: [], batmanFolders: []};
+  if(isStale(token)) return {comics: [], folders: [], aranhaFolders: [], xmenFolders: [], mangaFolders: [], batmanFolders: [], hadError:false, errorMessage:null};
 
   const seenAranhaNames = new Set();
   const aranhaFolders = allFolders.filter(f=>{
@@ -3449,7 +3453,11 @@ async function crawlLibrarySections(token, isStale, errorState){
     const folder = allFolders.find(f=>targetNames.includes(normalizeForFolderMatch(f.name)));
     if(!folder || isStale(token)) return [];
     let listing;
-    try{ listing = await driveListFolder(folder.id); }catch(e){ if(errorState) errorState.hadError = true; return []; }
+    try{ listing = await driveListFolder(folder.id); }catch(e){
+      if(errorState){ errorState.hadError = true; errorState.lastError = e; }
+      logErr('[PlanetaHQ] Falha ao listar conteúdo de pasta-alvo durante a varredura da Home', folder.id, e);
+      return [];
+    }
     return listing.folders.slice().sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
   }
   const xmenFolders = await childrenOfNamedFolder(['x men','xmen']);
@@ -3460,7 +3468,9 @@ async function crawlLibrarySections(token, isStale, errorState){
   // Batman: Ano Um" e as demais) pra "Coleção Batman".
   const batmanFolders = await childrenOfNamedFolder(['batman']);
 
-  return {comics, folders: allFolders, aranhaFolders, xmenFolders, mangaFolders, batmanFolders};
+  return {comics, folders: allFolders, aranhaFolders, xmenFolders, mangaFolders, batmanFolders,
+    hadError: !!(errorState && errorState.hadError),
+    errorMessage: errorState && errorState.lastError ? errorState.lastError.message : null};
 }
 
 function buildCarouselCard(item, opts){
@@ -3684,7 +3694,9 @@ async function getLibrarySections(forceRefresh){
         mangaFolders: cManga.folders,
         comics: cComics.comics,
         allFolders: cAllFolders.folders,
-        batmanFolders: cBatman.folders
+        batmanFolders: cBatman.folders,
+        hadError: false,
+        errorMessage: null
       };
     }
   }
@@ -3701,7 +3713,9 @@ async function getLibrarySections(forceRefresh){
       finalizeHomeSectionResult(ALLFOLDERS_CACHE_KEY, 'folders', raw.folders, errorState.hadError),
       finalizeHomeSectionResult(BATMAN_CACHE_KEY, 'folders', raw.batmanFolders, errorState.hadError)
     ]);
-    return { aranhaFolders, xmenFolders, mangaFolders, comics, allFolders, batmanFolders };
+    return { aranhaFolders, xmenFolders, mangaFolders, comics, allFolders, batmanFolders,
+      hadError: errorState.hadError,
+      errorMessage: errorState.lastError ? errorState.lastError.message : null };
   })();
   try{ return await librarySectionsPromise; }
   finally{ librarySectionsPromise = null; }
@@ -3863,7 +3877,7 @@ function wireHomeLogoFallback(section, id){
   }, {once:true});
 }
 
-function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, allComics}){
+function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, allComics, hadError, errorMessage}){
   const recommended = buildRecommended(allComics);
   wrap.innerHTML = '';
   let anySection = false;
@@ -3925,8 +3939,42 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
   });
   if(secRec){ wrap.appendChild(secRec); anySection = true; }
 
-  wrap.classList.toggle('hidden', !anySection);
+  if(!anySection){
+    // Antes, quando nenhuma seção tinha o que mostrar, a Home ficava
+    // simplesmente com a área toda escondida (classList 'hidden') — sem
+    // nenhuma mensagem. Isso é indistinguível, pra quem usa o app, de "o
+    // app travou"/"sumiu tudo": tanto faz se a causa foi um erro real ao
+    // falar com o Google Drive (rede instável, limite de requisições
+    // esgotado, chave de API com problema) quanto uma biblioteca de fato
+    // vazia — a tela ficava igual, muda, e o botão "Atualizar" repetia o
+    // mesmo problema sem avisar nada. Agora mostramos qual dos dois casos
+    // é, com um jeito de tentar de novo sem precisar procurar o botão lá
+    // em cima.
+    wrap.classList.remove('hidden');
+    if(hadError){
+      wrap.innerHTML = `<div class="empty-state">${ICONS.warning}<h3>Não foi possível carregar a biblioteca</h3>
+        Houve uma falha ao buscar os dados do Google Drive${errorMessage ? ': ' + escapeHtml(errorMessage) : '.'}
+        <button id="btn-home-retry" class="btn-primary" style="margin-top:14px">Tentar novamente</button>
+      </div>`;
+      const retryBtn = $('#btn-home-retry');
+      if(retryBtn) retryBtn.onclick = ()=>renderHomeSections(true);
+    } else {
+      wrap.innerHTML = `<div class="empty-state">${ICONS.folder}<h3>Nenhuma HQ encontrada</h3>A biblioteca configurada está vazia.</div>`;
+    }
+    return;
+  }
+  wrap.classList.remove('hidden');
 }
+
+// Assinatura simples (lista de IDs) de um conjunto de seções — usada só
+// pra comparar "o que já está na tela" com "o que acabou de chegar do
+// Drive" e decidir se vale a pena redesenhar tudo de novo (ver
+// lastPaintedHomeSignature abaixo).
+function homeSectionsSignature({aranhaFolders, xmenFolders, mangaFolders, batmanFolders, allComics}){
+  const ids = arr => (arr||[]).map(x=>x.id).join(',');
+  return [ids(aranhaFolders), ids(xmenFolders), ids(mangaFolders), ids(batmanFolders), ids(allComics)].join('|');
+}
+let lastPaintedHomeSignature = null;
 
 let homeToken = 0;
 async function renderHomeSections(forceRefresh, onProgress){
@@ -3955,17 +4003,20 @@ async function renderHomeSections(forceRefresh, onProgress){
 
   if(cachedAranha || cachedXMen || cachedManga || cachedComics || cachedBatman){
     wrap.classList.remove('hidden');
-    paintHomeSections(wrap, {
+    const fastData = {
       continueItems: continueItemsFast,
       aranhaFolders: cachedAranha ? cachedAranha.folders : [],
       xmenFolders: cachedXMen ? cachedXMen.folders : [],
       mangaFolders: cachedManga ? cachedManga.folders : [],
       batmanFolders: cachedBatman ? cachedBatman.folders : [],
       allComics: cachedComics ? cachedComics.comics : []
-    });
+    };
+    paintHomeSections(wrap, fastData);
+    lastPaintedHomeSignature = homeSectionsSignature(fastData);
   } else {
     wrap.innerHTML = `<div class="home-section"><div class="home-section-title">Carregando seções…</div></div>`;
     wrap.classList.remove('hidden');
+    lastPaintedHomeSignature = null;
   }
 
   // 2) Busca (ou revalida) as 5 seções numa varredura ÚNICA da biblioteca
@@ -3981,21 +4032,39 @@ async function renderHomeSections(forceRefresh, onProgress){
         xmenFolders: cachedXMen ? cachedXMen.folders : [],
         mangaFolders: cachedManga ? cachedManga.folders : [],
         batmanFolders: cachedBatman ? cachedBatman.folders : [],
-        comics: cachedComics ? cachedComics.comics : []
+        comics: cachedComics ? cachedComics.comics : [],
+        hadError: true,
+        errorMessage: e && e.message
       };
     })
   ]);
   if(onProgress) onProgress(1);
   if(isStale(myToken)) return;
 
-  paintHomeSections(wrap, {
+  // Se as pastas/HQs que chegaram agora do Drive são exatamente as mesmas
+  // (mesmos IDs, mesma ordem) que já estão pintadas na tela, redesenhar
+  // tudo de novo só forçaria as capas — que já estão certinhas — a sumir
+  // e recarregar à toa (todo card é recriado do zero em paintHomeSections).
+  // Isso é o caso mais comum de "Atualizar": na prática, a maioria das
+  // vezes nada mudou de verdade na biblioteca. Só quando algo realmente
+  // muda (pasta nova, HQ nova, erro que se resolveu ou apareceu) é que
+  // vale a pena substituir o que já está na tela.
+  const freshData = {
     continueItems,
     aranhaFolders: sections.aranhaFolders,
     xmenFolders: sections.xmenFolders,
     mangaFolders: sections.mangaFolders,
     batmanFolders: sections.batmanFolders,
-    allComics: sections.comics
-  });
+    allComics: sections.comics,
+    hadError: sections.hadError,
+    errorMessage: sections.errorMessage
+  };
+  const freshSignature = homeSectionsSignature(freshData);
+  if(freshSignature === lastPaintedHomeSignature && !sections.hadError){
+    return;
+  }
+  paintHomeSections(wrap, freshData);
+  lastPaintedHomeSignature = freshSignature;
 }
 
 /* ---------------------------------------------------------------------
@@ -4068,10 +4137,20 @@ $('#btn-refresh').onclick = async ()=>{
   // pontual (capas quebradas), não bloqueia a pintura das seções, então
   // fica mantida.
   try{ await idbClear('folderCovers'); }catch(e){}
-  aranhaCachePromise = null;
-  xmenCachePromise = null;
-  mangaCachePromise = null;
-  libraryIndexPromise = null;
+  // BUG CORRIGIDO: "Atualizar" forçava a varredura das seções da Home
+  // (forceRefresh=true) e da pasta atual a ignorar o cache PERSISTENTE
+  // (IndexedDB, 6h), mas nunca limpava o cache EM MEMÓRIA da sessão
+  // (state.folderCache) — que driveListFolder consulta antes de qualquer
+  // outra coisa e, se achar algo lá, devolve na hora sem nunca chegar a
+  // perguntar pro Google Drive de novo. Isso inclui a própria pasta raiz:
+  // se ela ficasse em memória com uma listagem vazia por qualquer motivo
+  // (falha temporária, mudança do lado do Drive, etc.), TODO clique em
+  // "Atualizar" continuava devolvendo essa mesma listagem vazia pra
+  // sempre, pelo resto da sessão — dando a impressão de "as pastas
+  // sumiram e o Atualizar não traz de volta", exatamente como relatado.
+  // Agora "Atualizar" começa limpando esse cache inteiro, garantindo que
+  // a varredura forçada realmente busque tudo de novo na rede.
+  state.folderCache = {};
   const current = state.path[state.path.length-1];
   if(current) renderLibrary(current.id, true);
   if(current && current.id === CONFIG.rootFolderId) renderHomeSections(true);

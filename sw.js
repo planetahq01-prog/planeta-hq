@@ -60,7 +60,20 @@
   index.html) à casca do app, do mesmo jeito que Homem-Aranha e X-Men
   acima — mesma lógica, mesmo motivo.
 */
-const CACHE_VERSION = 'v14';
+/*
+  v15: index.html mudou (correção do botão "Atualizar" não limpar o cache
+  em memória da biblioteca, e novo aviso de erro na Home) — subindo a
+  versão pra forçar os aparelhos a buscarem o arquivo novo.
+*/
+/*
+  v16: index.html mudou de novo — "Atualizar" agora só redesenha as
+  seções da Home (o que faz as capas recarregarem) quando os dados que
+  vieram do Drive são realmente diferentes do que já está na tela. Antes,
+  mesmo sem nenhuma mudança real na biblioteca, toda vez que a varredura
+  forçada terminava, TODOS os cards eram recriados do zero — fazendo as
+  capas já certas piscarem e recarregarem à toa.
+*/
+const CACHE_VERSION = 'v16';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
