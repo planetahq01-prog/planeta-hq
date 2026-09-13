@@ -404,6 +404,8 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
    sem travar a pintura da seção. Se falhar, volta pro nome do personagem
    em texto (section-logo-text) — ver wireHomeLogoFallback. */
 .home-section-title .section-logo{height:34px;width:auto;object-fit:contain;vertical-align:middle;}
+/* Logo do Homem-Aranha aumentada a pedido — maior que a base padrão. */
+.home-section-title .section-logo[data-logo="aranha"]{height:52px;}
 /* Logo dos X-Men já nasce visualmente maior/mais larga que a do
    Homem-Aranha (proporção do próprio arquivo), então recebe um aumento
    menor que a base acima pra não ficar desproporcional na barra de título. */
@@ -1530,10 +1532,17 @@ const coverObserver = ('IntersectionObserver' in window) ? new IntersectionObser
   entries.forEach(entry=>{
     if(!entry.isIntersecting) return;
     coverObserver.unobserve(entry.target);
+    pendingCoverNodes.delete(entry.target);
     const task = entry.target._coverTask;
     if(task) scheduleCoverTask(task);
   });
 }, {rootMargin:'500px 200px', threshold:0.01}) : null;
+
+// Guarda todo card de capa que está só "observado" (aguardando chegar
+// perto da tela pra então carregar de verdade). Usado pela tela de
+// carregamento inicial (ver forceLoadAllPendingCovers) pra saber quais
+// capas ainda não começaram a carregar de jeito nenhum.
+const pendingCoverNodes = new Set();
 
 // Agenda a capa de `node` pra carregar só quando ele estiver perto da
 // tela. Sem suporte a IntersectionObserver (raríssimo), cai pro
@@ -1544,11 +1553,36 @@ const coverObserver = ('IntersectionObserver' in window) ? new IntersectionObser
 function lazyLoadCover(node, task){
   node._coverTask = task;
   const start = ()=>{
-    if(coverObserver) coverObserver.observe(node);
+    if(coverObserver){ pendingCoverNodes.add(node); coverObserver.observe(node); }
     else scheduleCoverTask(task);
   };
   if(node.isConnected) start();
   else requestAnimationFrame(()=> requestAnimationFrame(start));
+}
+
+// Corrige a barra de carregamento inicial travando numa porcentagem fixa
+// (ex.: 66%) por até 45s antes de "destravar" de uma vez: a etapa de
+// capas (waitForVisibleCovers) media o progresso contando TODOS os
+// esqueletos de capa no DOM, mas a maioria delas só é disparada pelo
+// IntersectionObserver acima quando entra perto da tela de verdade — e
+// na tela de carregamento inicial ninguém rolou a página ainda, então
+// praticamente todas as capas abaixo da primeira tela ficavam
+// "observadas" só esperando, sem NUNCA começar a carregar, e a
+// porcentagem ficava presa no valor referente só às poucas capas
+// visíveis, até o prazo de segurança de 45s estourar e forçar o fim.
+// Esta função é chamada uma única vez, bem antes de esperar as capas,
+// e dispara o carregamento de TODAS as capas pendentes de uma vez
+// (respeitando os tetos de fila normais, COVER_MAX_CONCURRENT e
+// NETWORK_COVER_MAX_CONCURRENT) — assim a contagem de "restantes" cai
+// de verdade, no ritmo real da rede, e a porcentagem sobe suavemente
+// (66%, 67%, 68%...) até realmente terminar, em vez de ficar parada.
+function forceLoadAllPendingCovers(){
+  pendingCoverNodes.forEach(node=>{
+    if(coverObserver) coverObserver.unobserve(node);
+    const task = node._coverTask;
+    if(task) scheduleCoverTask(task);
+  });
+  pendingCoverNodes.clear();
 }
 function fmtSize(bytes){
   if(!bytes) return '';
@@ -1790,6 +1824,7 @@ async function runInitialLoad(){
   // esperar. Já avança capa a capa por conta própria (ver
   // waitForVisibleCovers).
   setLoadingSub('Carregando capas das seções…');
+  forceLoadAllPendingCovers();
   await waitForVisibleCovers(45000, frac=>{ progress.covers = Math.max(progress.covers, frac); recompute(); });
   progress.covers = 1; recompute();
 
