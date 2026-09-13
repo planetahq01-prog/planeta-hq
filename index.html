@@ -547,7 +547,7 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
     <div class="loading-word">PLANETA <span>HQ</span></div>
     <div class="loading-track"><div class="loading-fill" id="loading-fill"></div></div>
     <div class="loading-pct" id="loading-pct">0%</div>
-    <div class="loading-sub">Carregando sua biblioteca…</div>
+    <div class="loading-sub" id="loading-sub">Carregando sua biblioteca…</div>
   </div>
 
   <!-- ===================== TOPO + ABAS (aparecem depois de configurado) ===================== -->
@@ -1496,28 +1496,52 @@ function setLoadingProgress(pct){
   if(fill) fill.style.width = loadingProgressPct + '%';
   if(txt) txt.textContent = Math.round(loadingProgressPct) + '%';
 }
+function setLoadingSub(text){
+  const sub = $('#loading-sub');
+  if(sub) sub.textContent = text;
+}
 function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
 
-// Espera os dois logos de seção (Aranha/X-Men, vindos de fora via
-// postimg.cc) carregarem — ou desiste depois de maxWaitMs pra não travar
-// a tela de carregamento se aquele host estiver lento/fora do ar.
-function waitForHomeLogos(maxWaitMs){
-  const logos = Array.from(document.querySelectorAll('#home-sections .title-logo'));
-  if(!logos.length) return Promise.resolve();
-  return Promise.race([
-    Promise.all(logos.map(img=> img.complete ? Promise.resolve() : new Promise(res=>{
-      img.addEventListener('load', res, {once:true});
-      img.addEventListener('error', res, {once:true});
-    }))),
-    sleep(maxWaitMs)
-  ]);
+// Espera os logos de seção (Aranha/X-Men, vindos de fora via postimg.cc)
+// carregarem DE VERDADE (evento load/error do navegador) — nunca um
+// tempo fixo chutado. onProgress é avisado em tempo real, a cada logo que
+// termina, com a fração já concluída (ex.: 1 de 2 -> 0.5). maxWaitMs é só
+// uma rede de segurança pra nunca travar a pessoa pra sempre se aquele
+// host externo estiver fora do ar — bem mais generosa que antes, já que
+// o carregamento completo do app costuma levar de 1 a 2 minutos.
+function waitForHomeLogos(maxWaitMs, onProgress){
+  return new Promise(resolve=>{
+    const logos = Array.from(document.querySelectorAll('#home-sections .title-logo'));
+    if(!logos.length){ if(onProgress) onProgress(1); resolve(); return; }
+    let remaining = logos.length;
+    let done = false;
+    const finish = ()=>{
+      if(done) return;
+      done = true;
+      if(onProgress) onProgress(1);
+      resolve();
+    };
+    const onOne = ()=>{
+      remaining--;
+      if(onProgress) onProgress(1 - Math.max(0, remaining) / logos.length);
+      if(remaining <= 0) finish();
+    };
+    logos.forEach(img=>{
+      if(img.complete) onOne();
+      else{
+        img.addEventListener('load', onOne, {once:true});
+        img.addEventListener('error', onOne, {once:true});
+      }
+    });
+    setTimeout(finish, maxWaitMs);
+  });
 }
 
 // Acompanha os esqueletos (placeholders cinza-animado) das capas ainda
 // carregando na pasta raiz e nas seções da Home, e avança a barra
-// proporcionalmente conforme eles vão sumindo. Some quando não sobrar
-// nenhum — ou depois de maxWaitMs, pra uma rede lenta não prender a
-// pessoa pra sempre na tela de carregamento.
+// proporcionalmente conforme eles vão sumindo de verdade. Some quando
+// não sobrar nenhum — ou depois de maxWaitMs, pra uma rede lenta não
+// prender a pessoa pra sempre na tela de carregamento.
 function waitForVisibleCovers(maxWaitMs, onProgress){
   return new Promise(resolve=>{
     const selector = '#grid-library .cover-placeholder.skeleton, #home-sections .cover-placeholder.skeleton, #home-sections .cc-placeholder.skeleton';
@@ -1534,45 +1558,105 @@ function waitForVisibleCovers(maxWaitMs, onProgress){
   });
 }
 
-// Sequência completa do primeiro carregamento: mostra a tela de 0%,
-// deixa o chrome/biblioteca carregar por baixo (escondido atrás da
-// tela), e só esconde a tela quando os dados + capas visíveis
-// terminarem (ou no limite de tempo de segurança, pra nunca travar a
-// pessoa numa tela de carregamento eterna se algo der errado na rede).
+// Sequência completa do primeiro carregamento: mostra a tela de 0%, e só
+// esconde quando TUDO que aparece na primeira tela já estiver pronto de
+// verdade — pasta raiz, as 4 seções da Home (Aranha/X-Men/Mangás/Todos os
+// quadrinhos) já buscadas e pintadas na tela, os logos das seções (Aranha
+// e X-Men) totalmente carregados, e as capinhas visíveis já resolvidas.
+// A porcentagem é 100% "tempo real": cada etapa só soma na barra quando
+// aquele trabalho de rede realmente termina (nunca um cronômetro
+// fingindo progresso) — por isso a duração total bate com o que a pessoa
+// vê acontecer (normalmente de 1 a 2 minutos, variando com a rede).
+//
+// Bug corrigido: antes, a busca das seções da Home (renderHomeSections)
+// era disparada dentro de enterFolder() SEM 'await' — então esta função
+// achava que o carregamento tinha terminado assim que a pasta raiz
+// listava (rápido), sem nunca esperar a Home de verdade. E como na
+// primeira instalação (sem nenhum cache local ainda) a Home ainda nem
+// tinha pintado nenhum card/logo na tela nesse momento, as checagens de
+// "esqueletos restantes" e "logos carregando" abaixo não achavam NADA pra
+// esperar — e concluíam a barra em segundos, escondendo a tela de
+// carregamento enquanto a Home de verdade ainda levava 1-2 minutos
+// buscando dados em segundo plano. Se, nesse meio-tempo, a pessoa
+// navegasse para dentro de uma pasta e voltasse (ou apertasse
+// "Atualizar"), isso disparava uma NOVA chamada a renderHomeSections(),
+// que invalidava (via homeToken) a busca original ainda em andamento —
+// descartando silenciosamente o resultado dela quando finalmente
+// chegasse — e só essa segunda chamada (que não foi mais invalidada por
+// ninguém depois) conseguia de fato pintar a tela. Daí a impressão de que
+// "só carrega quando aperto atualizar ou entro numa pasta e volto".
+// Agora esta função espera renderHomeSections() de ponta a ponta antes
+// de considerar a Home pronta, então a própria tela de carregamento já
+// resolve isso sozinha, sem precisar de nenhuma ação manual.
 async function runInitialLoad(){
   const overlay = $('#view-loading');
   loadingProgressPct = 0;
   setLoadingProgress(0);
+  setLoadingSub('Carregando sua biblioteca…');
   overlay.classList.remove('hidden');
   $('#chrome').classList.remove('hidden');
   $('#view-library').classList.remove('hidden');
 
-  const hardStop = setTimeout(()=>{ setLoadingProgress(100); overlay.classList.add('hidden'); }, 20000);
+  // Rede de segurança: nunca prender a pessoa numa tela de carregamento
+  // eterna se algo travar de vez (ex.: Drive fora do ar). O prazo é bem
+  // maior que antes (3 minutos, contra os 20s de antes) porque um
+  // carregamento real e saudável já costuma levar de 1 a 2 minutos —
+  // um prazo curto escondia a tela antes da hora mesmo sem bug nenhum.
+  let finished = false;
+  const hardStop = setTimeout(()=>{
+    if(finished) return;
+    finished = true;
+    setLoadingProgress(100);
+    overlay.classList.add('hidden');
+  }, 180000);
 
-  // Fase 1 (0% -> 60%): busca a pasta raiz + as seções da Home. Duração
-  // real é desconhecida, então a barra avança sozinha até 50% enquanto
-  // espera, e só passa disso quando os dados realmente chegarem.
-  const fakeTimer = setInterval(()=>{
-    if(loadingProgressPct < 50) setLoadingProgress(loadingProgressPct + 2);
-  }, 180);
+  // Pesos de cada etapa na barra de 0-100%. "home" pesa mais porque é,
+  // de longe, a etapa mais demorada (busca as 4 seções da Home varrendo
+  // a biblioteca inteira pela API do Drive).
+  const WEIGHTS = { root: 8, home: 57, logos: 10, covers: 25 };
+  const progress = { root: 0, home: 0, logos: 0, covers: 0 };
+  const recompute = ()=>{
+    setLoadingProgress(
+      WEIGHTS.root*progress.root + WEIGHTS.home*progress.home +
+      WEIGHTS.logos*progress.logos + WEIGHTS.covers*progress.covers
+    );
+  };
+
+  // Etapa 1: pasta raiz da biblioteca. skipHome:true porque esta função
+  // cuida de disparar e ESPERAR a Home explicitamente logo abaixo, em vez
+  // de deixar o enterFolder() disparar aquilo sem ninguém aguardar.
   try{
-    await enterFolder(CONFIG.rootFolderId, 'Biblioteca', {reset:true});
+    await enterFolder(CONFIG.rootFolderId, 'Biblioteca', {reset:true, skipHome:true});
   }catch(e){
     logErr('[PlanetaHQ] Falha no carregamento inicial', e);
-  }finally{
-    clearInterval(fakeTimer);
   }
-  setLoadingProgress(60);
+  progress.root = 1; recompute();
 
-  // Fase 2 (60% -> 100%): logos das seções + capinhas visíveis na
-  // primeira tela.
+  // Etapa 2: as 4 seções da Home (Aranha, X-Men, Mangás, Todos os
+  // quadrinhos). De verdade esperada agora — a barra sobe em tempo real
+  // conforme cada uma das 4 buscas termina de verdade (25% cada), então
+  // o tempo total mostrado bate com o tempo real de rede, sem estimar
+  // nada.
+  setLoadingSub('Montando as seções da Home…');
   try{
-    await Promise.all([
-      waitForHomeLogos(4000),
-      waitForVisibleCovers(7000, frac=> setLoadingProgress(60 + frac*35))
-    ]);
-  }catch(e){}
-  setLoadingProgress(100);
+    await renderHomeSections(false, frac=>{ progress.home = frac; recompute(); });
+  }catch(e){
+    logErr('[PlanetaHQ] Falha ao carregar as seções da Home', e);
+  }
+  progress.home = 1; recompute();
+
+  // Etapas 3 e 4: só fazem sentido depois da Home ter pintado de verdade
+  // (etapa 2) — antes disso não existe nem <img> de logo nem esqueleto de
+  // capa no DOM pra esperar.
+  setLoadingSub('Carregando capas e logos das seções…');
+  await Promise.all([
+    waitForHomeLogos(45000, frac=>{ progress.logos = frac; recompute(); }),
+    waitForVisibleCovers(45000, frac=>{ progress.covers = frac; recompute(); })
+  ]);
+  progress.logos = 1; progress.covers = 1; recompute();
+
+  if(finished) return;
+  finished = true;
   clearTimeout(hardStop);
   await sleep(200);
   overlay.classList.add('hidden');
@@ -1601,13 +1685,13 @@ function saveConfig(apiKey, folderId, proxyUrl){
   localStorage.setItem(CONFIG_KEY, JSON.stringify(CONFIG));
 }
 
-async function enterFolder(id, name, {reset=false}={}){
+async function enterFolder(id, name, {reset=false, skipHome=false}={}){
   if(reset) state.path = [];
   state.path.push({id, name});
   $('#search-input').value = '';
   renderBreadcrumb();
   await renderLibrary(id, false);
-  if(id === CONFIG.rootFolderId){
+  if(id === CONFIG.rootFolderId && !skipHome){
     renderHomeSections();
   }
   // Entrar numa subpasta é ir "mais fundo" no app: empilha um nível no
@@ -3402,7 +3486,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
 }
 
 let homeToken = 0;
-async function renderHomeSections(forceRefresh){
+async function renderHomeSections(forceRefresh, onProgress){
   const wrap = $('#home-sections');
   if(!wrap) return;
 
@@ -3437,12 +3521,18 @@ async function renderHomeSections(forceRefresh){
 
   // 2) Busca (ou revalida) tudo em paralelo — antes isso era sequencial,
   // agora roda ao mesmo tempo, o que já corta bastante o tempo de espera.
+  // Cada uma das 4 buscas conta como 1/4 do progresso desta etapa, e
+  // avisa quem chamou (onProgress) assim que termina DE VERDADE — em
+  // tempo real, sem estimar duração — usado pela tela de carregamento
+  // inicial pra saber exatamente quando a Home está pronta.
+  let doneCount = 0;
+  const tick = ()=>{ doneCount++; if(onProgress) onProgress(doneCount/4); };
   const [continueItems, aranhaFolders, xmenFolders, mangaFolders, allComics] = await Promise.all([
     getContinueItems(),
-    getAranhaFolders(forceRefresh).catch(()=>paintedFast && cachedAranha ? cachedAranha.folders : []),
-    getXMenFolders(forceRefresh).catch(()=>paintedFast && cachedXMen ? cachedXMen.folders : []),
-    getMangaFolders(forceRefresh).catch(()=>paintedFast && cachedManga ? cachedManga.folders : []),
-    getAllComicsCached(forceRefresh).catch(()=>paintedFast && cachedComics ? cachedComics.comics : [])
+    getAranhaFolders(forceRefresh).catch(()=>paintedFast && cachedAranha ? cachedAranha.folders : []).then(r=>{ tick(); return r; }),
+    getXMenFolders(forceRefresh).catch(()=>paintedFast && cachedXMen ? cachedXMen.folders : []).then(r=>{ tick(); return r; }),
+    getMangaFolders(forceRefresh).catch(()=>paintedFast && cachedManga ? cachedManga.folders : []).then(r=>{ tick(); return r; }),
+    getAllComicsCached(forceRefresh).catch(()=>paintedFast && cachedComics ? cachedComics.comics : []).then(r=>{ tick(); return r; })
   ]);
   if(isStale(myToken)) return;
 
