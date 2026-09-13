@@ -1555,6 +1555,42 @@ function waitForVisibleCovers(maxWaitMs, onProgress){
 // resolve isso sozinha, sem precisar de nenhuma ação manual.
 async function runInitialLoad(){
   const overlay = $('#view-loading');
+
+  // Caminho rápido: se já existe QUALQUER cache de uma sessão anterior
+  // (mesmo vencido, mesmo só um dos quatro), a pessoa já abriu o app
+  // antes neste aparelho — não faz sentido nenhum prendê-la de novo atrás
+  // da tela de 0-100% esperando a Home inteira (incluindo até 45s de
+  // espera pelas capas) só pra revalidar dados que, na prática, quase
+  // sempre ainda estão bons. Em vez disso: mostra a Home na hora usando o
+  // que já está salvo (localStorage + IndexedDB, tudo local, sem rede) e
+  // deixa a revalidação de verdade (renderHomeSections já faz isso
+  // sozinha, ver comentário lá) e o carregamento de cada capa rolarem em
+  // segundo plano, exatamente como já acontece ao voltar pra Home depois
+  // de entrar numa pasta e sair — sem bloquear nada. Isso é o que faz a
+  // diferença entre "1-2 minutos toda vez que abro o app" e "abre na
+  // hora, e vou vendo as capinhas aparecerem".
+  const hasAnyHomeCache = !!(
+    localStorage.getItem(ARANHA_CACHE_KEY) ||
+    localStorage.getItem(XMEN_CACHE_KEY) ||
+    localStorage.getItem(MANGA_CACHE_KEY) ||
+    localStorage.getItem(ALLCOMICS_CACHE_KEY)
+  );
+  if(hasAnyHomeCache){
+    $('#chrome').classList.remove('hidden');
+    $('#view-library').classList.remove('hidden');
+    overlay.classList.add('hidden');
+    try{
+      await enterFolder(CONFIG.rootFolderId, 'Biblioteca', {reset:true, skipHome:true});
+    }catch(e){
+      logErr('[PlanetaHQ] Falha no carregamento rápido (pasta raiz)', e);
+    }
+    renderHomeSections().catch(e=>logErr('[PlanetaHQ] Falha ao revalidar a Home em segundo plano', e));
+    return;
+  }
+
+  // A partir daqui: só roda na primeira instalação de verdade (nenhum
+  // cache local ainda), quando realmente não tem outro jeito além de
+  // varrer a biblioteca inteira pela primeira vez.
   loadingProgressPct = 0;
   setLoadingProgress(0);
   setLoadingSub('Conectando com sua biblioteca…');
