@@ -909,6 +909,14 @@ async function idbDelete(store, key){
     tx.onerror = ()=>reject(tx.error);
   });
 }
+async function idbClear(store){
+  const db = await openDB();
+  return new Promise((resolve,reject)=>{
+    const tx = db.transaction(store,'readwrite').objectStore(store).clear();
+    tx.onsuccess = ()=>resolve(true);
+    tx.onerror = ()=>reject(tx.error);
+  });
+}
 async function idbAll(store){
   const db = await openDB();
   return new Promise((resolve,reject)=>{
@@ -3046,24 +3054,34 @@ function buildCarouselCard(item, opts){
   const loadCover = async ()=>{
     const ph = cover.querySelector('.cc-placeholder');
     try{
-      let src;
+      let src, coverFile;
       if(isFolder){
         const override = getFolderCoverOverride(item.name);
         if(override){
           src = override;
         } else {
-          const file = await resolveFolderCoverFile(item.id);
-          if(!file){ if(ph) ph.classList.remove('skeleton'); return; }
-          src = await resolveCoverSrc(file);
+          coverFile = await resolveFolderCoverFile(item.id);
+          if(!coverFile){ if(ph) ph.classList.remove('skeleton'); return; }
+          src = await resolveCoverSrc(coverFile);
         }
       } else {
+        coverFile = item;
         src = await resolveCoverSrc(item);
       }
       if(!src){ if(ph) ph.classList.remove('skeleton'); return; }
-      const img = el('img','');
-      img.decoding = 'async'; img.alt = '';
-      img.onload = ()=> img.classList.add('loaded');
-      img.src = src;
+      // Usa buildCoverNode (a mesma função da biblioteca normal) em vez de
+      // montar a <img> na mão. Isso garante o mesmo fallback de quando o
+      // thumbnailLink do Drive falha (onerror -> regenera a capa baixando
+      // e renderizando o arquivo de verdade). Antes, a <img> aqui não tinha
+      // 'onerror' nenhum, então uma falha de thumbnailLink deixava a
+      // capinha quebrada pra sempre nos carrosséis da Home — mesmo que a
+      // mesma pasta, aberta pela biblioteca normal, se autocorrigisse. Isso
+      // explicava por que só sumiam capinhas de pasta aqui (e não ao
+      // navegar direto pra dentro da pasta), e por que pastas atualizadas
+      // com mais frequência (como Coleção X-Men e Coleção Homem-Aranha)
+      // eram as mais afetadas: arquivos adicionados/alterados há pouco
+      // tempo são justamente os que mais sofrem com thumbnailLink falho.
+      const img = buildCoverNode(src, coverFile);
       if(ph) ph.replaceWith(img);
     }catch(e){ if(ph) ph.classList.remove('skeleton'); }
   };
@@ -3472,13 +3490,24 @@ $('#sort-select').addEventListener('change', e=>{
   reRenderCurrentLibraryView();
 });
 
-$('#btn-refresh').onclick = ()=>{
+$('#btn-refresh').onclick = async ()=>{
   coverMemoryCache.clear();
   localStorage.removeItem(ARANHA_CACHE_KEY);
   localStorage.removeItem(XMEN_CACHE_KEY);
   localStorage.removeItem(MANGA_CACHE_KEY);
   localStorage.removeItem(ALLCOMICS_CACHE_KEY);
   localStorage.removeItem(ALLFOLDERS_CACHE_KEY);
+  // A gaveta 'folderCovers' guarda, pra sempre e sem nenhum prazo de
+  // validade, qual arquivo foi escolhido como capa de cada pasta
+  // (resolveFolderCoverFile). Ela nunca era limpa aqui — então se o
+  // arquivo escolhido como capa de uma pasta fosse depois apagado, movido
+  // ou renomeado no Drive (comum em coleções que a pessoa atualiza com
+  // frequência, como Coleção X-Men e Coleção Homem-Aranha), a capinha
+  // dessa pasta ficava quebrada PARA SEMPRE, e nem clicar em "Atualizar"
+  // resolvia, porque essa gaveta específica nunca era tocada. Agora o
+  // "Atualizar" também limpa essa gaveta, forçando reavaliar do zero qual
+  // é o arquivo-capa atual de cada pasta.
+  try{ await idbClear('folderCovers'); }catch(e){}
   aranhaCachePromise = null;
   xmenCachePromise = null;
   mangaCachePromise = null;
