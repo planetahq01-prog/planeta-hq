@@ -492,6 +492,7 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 }
 #view-loading .loading-pct{font-size:13px;color:var(--paper);font-weight:700;letter-spacing:.3px;}
 #view-loading .loading-sub{font-size:12px;color:var(--text-muted);max-width:260px;}
+#view-loading .loading-warn{font-size:11px;color:var(--text-muted);opacity:.75;max-width:240px;margin-top:2px;}
 .debug-panel-head{display:flex;align-items:center;gap:10px;}
 .debug-panel-head strong{flex:1;font-size:16px;}
 #debug-panel-text{
@@ -548,6 +549,7 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
     <div class="loading-track"><div class="loading-fill" id="loading-fill"></div></div>
     <div class="loading-pct" id="loading-pct">0%</div>
     <div class="loading-sub" id="loading-sub">Carregando sua biblioteca…</div>
+    <div class="loading-warn" id="loading-warn">Isso pode levar alguns minutos na primeira vez — não feche o app.</div>
   </div>
 
   <!-- ===================== TOPO + ABAS (aparecem depois de configurado) ===================== -->
@@ -984,6 +986,13 @@ function driveReleaseSlot(){
 }
 function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
 
+// Contagem de pedidos concluídos com sucesso à API do Drive desde que o
+// app abriu. Não influencia nenhuma lógica de dados — serve só de sinal
+// em tempo real pra tela de carregamento inicial saber, pedido a pedido,
+// o quanto a varredura da biblioteca (a etapa mais demorada) já avançou,
+// já que o número final de pastas a visitar não é conhecido de antemão.
+let driveRequestsDone = 0;
+
 async function driveFetchJson(url){
   const MAX_ATTEMPTS = 6;
   for(let attempt=1; attempt<=MAX_ATTEMPTS; attempt++){
@@ -991,7 +1000,7 @@ async function driveFetchJson(url){
     let res, errBody, networkErr;
     try{
       res = await fetch(url);
-      if(res.ok) return await res.json();
+      if(res.ok){ driveRequestsDone++; return await res.json(); }
       errBody = await res.text().catch(()=> '');
     } catch(e){
       networkErr = e;
@@ -1592,7 +1601,7 @@ async function runInitialLoad(){
   const overlay = $('#view-loading');
   loadingProgressPct = 0;
   setLoadingProgress(0);
-  setLoadingSub('Carregando sua biblioteca…');
+  setLoadingSub('Conectando com sua biblioteca…');
   overlay.classList.remove('hidden');
   $('#chrome').classList.remove('hidden');
   $('#view-library').classList.remove('hidden');
@@ -1622,36 +1631,64 @@ async function runInitialLoad(){
     );
   };
 
+  // Sobe suavemente e em tempo real (1%, 2%, 3%...) conforme pedidos DE
+  // VERDADE à API do Drive vão terminando (cada pasta visitada = 1
+  // pedido) — sem precisar saber de antemão quantas pastas a etapa vai
+  // visitar no total. 'scale' controla só a "régua": quanto maior, mais
+  // pedidos são necessários pra a curva se aproximar de 100%. Nunca
+  // chega sozinha a 100% desta etapa (fica presa em até 97%) — o valor
+  // final e definitivo só é cravado quando o trabalho reportar, de
+  // verdade, que terminou. Isso resolve a barra ficando parada num
+  // número só por muito tempo (o que antes passava a impressão de app
+  // travado), sem inventar nenhuma duração — o ritmo do avanço reflete
+  // literalmente a rede respondendo.
+  function pollNetworkProgress(stageKey, scale){
+    const startCount = driveRequestsDone;
+    return setInterval(()=>{
+      const doneReqs = driveRequestsDone - startCount;
+      const frac = Math.min(0.97, 1 - 1/(1 + doneReqs/scale));
+      progress[stageKey] = Math.max(progress[stageKey], frac);
+      recompute();
+    }, 200);
+  }
+
   // Etapa 1: pasta raiz da biblioteca. skipHome:true porque esta função
   // cuida de disparar e ESPERAR a Home explicitamente logo abaixo, em vez
   // de deixar o enterFolder() disparar aquilo sem ninguém aguardar.
+  let poll = pollNetworkProgress('root', 2);
   try{
     await enterFolder(CONFIG.rootFolderId, 'Biblioteca', {reset:true, skipHome:true});
   }catch(e){
     logErr('[PlanetaHQ] Falha no carregamento inicial', e);
   }
+  clearInterval(poll);
   progress.root = 1; recompute();
 
   // Etapa 2: as 4 seções da Home (Aranha, X-Men, Mangás, Todos os
-  // quadrinhos). De verdade esperada agora — a barra sobe em tempo real
-  // conforme cada uma das 4 buscas termina de verdade (25% cada), então
-  // o tempo total mostrado bate com o tempo real de rede, sem estimar
-  // nada.
+  // quadrinhos) — a mais demorada, geralmente 1 a 2 minutos na primeira
+  // instalação, pois varre a biblioteca inteira pela API do Drive sem
+  // nenhum cache local ainda. Combina dois sinais reais: o avanço
+  // suave por pedido de rede (acima) e os marcos garantidos de 25% toda
+  // vez que uma das 4 buscas realmente termina (via onProgress) — o que
+  // vier na frente vence, então a barra nunca anda pra trás.
   setLoadingSub('Montando as seções da Home…');
+  poll = pollNetworkProgress('home', 30);
   try{
-    await renderHomeSections(false, frac=>{ progress.home = frac; recompute(); });
+    await renderHomeSections(false, frac=>{ progress.home = Math.max(progress.home, frac); recompute(); });
   }catch(e){
     logErr('[PlanetaHQ] Falha ao carregar as seções da Home', e);
   }
+  clearInterval(poll);
   progress.home = 1; recompute();
 
   // Etapas 3 e 4: só fazem sentido depois da Home ter pintado de verdade
   // (etapa 2) — antes disso não existe nem <img> de logo nem esqueleto de
-  // capa no DOM pra esperar.
+  // capa no DOM pra esperar. Ambas já avançam pedido a pedido / capa a
+  // capa por conta própria (ver waitForHomeLogos/waitForVisibleCovers).
   setLoadingSub('Carregando capas e logos das seções…');
   await Promise.all([
-    waitForHomeLogos(45000, frac=>{ progress.logos = frac; recompute(); }),
-    waitForVisibleCovers(45000, frac=>{ progress.covers = frac; recompute(); })
+    waitForHomeLogos(45000, frac=>{ progress.logos = Math.max(progress.logos, frac); recompute(); }),
+    waitForVisibleCovers(45000, frac=>{ progress.covers = Math.max(progress.covers, frac); recompute(); })
   ]);
   progress.logos = 1; progress.covers = 1; recompute();
 
