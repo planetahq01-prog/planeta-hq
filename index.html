@@ -399,12 +399,10 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
   padding:14px 16px 10px;letter-spacing:-.2px;
   display:flex;align-items:center;gap:8px;flex-wrap:wrap;
 }
-/* Logo de "Coleção [logo]" (Homem-Aranha / X-Men). Começa escondida e só
-   aparece (com um fade suave) quando a imagem termina de carregar; o texto
-   com o nome do personagem (section-logo-text) fica visível até lá, então
-   o título nunca fica vazio nem pisca em branco enquanto a logo baixa —
-   ver applyHomeLogo/getHomeLogoDataUrl, que buscam isso em segundo plano,
-   sem travar a pintura da seção. */
+/* Logo de "Coleção [logo]" (Homem-Aranha / X-Men). É uma <img> comum
+   apontando direto pra URL externa (ver HOME_LOGOS) — carrega em paralelo,
+   sem travar a pintura da seção. Se falhar, volta pro nome do personagem
+   em texto (section-logo-text) — ver wireHomeLogoFallback. */
 .home-section-title .section-logo{height:34px;width:auto;object-fit:contain;vertical-align:middle;}
 /* Logo dos X-Men já nasce visualmente maior/mais larga que a do
    Homem-Aranha (proporção do próprio arquivo), então recebe um aumento
@@ -952,10 +950,6 @@ function openDB(){
       // que reaproveite este mesmo mecanismo (readHomeCache/writeHomeCache),
       // fica automaticamente livre desse mesmo problema.
       if(!db.objectStoreNames.contains('homeCache')) db.createObjectStore('homeCache', {keyPath:'id'});
-      // Guarda as logos das seções da Home (Homem-Aranha, X-Men) já
-      // convertidas em dataURL, pra elas aparecerem instantâneas depois da
-      // primeira vez sem precisar baixar de novo — ver getHomeLogoDataUrl.
-      if(!db.objectStoreNames.contains('homeLogos')) db.createObjectStore('homeLogos', {keyPath:'id'});
     };
     req.onsuccess = ()=>resolve(req.result);
     req.onerror = ()=>reject(req.error);
@@ -3599,63 +3593,43 @@ function buildRecommended(allComics){
   return picked.concat(filler);
 }
 
-// Logos usadas no título de "Coleção [logo]" (Homem-Aranha / X-Men).
-// Troque pelas URLs das suas imagens (pode ser um link do postimg.cc, do
-// seu Google Drive com acesso público, etc.) — o app baixa cada uma só
-// UMA vez e guarda no IndexedDB (ver getHomeLogoDataUrl), então da segunda
-// abertura em diante elas aparecem na hora, sem bater na rede de novo.
+// Logos usadas no título de "Coleção [logo]" (Homem-Aranha / X-Men, e
+// qualquer outra que você queira adicionar no futuro).
+//
+// IMPORTANTE: pra uma logo nova aparecer desde a PRIMEIRA visita à Home
+// (não só a partir da segunda abertura do app) e continuar instantânea e
+// offline depois disso, ela precisa estar em DOIS lugares:
+//  1) aqui embaixo, com um id curto (ex.: 'vingadores');
+//  2) na lista APP_SHELL do arquivo sw.js, com a mesma URL exata.
+// É o service worker (não este arquivo) quem efetivamente guarda a
+// imagem em disco pra ela carregar na hora depois da primeira vez — ver
+// comentário no sw.js. Sem o passo 2, a logo até funciona, mas sempre
+// dependendo da rede, sem o "carregamento instantâneo".
+//
+// Usamos uma tag <img> comum (em vez de baixar via fetch()/JavaScript e
+// converter pra guardar no IndexedDB, como esta função fazia antes) porque
+// vários serviços gratuitos de hospedagem de imagem (postimg.cc incluso)
+// bloqueiam esse tipo de requisição por proteção contra "hotlinking",
+// mesmo liberando a mesma imagem numa <img> comum — o que fazia a logo
+// nunca chegar a carregar, silenciosamente, nem depois de muito tempo.
+// Uma <img> de verdade não tem esse problema.
 const HOME_LOGOS = {
   aranha: 'https://i.postimg.cc/x1cRhdkq/XRecorder-17092024-211205-removebg-preview.png',
   xmen: 'https://i.postimg.cc/cJzP2j41/x-men-seeklogo.png'
 };
 
-const homeLogoMemoryCache = new Map();
-async function getHomeLogoDataUrl(id, url){
-  if(!url) return null;
-  if(homeLogoMemoryCache.has(id)) return homeLogoMemoryCache.get(id);
-  try{
-    const cached = await idbGet('homeLogos', id);
-    if(cached && cached.dataUrl){
-      homeLogoMemoryCache.set(id, cached.dataUrl);
-      return cached.dataUrl;
-    }
-  }catch(e){}
-  // Só bate na rede se ainda não tiver em nenhum dos dois caches acima —
-  // isto é, no máximo uma vez por logo, na vida inteira do app neste
-  // aparelho (a não ser que os dados do site sejam apagados).
-  try{
-    const res = await fetch(url, {cache:'force-cache'});
-    if(!res.ok) return null;
-    const blob = await res.blob();
-    const dataUrl = await new Promise((resolve,reject)=>{
-      const reader = new FileReader();
-      reader.onload = ()=>resolve(reader.result);
-      reader.onerror = ()=>reject(reader.error);
-      reader.readAsDataURL(blob);
-    });
-    homeLogoMemoryCache.set(id, dataUrl);
-    idbSet('homeLogos', {id, dataUrl}).catch(()=>{});
-    return dataUrl;
-  }catch(e){ return null; }
-}
-// Dispara a busca/aplicação da logo em segundo plano, sem "await" — a
-// seção (texto + carrossel) já está pintada na tela antes mesmo desta
-// função rodar. Enquanto a logo não chega, fica o nome do personagem em
-// texto (section-logo-text); quando chega, troca pela imagem com um fade.
-function applyHomeLogo(section, id){
-  const url = HOME_LOGOS[id];
-  if(!url || !section) return;
+// Se a imagem falhar por qualquer motivo (sem internet na primeiríssima
+// visita, link quebrado, etc.), volta pro nome do personagem em texto em
+// vez de deixar um ícone de imagem quebrada no título.
+function wireHomeLogoFallback(section, id){
+  if(!section) return;
   const img = section.querySelector(`.section-logo[data-logo="${id}"]`);
+  const txt = section.querySelector(`.section-logo-text[data-logo-text="${id}"]`);
   if(!img) return;
-  getHomeLogoDataUrl(id, url).then(dataUrl=>{
-    if(!dataUrl || !img.isConnected) return;
-    img.onload = ()=>{
-      img.classList.remove('hidden');
-      const txt = section.querySelector(`.section-logo-text[data-logo-text="${id}"]`);
-      if(txt) txt.classList.add('hidden');
-    };
-    img.src = dataUrl;
-  });
+  img.addEventListener('error', ()=>{
+    img.classList.add('hidden');
+    if(txt) txt.classList.remove('hidden');
+  }, {once:true});
 }
 
 function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, mangaFolders, allComics}){
@@ -3670,25 +3644,29 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
 
   // Título "Coleção [logo]": some texto (nome do personagem) some na hora,
   // sem depender de nenhuma rede externa pra pintar a seção — a logo em si
-  // é aplicada depois, em segundo plano, por applyHomeLogo (ver acima),
-  // que não atrasa em nada esta função nem a tela de carregamento inicial.
+  // Título "Coleção [logo]": a <img> aponta direto pra URL externa (ver
+  // HOME_LOGOS) — o texto com o nome do personagem fica escondido, e só
+  // aparece se a imagem falhar (wireHomeLogoFallback). Nenhuma etapa de
+  // JavaScript espera a imagem carregar pra pintar a seção: o navegador
+  // (ou o service worker, depois da primeira vez — ver sw.js) resolve a
+  // <img> por conta própria, em paralelo, sem travar nada.
   const secAranha = buildHomeSection(
-    `Coleção <span class="section-logo-text" data-logo-text="aranha">Homem-Aranha</span><img class="section-logo hidden" data-logo="aranha" alt="Homem-Aranha">`,
+    `Coleção <span class="section-logo-text hidden" data-logo-text="aranha">Homem-Aranha</span><img class="section-logo" data-logo="aranha" src="${HOME_LOGOS.aranha}" alt="Homem-Aranha" loading="eager" decoding="async">`,
     aranhaFolders,
     (it)=>{
       return buildCarouselCard(it, { isFolder:true });
     }
   );
-  if(secAranha){ wrap.appendChild(secAranha); anySection = true; applyHomeLogo(secAranha, 'aranha'); }
+  if(secAranha){ wrap.appendChild(secAranha); anySection = true; wireHomeLogoFallback(secAranha, 'aranha'); }
 
   const secXMen = buildHomeSection(
-    `Coleção <span class="section-logo-text" data-logo-text="xmen">X-Men</span><img class="section-logo hidden" data-logo="xmen" alt="X-Men">`,
+    `Coleção <span class="section-logo-text hidden" data-logo-text="xmen">X-Men</span><img class="section-logo" data-logo="xmen" src="${HOME_LOGOS.xmen}" alt="X-Men" loading="eager" decoding="async">`,
     xmenFolders,
     (it)=>{
       return buildCarouselCard(it, { isFolder:true });
     }
   );
-  if(secXMen){ wrap.appendChild(secXMen); anySection = true; applyHomeLogo(secXMen, 'xmen'); }
+  if(secXMen){ wrap.appendChild(secXMen); anySection = true; wireHomeLogoFallback(secXMen, 'xmen'); }
 
   const secManga = buildHomeSection(
     '🎌 Coleção Mangás',

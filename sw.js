@@ -39,13 +39,23 @@
   da rede.
 */
 /*
-  v11: index.html mudou de novo (velocidade do "Atualizar", cache dos
-  "Recomendados" passou a usar IndexedDB em vez de localStorage, logos das
-  seções Homem-Aranha/X-Men, e correção do carregamento instantâneo ao
-  reabrir o app). Subindo a versão aqui pra forçar os aparelhos a
-  buscarem o index.html novo em vez de continuarem numa cópia antiga.
+  v12: as logos das seções "Coleção Homem-Aranha" e "Coleção X-Men" (ver
+  HOME_LOGOS no index.html) agora entram na casca do app, do mesmo jeito
+  que as fontes e as bibliotecas de leitura (cache primeiro, rede como
+  respaldo). Antes elas eram baixadas via fetch() de dentro do JavaScript
+  do app pra guardar convertidas no IndexedDB — mas vários serviços
+  gratuitos de imagem (postimg.cc incluso) bloqueiam esse tipo de
+  requisição por proteção contra "hotlinking", mesmo liberando a mesma
+  imagem numa <img> comum. Isso fazia a logo nunca aparecer, mesmo depois
+  de muito tempo de uso. Uma <img> comum servida por aqui (o service
+  worker faz uma requisição de imagem de verdade, não um fetch() de
+  JavaScript) não tem esse problema, e de quebra já fica disponível
+  offline e instantânea desde a primeira vez que o app é instalado.
+  IMPORTANTE: se você adicionar uma logo nova em HOME_LOGOS no
+  index.html, adicione a URL dela aqui também (e suba a CACHE_VERSION),
+  senão essa logo nova nunca vai ficar instantânea/offline.
 */
-const CACHE_VERSION = 'v11';
+const CACHE_VERSION = 'v12';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
@@ -57,7 +67,11 @@ const APP_SHELL = [
   // baixado na aba "Baixados") falha assim que o aparelho está offline, com
   // o erro "Setting up fake worker failed: Cannot load script at: ...".
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js',
-  'https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700;800&display=swap'
+  'https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700;800&display=swap',
+  // Logos das seções da Home — precisam ser EXATAMENTE as mesmas URLs de
+  // HOME_LOGOS no index.html.
+  'https://i.postimg.cc/x1cRhdkq/XRecorder-17092024-211205-removebg-preview.png',
+  'https://i.postimg.cc/cJzP2j41/x-men-seeklogo.png'
 ];
 // URLs absolutas resolvidas uma única vez, pra comparar por igualdade exata
 // (nunca mais por sufixo/heurística) na hora de decidir o que é "casca".
