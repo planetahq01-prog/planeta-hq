@@ -1649,7 +1649,7 @@ function waitForVisibleCovers(maxWaitMs, onProgress){
 
 // Sequência completa do primeiro carregamento: mostra a tela de 0%, e só
 // esconde quando TUDO que aparece na primeira tela já estiver pronto de
-// verdade — pasta raiz, as 4 seções da Home (Aranha/X-Men/Mangás/Todos os
+// verdade — pasta raiz, as 5 seções da Home (Aranha/X-Men/Mangás/Batman/Todos os
 // quadrinhos) já buscadas e pintadas na tela, e as capinhas visíveis já
 // resolvidas.
 // A porcentagem é 100% "tempo real": cada etapa só soma na barra quando
@@ -1713,19 +1713,20 @@ async function runInitialLoad(){
   // toda vez que abro o app" e "abre na hora, e vou vendo as capinhas
   // aparecerem".
   // Essa checagem usa readHomeCache (IndexedDB) — não localStorage. O
-  // cache dessas 4 seções mora no IndexedDB desde a correção do limite de
+  // cache dessas 5 seções mora no IndexedDB desde a correção do limite de
   // armazenamento dos "Recomendados"; continuar olhando pro localStorage
   // aqui (como era antes) fazia esta checagem nunca encontrar nada, então
   // o app achava, TODA vez que reabria, que era a primeira instalação —
   // e voltava a mostrar a tela de carregamento cheia (varrendo a
   // biblioteca inteira de novo) mesmo já tendo tudo salvo localmente.
-  const [cAranha, cXMen, cManga, cComics] = await Promise.all([
+  const [cAranha, cXMen, cManga, cComics, cBatman] = await Promise.all([
     readHomeCache(ARANHA_CACHE_KEY, 'folders'),
     readHomeCache(XMEN_CACHE_KEY, 'folders'),
     readHomeCache(MANGA_CACHE_KEY, 'folders'),
-    readHomeCache(ALLCOMICS_CACHE_KEY, 'comics')
+    readHomeCache(ALLCOMICS_CACHE_KEY, 'comics'),
+    readHomeCache(BATMAN_CACHE_KEY, 'folders')
   ]);
-  const hasAnyHomeCache = !!(cAranha || cXMen || cManga || cComics);
+  const hasAnyHomeCache = !!(cAranha || cXMen || cManga || cComics || cBatman);
   if(hasAnyHomeCache){
     $('#chrome').classList.remove('hidden');
     $('#view-library').classList.remove('hidden');
@@ -1765,7 +1766,7 @@ async function runInitialLoad(){
   }, 180000);
 
   // Pesos de cada etapa na barra de 0-100%. "home" pesa mais porque é,
-  // de longe, a etapa mais demorada (busca as 4 seções da Home varrendo
+  // de longe, a etapa mais demorada (busca as 5 seções da Home varrendo
   // a biblioteca inteira pela API do Drive).
   const WEIGHTS = { root: 8, home: 57, covers: 35 };
   const progress = { root: 0, home: 0, covers: 0 };
@@ -1809,7 +1810,7 @@ async function runInitialLoad(){
   clearInterval(poll);
   progress.root = 1; recompute();
 
-  // Etapa 2: as 4 seções da Home (Aranha, X-Men, Mangás, Todos os
+  // Etapa 2: as 5 seções da Home (Aranha, X-Men, Mangás, Batman, Todos os
   // quadrinhos) — a mais demorada, geralmente 1 a 2 minutos na primeira
   // instalação, pois varre a biblioteca inteira pela API do Drive sem
   // nenhum cache local ainda. Combina dois sinais reais: o avanço
@@ -2058,7 +2059,8 @@ function renderComicCard(f){
   return card;
 }
 
-async function resolveCoverSrc(f){
+async function resolveCoverSrc(f, opts){
+  opts = opts || {};
   if(coverMemoryCache.has(f.id)){
     const memo = coverMemoryCache.get(f.id);
     if(memo) return memo;
@@ -2078,7 +2080,15 @@ async function resolveCoverSrc(f){
   // (que baixava a mesma miniatura de novo). Isso custava uma rodada
   // inteira de rede à toa. Agora devolvemos a URL direto — se ela falhar,
   // quem chama trata isso no onerror da própria <img> (ver buildCoverNode).
-  if(f.thumbnailLink) return f.thumbnailLink.replace(/=s\d+$/, '=s400');
+  if(f.thumbnailLink){
+    const liveUrl = f.thumbnailLink.replace(/=s\d+$/, '=s400');
+    // opts.persistOffline: só as capas de pasta das seções da Home passam
+    // isto (ver buildCarouselCard) — dispara, sem esperar, a cópia offline
+    // dela em segundo plano (ver schedulePersistCoverOffline) enquanto a
+    // miniatura ao vivo já é devolvida e pintada na tela normalmente.
+    if(opts.persistOffline) schedulePersistCoverOffline(f.id, liveUrl);
+    return liveUrl;
+  }
   return resolveCoverFallback(f);
 }
 
@@ -2192,6 +2202,41 @@ function cacheResolvedCover(id, dataUrl){
     idbSet('covers', {id, dataUrl, ts: Date.now()}).catch(()=>{});
     scheduleCoversTrim();
   }
+}
+
+// Gera e guarda, em segundo plano, uma cópia offline (dataURL) da capa de
+// uma pasta mostrada nos carrosséis da Home (Coleção Homem-Aranha/X-Men/
+// Mangás/Batman). Sem isso, essas capas específicas sempre dependiam da
+// miniatura ao vivo do Drive (thumbnailLink) — que precisa de internet
+// toda vez, mesmo depois de a pessoa já ter visto aquela seção antes
+// (diferente das logos das seções, que já ficam offline via sw.js). Só
+// essas capas de pasta usam isto (ver chamada em resolveCoverSrc, com
+// opts.persistOffline, disparada só pelo caminho isFolder de
+// buildCarouselCard) — as capas de HQ comuns da biblioteca continuam sem
+// isso, pra não inflar o armazenamento com a biblioteca inteira.
+// Roda no máximo uma vez por capa: assim que salva no IndexedDB, a
+// PRÓXIMA chamada a resolveCoverSrc já encontra o resultado ali (mesma
+// gaveta 'covers', mesmo teto MAX_COVERS_BYTES) e nem chega a chamar isto
+// de novo. Nunca atrapalha a exibição: a miniatura ao vivo já foi
+// devolvida e pintada na tela antes disso rodar em segundo plano.
+const coverPersistInFlight = new Set();
+function schedulePersistCoverOffline(fileId, url){
+  if(coverPersistInFlight.has(fileId)) return;
+  coverPersistInFlight.add(fileId);
+  (async ()=>{
+    try{
+      const already = await idbGet('covers', fileId);
+      if(already) return;
+      const dataUrl = await toDataUrl(url);
+      cacheResolvedCover(fileId, dataUrl);
+    }catch(e){
+      // Melhor esforço: sem internet, CORS bloqueando, etc. — a capa
+      // simplesmente continua dependendo do Drive por enquanto, sem
+      // travar nem avisar a pessoa.
+    }finally{
+      coverPersistInFlight.delete(fileId);
+    }
+  })();
 }
 
 // Renderização leve de capa a partir de um PDF remoto: só a página 1, em
@@ -3334,7 +3379,7 @@ function normalizeForFolderMatch(s){
 
 const ALLFOLDERS_CACHE_KEY = 'planetahq_allfolders_cache_v1';
 
-// Varredura ÚNICA de toda a biblioteca, usada pra montar as 4 seções da
+// Varredura ÚNICA de toda a biblioteca, usada pra montar as 5 seções da
 // Home de uma vez só (Aranha, X-Men, Mangás e Todos os quadrinhos/
 // Recomendados).
 //
@@ -3376,7 +3421,7 @@ async function crawlLibrarySections(token, isStale, errorState){
     await runLimited(listing.folders, 6, sub=>walk(sub.id, [...path, sub.name]));
   }
   await walk(CONFIG.rootFolderId, []);
-  if(isStale(token)) return {comics: [], folders: [], aranhaFolders: [], xmenFolders: [], mangaFolders: []};
+  if(isStale(token)) return {comics: [], folders: [], aranhaFolders: [], xmenFolders: [], mangaFolders: [], batmanFolders: []};
 
   const seenAranhaNames = new Set();
   const aranhaFolders = allFolders.filter(f=>{
@@ -3407,8 +3452,13 @@ async function crawlLibrarySections(token, isStale, errorState){
   }
   const xmenFolders = await childrenOfNamedFolder(['x men','xmen']);
   const mangaFolders = await childrenOfNamedFolder(['mangas','manga']);
+  // Pasta "Batman" (dentro de "DC" na prática, mas achamos pelo nome em
+  // qualquer nível, do mesmo jeito que X-Men/Mangás — sem depender do
+  // caminho exato "DC > Batman"), listando as subpastas dela (ex.: "1 -
+  // Batman: Ano Um" e as demais) pra "Coleção Batman".
+  const batmanFolders = await childrenOfNamedFolder(['batman']);
 
-  return {comics, folders: allFolders, aranhaFolders, xmenFolders, mangaFolders};
+  return {comics, folders: allFolders, aranhaFolders, xmenFolders, mangaFolders, batmanFolders};
 }
 
 function buildCarouselCard(item, opts){
@@ -3440,7 +3490,7 @@ function buildCarouselCard(item, opts){
         } else {
           coverFile = await resolveFolderCoverFile(item.id);
           if(!coverFile){ if(ph) ph.classList.remove('skeleton'); return; }
-          src = await resolveCoverSrc(coverFile);
+          src = await resolveCoverSrc(coverFile, {persistOffline:true});
         }
       } else {
         coverFile = item;
@@ -3545,6 +3595,7 @@ const ARANHA_CACHE_KEY = 'planetahq_aranha_cache_v2';
 const XMEN_CACHE_KEY = 'planetahq_xmen_cache_v1';
 const MANGA_CACHE_KEY = 'planetahq_manga_cache_v1';
 const ALLCOMICS_CACHE_KEY = 'planetahq_allcomics_cache_v1';
+const BATMAN_CACHE_KEY = 'planetahq_batman_cache_v1';
 const HOME_CACHE_MAX_AGE = 6*3600*1000;
 
 async function readHomeCache(key, arrProp){
@@ -3602,11 +3653,11 @@ async function finalizeHomeSectionResult(key, arrProp, freshValue, hadError){
 let librarySectionsToken = 0;
 let librarySectionsPromise = null;
 
-// Único ponto de entrada pras 4 seções da Home + índice completo de
+// Único ponto de entrada pras 5 seções da Home + índice completo de
 // pastas — todas nascem da mesma varredura (crawlLibrarySections), então
 // pedir mais de uma ao mesmo tempo (como renderHomeSections faz) não
 // dispara mais de uma varredura. O cache "fresco" (menos de 6h) só é usado
-// se TODAS as 5 gavetas estiverem em dia; se qualquer uma estiver faltando
+// se TODAS as 6 gavetas estiverem em dia; se qualquer uma estiver faltando
 // ou vencida, refaz a varredura inteira de uma vez (o que também as
 // resssincroniza).
 async function getLibrarySections(forceRefresh){
@@ -3615,21 +3666,23 @@ async function getLibrarySections(forceRefresh){
 
   if(!forceRefresh){
     const now = Date.now();
-    const [cAranha, cXMen, cManga, cComics, cAllFolders] = await Promise.all([
+    const [cAranha, cXMen, cManga, cComics, cAllFolders, cBatman] = await Promise.all([
       readHomeCache(ARANHA_CACHE_KEY, 'folders'),
       readHomeCache(XMEN_CACHE_KEY, 'folders'),
       readHomeCache(MANGA_CACHE_KEY, 'folders'),
       readHomeCache(ALLCOMICS_CACHE_KEY, 'comics'),
-      readHomeCache(ALLFOLDERS_CACHE_KEY, 'folders')
+      readHomeCache(ALLFOLDERS_CACHE_KEY, 'folders'),
+      readHomeCache(BATMAN_CACHE_KEY, 'folders')
     ]);
     const fresh = c=>c && (now - c.savedAt < HOME_CACHE_MAX_AGE);
-    if(fresh(cAranha) && fresh(cXMen) && fresh(cManga) && fresh(cComics) && fresh(cAllFolders)){
+    if(fresh(cAranha) && fresh(cXMen) && fresh(cManga) && fresh(cComics) && fresh(cAllFolders) && fresh(cBatman)){
       return {
         aranhaFolders: cAranha.folders,
         xmenFolders: cXMen.folders,
         mangaFolders: cManga.folders,
         comics: cComics.comics,
-        allFolders: cAllFolders.folders
+        allFolders: cAllFolders.folders,
+        batmanFolders: cBatman.folders
       };
     }
   }
@@ -3638,14 +3691,15 @@ async function getLibrarySections(forceRefresh){
     const token = ++librarySectionsToken;
     const errorState = {hadError:false};
     const raw = await crawlLibrarySections(token, t=>t!==librarySectionsToken, errorState);
-    const [aranhaFolders, xmenFolders, mangaFolders, comics, allFolders] = await Promise.all([
+    const [aranhaFolders, xmenFolders, mangaFolders, comics, allFolders, batmanFolders] = await Promise.all([
       finalizeHomeSectionResult(ARANHA_CACHE_KEY, 'folders', raw.aranhaFolders, errorState.hadError),
       finalizeHomeSectionResult(XMEN_CACHE_KEY, 'folders', raw.xmenFolders, errorState.hadError),
       finalizeHomeSectionResult(MANGA_CACHE_KEY, 'folders', raw.mangaFolders, errorState.hadError),
       finalizeHomeSectionResult(ALLCOMICS_CACHE_KEY, 'comics', raw.comics, errorState.hadError),
-      finalizeHomeSectionResult(ALLFOLDERS_CACHE_KEY, 'folders', raw.folders, errorState.hadError)
+      finalizeHomeSectionResult(ALLFOLDERS_CACHE_KEY, 'folders', raw.folders, errorState.hadError),
+      finalizeHomeSectionResult(BATMAN_CACHE_KEY, 'folders', raw.batmanFolders, errorState.hadError)
     ]);
-    return { aranhaFolders, xmenFolders, mangaFolders, comics, allFolders };
+    return { aranhaFolders, xmenFolders, mangaFolders, comics, allFolders, batmanFolders };
   })();
   try{ return await librarySectionsPromise; }
   finally{ librarySectionsPromise = null; }
@@ -3789,7 +3843,8 @@ function buildRecommended(allComics){
 // Uma <img> de verdade não tem esse problema.
 const HOME_LOGOS = {
   aranha: 'https://i.postimg.cc/x1cRhdkq/XRecorder-17092024-211205-removebg-preview.png',
-  xmen: 'https://i.postimg.cc/cJzP2j41/x-men-seeklogo.png'
+  xmen: 'https://i.postimg.cc/cJzP2j41/x-men-seeklogo.png',
+  batman: 'https://i.postimg.cc/bJBSv7pv/batman-1-logo-png-transparent.png'
 };
 
 // Se a imagem falhar por qualquer motivo (sem internet na primeiríssima
@@ -3806,7 +3861,7 @@ function wireHomeLogoFallback(section, id){
   }, {once:true});
 }
 
-function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, mangaFolders, allComics}){
+function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, allComics}){
   const recommended = buildRecommended(allComics);
   wrap.innerHTML = '';
   let anySection = false;
@@ -3842,6 +3897,18 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
   );
   if(secXMen){ wrap.appendChild(secXMen); anySection = true; wireHomeLogoFallback(secXMen, 'xmen'); }
 
+  // "Coleção [logo do Batman]": subpastas de dentro da pasta "Batman" (ex.:
+  // "DC > Batman > 1 - Batman: Ano Um" e as demais) — mesma lógica das
+  // seções Homem-Aranha/X-Men acima, ver childrenOfNamedFolder.
+  const secBatman = buildHomeSection(
+    `Coleção <span class="section-logo-text hidden" data-logo-text="batman">Batman</span><img class="section-logo" data-logo="batman" src="${HOME_LOGOS.batman}" alt="Batman" loading="eager" decoding="async">`,
+    batmanFolders,
+    (it)=>{
+      return buildCarouselCard(it, { isFolder:true });
+    }
+  );
+  if(secBatman){ wrap.appendChild(secBatman); anySection = true; wireHomeLogoFallback(secBatman, 'batman'); }
+
   const secManga = buildHomeSection(
     '🎌 Coleção Mangás',
     mangaFolders,
@@ -3874,22 +3941,24 @@ async function renderHomeSections(forceRefresh, onProgress){
   // o cache antes de buscar de novo, e por isso todas as seções sumiam da
   // tela até a busca nova terminar). A busca de verdade (item 2 abaixo)
   // troca pelos dados frescos assim que chegar, sem travar nada.
-  const [cachedAranha, cachedXMen, cachedManga, cachedComics, continueItemsFast] = await Promise.all([
+  const [cachedAranha, cachedXMen, cachedManga, cachedComics, continueItemsFast, cachedBatman] = await Promise.all([
     readHomeCache(ARANHA_CACHE_KEY, 'folders'),
     readHomeCache(XMEN_CACHE_KEY, 'folders'),
     readHomeCache(MANGA_CACHE_KEY, 'folders'),
     readHomeCache(ALLCOMICS_CACHE_KEY, 'comics'),
-    getContinueItems()
+    getContinueItems(),
+    readHomeCache(BATMAN_CACHE_KEY, 'folders')
   ]);
   if(isStale(myToken)) return;
 
-  if(cachedAranha || cachedXMen || cachedManga || cachedComics){
+  if(cachedAranha || cachedXMen || cachedManga || cachedComics || cachedBatman){
     wrap.classList.remove('hidden');
     paintHomeSections(wrap, {
       continueItems: continueItemsFast,
       aranhaFolders: cachedAranha ? cachedAranha.folders : [],
       xmenFolders: cachedXMen ? cachedXMen.folders : [],
       mangaFolders: cachedManga ? cachedManga.folders : [],
+      batmanFolders: cachedBatman ? cachedBatman.folders : [],
       allComics: cachedComics ? cachedComics.comics : []
     });
   } else {
@@ -3897,7 +3966,7 @@ async function renderHomeSections(forceRefresh, onProgress){
     wrap.classList.remove('hidden');
   }
 
-  // 2) Busca (ou revalida) as 4 seções numa varredura ÚNICA da biblioteca
+  // 2) Busca (ou revalida) as 5 seções numa varredura ÚNICA da biblioteca
   // (ver crawlLibrarySections) — antes eram até 4 varreduras quase
   // inteiras e redundantes rodando em paralelo, o que fazia o "Atualizar"
   // demorar bem mais do que precisava.
@@ -3909,6 +3978,7 @@ async function renderHomeSections(forceRefresh, onProgress){
         aranhaFolders: cachedAranha ? cachedAranha.folders : [],
         xmenFolders: cachedXMen ? cachedXMen.folders : [],
         mangaFolders: cachedManga ? cachedManga.folders : [],
+        batmanFolders: cachedBatman ? cachedBatman.folders : [],
         comics: cachedComics ? cachedComics.comics : []
       };
     })
@@ -3921,6 +3991,7 @@ async function renderHomeSections(forceRefresh, onProgress){
     aranhaFolders: sections.aranhaFolders,
     xmenFolders: sections.xmenFolders,
     mangaFolders: sections.mangaFolders,
+    batmanFolders: sections.batmanFolders,
     allComics: sections.comics
   });
 }

@@ -55,7 +55,12 @@
   index.html, adicione a URL dela aqui também (e suba a CACHE_VERSION),
   senão essa logo nova nunca vai ficar instantânea/offline.
 */
-const CACHE_VERSION = 'v13';
+/*
+  v14: adicionada a logo da seção "Coleção Batman" (ver HOME_LOGOS no
+  index.html) à casca do app, do mesmo jeito que Homem-Aranha e X-Men
+  acima — mesma lógica, mesmo motivo.
+*/
+const CACHE_VERSION = 'v14';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
@@ -71,7 +76,8 @@ const APP_SHELL = [
   // Logos das seções da Home — precisam ser EXATAMENTE as mesmas URLs de
   // HOME_LOGOS no index.html.
   'https://i.postimg.cc/x1cRhdkq/XRecorder-17092024-211205-removebg-preview.png',
-  'https://i.postimg.cc/cJzP2j41/x-men-seeklogo.png'
+  'https://i.postimg.cc/cJzP2j41/x-men-seeklogo.png',
+  'https://i.postimg.cc/bJBSv7pv/batman-1-logo-png-transparent.png'
 ];
 // URLs absolutas resolvidas uma única vez, pra comparar por igualdade exata
 // (nunca mais por sufixo/heurística) na hora de decidir o que é "casca".
