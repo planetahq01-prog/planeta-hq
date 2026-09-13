@@ -429,6 +429,7 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 .carousel::-webkit-scrollbar{display:none;}
 .carousel.dragging{cursor:grabbing;scroll-snap-type:none;}
 .carousel.dragging *{pointer-events:none;}
+.carousel-card.loading{opacity:.6;pointer-events:none;}
 .carousel-card{
   flex:0 0 138px;width:138px;scroll-snap-align:start;
   display:flex;flex-direction:column;gap:6px;
@@ -690,7 +691,6 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
     <div class="reader-top">
       <button class="icon-btn" id="btn-close-reader"></button>
       <div class="reader-title" id="reader-title"></div>
-      <button class="fav-btn" id="btn-fav-reader" title="Favoritar"></button>
       <button class="icon-btn" id="btn-reader-settings"></button>
       <button class="icon-btn" id="btn-download-reader"></button>
     </div>
@@ -1433,7 +1433,7 @@ function runLimited(items, limit, worker){
    simultâneas — então telas com muita coisa abrem mais rápido e gastam
    bem menos dado.
    --------------------------------------------------------------------- */
-const COVER_MAX_CONCURRENT = 6;
+const COVER_MAX_CONCURRENT = 9;
 let coverActiveCount = 0;
 const coverQueue = [];
 function pumpCoverQueue(){
@@ -1452,7 +1452,7 @@ function scheduleCoverTask(task){ coverQueue.push(task); pumpCoverQueue(); }
 // CBZ) — isso sobe worker do pdf.js e gasta CPU/memória de verdade, então
 // rodar 6 ao mesmo tempo (teto da fila de visibilidade acima) deixava o
 // app pesado/travando ao rolar a biblioteca. Aqui o teto é bem menor.
-const NETWORK_COVER_MAX_CONCURRENT = 2;
+const NETWORK_COVER_MAX_CONCURRENT = 3;
 let networkCoverActiveCount = 0;
 const networkCoverQueueTasks = [];
 function pumpNetworkCoverQueue(){
@@ -1628,6 +1628,15 @@ function waitForVisibleCovers(maxWaitMs, onProgress){
     const initial = Math.max(1, document.querySelectorAll(selector).length);
     const start = Date.now();
     const tick = ()=>{
+      // Chamar isso de novo a cada tick (e não só uma vez, antes do loop
+      // começar) é o que resolve a barra travando fixa em 63%/66%: algumas
+      // capas só terminam de entrar em pendingCoverNodes um instante depois
+      // da primeira chamada (ver comentário de lazyLoadCover, que adia via
+      // requestAnimationFrame quando o card ainda não está no DOM) — sem
+      // repetir a chamada, essas ficavam "esquecidas", observadas mas nunca
+      // de fato disparadas, e a contagem de "restantes" nunca chegava a
+      // zero antes do prazo de segurança de 45s estourar.
+      forceLoadAllPendingCovers();
       const remaining = document.querySelectorAll(selector).length;
       const doneFrac = 1 - Math.min(1, remaining / initial);
       if(onProgress) onProgress(doneFrac);
@@ -1823,7 +1832,7 @@ async function runInitialLoad(){
   // waitForVisibleCovers).
   setLoadingSub('Carregando capas das seções…');
   forceLoadAllPendingCovers();
-  await waitForVisibleCovers(45000, frac=>{ progress.covers = Math.max(progress.covers, frac); recompute(); });
+  await waitForVisibleCovers(20000, frac=>{ progress.covers = Math.max(progress.covers, frac); recompute(); });
   progress.covers = 1; recompute();
 
   if(finished) return;
@@ -1991,9 +2000,10 @@ function renderFolderCard(f, opts){
   const cover = el('div','folder-cover');
   const ph = elHtml('div','cover-placeholder skeleton', ICONS.folder);
   cover.appendChild(ph);
+  cover.appendChild(buildFavButton(f));
   card.appendChild(cover);
   card.appendChild(el('div','label', f.name));
-  card.onclick = opts.fromSearch ? ()=>openFolderFromSearch(f) : ()=>enterFolder(f.id, f.name);
+  card.onclick = opts.onOpen ? ()=>opts.onOpen(f) : (opts.fromSearch ? ()=>openFolderFromSearch(f) : ()=>enterFolder(f.id, f.name));
   return card;
 }
 
@@ -2002,7 +2012,6 @@ function renderComicCard(f){
   card.dataset.id = f.id;
   const ph = elHtml('div','cover-placeholder skeleton', `${ICONS.page}<span class="ph-name">${escapeHtml(f.name.split('.')[0].slice(0,40))}</span>`);
   card.appendChild(ph);
-  card.appendChild(buildFavButton(f));
   card.appendChild(el('div','label', f.name.replace(/\.(pdf|cbz|cbr)$/i,'')));
   const meta = el('div','meta');
   meta.appendChild(el('span','ext-badge', f.name.split('.').pop().toUpperCase()));
@@ -2018,7 +2027,8 @@ function renderComicCard(f){
   card.onclick = async ()=>{
     if(card.classList.contains('loading')) return;
     card.classList.add('loading');
-    try{ await openReader(f); }
+    const pid = f._parentId!=null ? f._parentId : (state.path[state.path.length-1] && state.path[state.path.length-1].id);
+    try{ await openReader(f, undefined, pid); }
     finally{ card.classList.remove('loading'); }
   };
   dlBtn.onclick = async (e)=>{
@@ -2628,7 +2638,6 @@ async function renderDownloads(){
     const card = el('div','card comic');
     const ph = elHtml('div','cover-placeholder skeleton', `${ICONS.page}<span class="ph-name">${escapeHtml(it.name.split('.')[0].slice(0,40))}</span>`);
     card.appendChild(ph);
-    card.appendChild(buildFavButton({id: it.id, name: it.name, mimeType: it.mimeType, size: it.size, _ext: it.ext}));
     card.appendChild(el('div','label', it.name.replace(/\.(pdf|cbz|cbr)$/i,'')));
     const meta = el('div','meta');
     meta.appendChild(el('span','', it.path || ''));
@@ -2657,23 +2666,29 @@ async function renderDownloads(){
 /* ---------------------------------------------------------------------
    7.5) Favoritos
    --------------------------------------------------------------------- */
+// Muda pra aba Biblioteca e entra direto na pasta favoritada (que pode
+// estar em qualquer nível da árvore) — reaproveita openFolderFromSearch,
+// que já reseta o caminho pra raiz antes de entrar.
+function openFavoriteFolder(f){
+  const libTab = document.querySelector('.tab[data-tab="library"]');
+  if(libTab && !libTab.classList.contains('active')) libTab.click();
+  openFolderFromSearch(f);
+}
+
 async function renderFavorites(){
   const grid = $('#grid-favorites');
-  const items = (await idbAll('favorites')).filter(it=>(it._ext||guessExt(it))!=='cbr');
+  const items = (await idbAll('favorites')).filter(it=>it.mimeType==='application/vnd.google-apps.folder');
   grid.innerHTML = '';
   if(items.length===0){
-    grid.innerHTML = `<div class="empty-state">${ICONS.star}<h3>Nenhum favorito ainda</h3>Toque na estrela de qualquer HQ para adicioná-la aqui.</div>`;
+    grid.innerHTML = `<div class="empty-state">${ICONS.star}<h3>Nenhum favorito ainda</h3>Toque na estrela de qualquer pasta para adicioná-la aqui.</div>`;
     return;
   }
   items.sort((a,b)=>b.addedAt-a.addedAt);
-  state.currentListContext = items;
-  state.currentListIsLocal = false;
   items.forEach(it=>{
-    const card = renderComicCard({id: it.id, name: it.name, mimeType: it.mimeType, size: it.size, _ext: it._ext, thumbnailLink: it.thumbnailLink});
+    const card = renderFolderCard(it, {onOpen: openFavoriteFolder});
     grid.appendChild(card);
+    lazyLoadCover(card, ()=>attachFolderCoverAsync(card, {id: it.id, name: it.name}));
   });
-  const comicCards = [...grid.querySelectorAll('.card')].map((card,i)=>({card, f: items[i]}));
-  comicCards.forEach(({card, f})=>lazyLoadCover(card, ()=>attachCoverAsync(card, {id: f.id, name: f.name, mimeType: f.mimeType, thumbnailLink: f.thumbnailLink, _ext: f._ext})));
 }
 
 /* ---------------------------------------------------------------------
@@ -2705,7 +2720,6 @@ async function renderHistory(){
     const card = el('div','card comic');
     const ph = elHtml('div','cover-placeholder skeleton', `${ICONS.page}<span class="ph-name">${escapeHtml(it.name.split('.')[0].slice(0,40))}</span>`);
     card.appendChild(ph);
-    card.appendChild(buildFavButton({id: it.id, name: it.name, mimeType: it.mimeType, size: it.size, _ext: it._ext, thumbnailLink: it.thumbnailLink}));
     card.appendChild(el('div','label', it.name.replace(/\.(pdf|cbz|cbr)$/i,'')));
     const meta = el('div','meta');
     const statusText = it.pct >= 98 ? 'Concluído ✓' : `${it.pct}% · pág. ${it.pageIndex+1}/${it.pageCount}`;
@@ -2742,6 +2756,7 @@ async function saveProgress(fileMeta, pageIndex, pageCount){
     id: fileMeta.id, name: fileMeta.name, mimeType: fileMeta.mimeType,
     size: fileMeta.size, _ext: fileMeta._ext || guessExt(fileMeta),
     thumbnailLink: fileMeta.thumbnailLink,
+    parentId: state.reader.parentId || null,
     pageIndex, pageCount, pct,
     path: state.path.map(p=>p.name).join(' / '),
     updatedAt: Date.now()
@@ -2784,7 +2799,7 @@ function buildFavButton(fileMeta, tag){
   return btn;
 }
 
-async function openReader(fileMeta, forceLocal){
+async function openReader(fileMeta, forceLocal, parentId){
   const wasHidden = $('#view-reader').classList.contains('hidden');
   $('#view-reader').classList.remove('hidden');
   // Só empilha um nível de histórico ao abrir o leitor pela primeira vez;
@@ -2806,6 +2821,7 @@ async function openReader(fileMeta, forceLocal){
   status.classList.remove('hidden');
   resetPinchZoom(img);
   state.reader.forceLocal = forceLocal;
+  state.reader.parentId = (parentId!=null) ? parentId : (fileMeta.parentId!=null ? fileMeta.parentId : (fileMeta._parentId!=null ? fileMeta._parentId : null));
   state.reader.siblings = state.currentListContext || [];
   state.reader.siblingIndex = state.reader.siblings.findIndex(x=>x.id===fileMeta.id);
   updateChapterNavButtons();
@@ -2844,7 +2860,6 @@ async function openReader(fileMeta, forceLocal){
     }catch(e){}
 
     updateDownloadButtonReader();
-    updateFavButtonReader(fileMeta);
     status.classList.add('hidden');
     cacheCoverFromDoc(fileMeta.id, doc); // sem await: não atrasa a leitura
     await rebuildReaderView();
@@ -3145,7 +3160,7 @@ async function openAdjacentComic(delta){
     id: target.id, name: target.name, mimeType: target.mimeType,
     size: target.size, _ext: target._ext || target.ext, thumbnailLink: target.thumbnailLink
   };
-  await openReader(meta, !!state.currentListIsLocal);
+  await openReader(meta, !!state.currentListIsLocal, state.reader.parentId);
 }
 
 function closeReader(){
@@ -3169,19 +3184,6 @@ async function updateDownloadButtonReader(){
   const existing = await idbGet('downloads', state.reader.fileMeta.id);
   btn.innerHTML = existing ? ICONS.check : ICONS.download;
 }
-
-async function updateFavButtonReader(fileMeta){
-  const btn = $('#btn-fav-reader');
-  const fav = await isFavorite(fileMeta.id);
-  btn.classList.toggle('active', fav);
-}
-$('#btn-fav-reader').onclick = async ()=>{
-  const meta = state.reader.fileMeta;
-  if(!meta) return;
-  const nowFav = await toggleFavorite(meta);
-  $('#btn-fav-reader').classList.toggle('active', nowFav);
-  toast(nowFav ? 'Adicionado aos favoritos' : 'Removido dos favoritos');
-};
 
 $('#btn-download-reader').onclick = async ()=>{
   const meta = state.reader.fileMeta;
@@ -3364,7 +3366,7 @@ async function crawlLibrarySections(token, isStale, errorState){
     listing.files.forEach(f=>{
       if(seenComics.has(f.id)) return;
       seenComics.add(f.id);
-      comics.push({...f, _path: path});
+      comics.push({...f, _path: path, _parentId: folderId});
     });
     listing.folders.forEach(sub=>{
       if(seenFolders.has(sub.id)) return;
@@ -3420,7 +3422,7 @@ function buildCarouselCard(item, opts){
   if(opts.progressPct){
     cover.appendChild(elHtml('div','cc-progress', `<i style="width:${opts.progressPct}%"></i>`));
   }
-  if(!isFolder) cover.appendChild(buildFavButton(item, 'span'));
+  if(isFolder) cover.appendChild(buildFavButton(item, 'span'));
   btn.appendChild(cover);
 
   btn.appendChild(el('div','cc-name', item.name.replace(/\.(pdf|cbz|cbr)$/i,'')));
@@ -3463,9 +3465,27 @@ function buildCarouselCard(item, opts){
   };
   lazyLoadCover(btn, loadCover);
 
-  btn.onclick = ()=>{
-    if(isFolder) enterFolder(item.id, item.name);
-    else openReader(item);
+  btn.onclick = async ()=>{
+    if(isFolder){ enterFolder(item.id, item.name); return; }
+    if(btn.classList.contains('loading')) return;
+    const pid = item.parentId!=null ? item.parentId : item._parentId;
+    if(pid!=null){
+      btn.classList.add('loading');
+      try{
+        const {files} = await driveListFolder(pid);
+        state.currentListContext = files;
+        state.currentListIsLocal = false;
+        await openReader(item, false, pid);
+      }catch(e){
+        // Sem internet ou pasta indisponível: abre a HQ mesmo assim, só
+        // sem os botões de HQ anterior/próxima desta vez.
+        await openReader(item);
+      }finally{
+        btn.classList.remove('loading');
+      }
+    } else {
+      await openReader(item);
+    }
   };
   return btn;
 }
@@ -4021,7 +4041,6 @@ Object.entries({
   'btn-settings': ICONS.settings,
   'btn-back': ICONS.chevLeft,
   'btn-close-reader': ICONS.close,
-  'btn-fav-reader': ICONS.star,
   'btn-reader-settings': ICONS.settings,
   'btn-download-reader': ICONS.download,
   'nav-prev': ICONS.chevLeft,
