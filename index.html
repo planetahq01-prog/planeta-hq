@@ -2,7 +2,7 @@
 <html lang="pt-BR">
 <head>
 <meta charset="UTF-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#0d0c12">
 <link rel="manifest" href="./manifest.json">
 <title>Planeta HQ</title>
@@ -43,6 +43,14 @@
 html,body{
   margin:0;padding:0;height:100%;color:var(--paper);font-family:var(--font-body);
   background:radial-gradient(ellipse 900px 500px at 50% -10%, #241f38 0%, var(--ink) 55%) var(--ink);
+  /* Bloqueia o pinch-zoom e o duplo-toque-pra-zoom nativos do navegador
+     em todo o app (home, navegação, leitura). "pan-x pan-y" mantém a
+     rolagem normal (vertical e os carrosséis horizontais) funcionando,
+     só o gesto de pinça/zoom fica desativado. A tela de leitura tem seu
+     próprio sistema de zoom em JS, então recebe touch-action:none nela
+     mesma pra ter controle total sobre os toques (ver .reader-scroll e
+     .zoom-wrap). */
+  touch-action:pan-x pan-y;
 }
 body{-webkit-tap-highlight-color:transparent;overscroll-behavior:none;}
 button{font-family:var(--font-body);cursor:pointer;}
@@ -337,7 +345,7 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
   touch-action:pan-y;
 }
 #reader-scroll-inner{width:100%;margin:0 auto;}
-.reader-page{width:100%;}
+.reader-page{width:100%;overflow:hidden;position:relative;}
 .reader-page img{width:100%;height:auto;display:block;}
 .reader-page.skeleton{
   aspect-ratio:2/3;
@@ -2796,8 +2804,7 @@ async function openReader(fileMeta, forceLocal){
   $('#reader-stage').classList.add('hidden');
   status.innerHTML = '<div class="spinner"></div><div>Abrindo HQ...</div>';
   status.classList.remove('hidden');
-  state.reader.zoom = 1;
-  updateZoomLabel();
+  resetPinchZoom(img);
   state.reader.forceLocal = forceLocal;
   state.reader.siblings = state.currentListContext || [];
   state.reader.siblingIndex = state.reader.siblings.findIndex(x=>x.id===fileMeta.id);
@@ -2882,8 +2889,6 @@ function prevPage(){ showPage(state.reader.pageIndex-1); }
 
 function applyFitAndZoom(){
   const img = $('#reader-img');
-  const wrap = $('#zoom-wrap');
-  const z = state.reader.zoom;
   if(state.reader.fit === 'height'){
     img.style.height = '100%';
     img.style.width = 'auto';
@@ -2893,12 +2898,7 @@ function applyFitAndZoom(){
   }
   img.style.maxWidth = 'none';
   img.style.maxHeight = 'none';
-  img.style.transformOrigin = '50% 0';
-  img.style.willChange = 'transform';
-  img.style.transform = z > 1 ? `scale(${z})` : 'none';
-  wrap.style.overflow = z > 1 ? 'auto' : 'hidden';
-  $('#nav-prev').style.pointerEvents = z>1 ? 'none' : '';
-  $('#nav-next').style.pointerEvents = z>1 ? 'none' : '';
+  resetPinchZoom(img);
 }
 
 async function buildScrollReader(doc){
@@ -2916,7 +2916,6 @@ async function buildScrollReader(doc){
     inner.appendChild(pageDiv);
     pageEls.push(pageDiv);
   }
-  applyScrollZoom();
   $('#page-count').textContent = `${state.reader.pageIndex+1} / ${doc.pageCount}`;
 
   const io = new IntersectionObserver((entries)=>{
@@ -2964,23 +2963,163 @@ function unloadScrollPage(pageDiv){
   pageDiv.innerHTML = '';
   pageDiv.classList.add('skeleton');
 }
-function applyScrollZoom(){
-  const inner = document.getElementById('reader-scroll-inner');
-  if(!inner) return;
-  const z = state.reader.zoom;
-  inner.style.transformOrigin = '50% 0';
-  inner.style.willChange = 'transform';
-  inner.style.transform = z > 1 ? `scale(${z})` : 'none';
-}function updateZoomLabel(){
-  const label = $('#rs-zoom-value');
-  if(label) label.textContent = Math.round(state.reader.zoom*100)+'%';
+/* =========================================================================
+   ZOOM POR PINÇA NA LEITURA (sem conflito com a rolagem)
+   -------------------------------------------------------------------------
+   Cada imagem de página guarda seu próprio estado de zoom em `img._zoom =
+   {scale, tx, ty}` e recebe só um `transform: translate(tx,ty) scale(s)`
+   com transform-origin 0 0 — a "caixa" ao redor dela (a div da página no
+   modo rolagem, ou o #zoom-wrap no modo paginado) NUNCA é transformada,
+   então o tamanho dela no layout não muda e a rolagem da lista continua
+   normal o tempo todo, mesmo com uma página zoomada lá dentro.
+
+   A matemática usa direto as coordenadas de tela do toque (clientX/Y),
+   então funciona igual em qualquer canto da imagem — não só no centro —
+   e também dá pra "arrastar" o zoom enquanto belisca (os dois dedos se
+   movendo juntos), igual o zoom padrão de fotos/PDFs.
+
+   Só entra em ação durante um gesto de 2 dedos (ou 1 dedo arrastando uma
+   página que já está com zoom>1); fora isso a rolagem normal do
+   navegador cuida de tudo sozinha — é por isso que não trava mais.
+   ========================================================================= */
+const PINCH_MAX_SCALE = 4;
+const PINCH_MIN_SCALE = 1;
+
+function pinchDist(a,b){ return Math.hypot(a.clientX-b.clientX, a.clientY-b.clientY); }
+function pinchMid(a,b){ return {x:(a.clientX+b.clientX)/2, y:(a.clientY+b.clientY)/2}; }
+
+function getPinchState(img){
+  if(!img._zoom) img._zoom = {scale:1, tx:0, ty:0};
+  return img._zoom;
 }
-function setZoom(z){
-  state.reader.zoom = Math.round(Math.min(4, Math.max(1, z)) * 100) / 100;
-  updateZoomLabel();
-  if(state.reader.mode === 'scroll') applyScrollZoom();
-  else applyFitAndZoom();
+
+function applyPinchTransform(img){
+  const z = getPinchState(img);
+  img.style.transformOrigin = '0 0';
+  img.style.willChange = 'transform';
+  img.style.transform = (z.scale===1 && z.tx===0 && z.ty===0) ? 'none' : `translate(${z.tx}px,${z.ty}px) scale(${z.scale})`;
 }
+
+// Mantém a imagem zoomada sobreposta à sua "caixa" (a página ou o
+// zoom-wrap), sem deixar o usuário arrastá-la pro vazio.
+function clampPinch(img, container){
+  const z = getPinchState(img);
+  const c = container.getBoundingClientRect();
+  const scaledW = c.width * z.scale, scaledH = c.height * z.scale;
+  const minTx = Math.min(0, c.width - scaledW), minTy = Math.min(0, c.height - scaledH);
+  z.tx = Math.min(0, Math.max(minTx, z.tx));
+  z.ty = Math.min(0, Math.max(minTy, z.ty));
+}
+
+function resetPinchZoom(img){
+  if(!img) return;
+  const z = getPinchState(img);
+  z.scale = 1; z.tx = 0; z.ty = 0;
+  img.style.transition = 'transform .18s ease';
+  applyPinchTransform(img);
+  setTimeout(()=>{ img.style.transition = ''; }, 200);
+}
+
+// Liga o gesto de pinça/arrastar-com-zoom num `container` (a "janela"
+// fixa, que nunca se transforma) cujo conteúdo zoomável é obtido via
+// `getImg(touchEvent)` — no modo rolagem isso muda a cada toque
+// (depende de qual página foi tocada); no modo paginado é sempre a
+// mesma imagem.
+function setupPinchZoom(container, getImg, getContainerFor){
+  let img = null, mode = null; // mode: 'pinch' | 'pan'
+  let prevDist = 0, prevMid = {x:0,y:0};
+  let lastTouch = {x:0,y:0};
+
+  function endGesture(){
+    if(img){
+      const z = getPinchState(img);
+      if(z.scale <= 1.02) resetPinchZoom(img);
+    }
+    img = null; mode = null;
+  }
+
+  container.addEventListener('touchstart', (e)=>{
+    if(e.touches.length===2){
+      const target = getImg(e);
+      if(!target) return;
+      if(img && img!==target) resetPinchZoom(img);
+      img = target;
+      mode = 'pinch';
+      img.style.transition = '';
+      prevDist = pinchDist(e.touches[0], e.touches[1]);
+      prevMid = pinchMid(e.touches[0], e.touches[1]);
+    } else if(e.touches.length===1){
+      const target = getImg(e);
+      if(target && target===img && getPinchState(img).scale>1.01){
+        mode = 'pan';
+        lastTouch = {x:e.touches[0].clientX, y:e.touches[0].clientY};
+      }
+    }
+  }, {passive:true});
+
+  container.addEventListener('touchmove', (e)=>{
+    if(mode==='pinch' && e.touches.length===2 && img){
+      e.preventDefault();
+      const z = getPinchState(img);
+      const newDist = pinchDist(e.touches[0], e.touches[1]);
+      const newMid = pinchMid(e.touches[0], e.touches[1]);
+      const newScale = Math.min(PINCH_MAX_SCALE, Math.max(PINCH_MIN_SCALE, z.scale * (newDist/prevDist)));
+      z.tx = newMid.x - (prevMid.x - z.tx) * (newScale/z.scale);
+      z.ty = newMid.y - (prevMid.y - z.ty) * (newScale/z.scale);
+      z.scale = newScale;
+      prevDist = newDist; prevMid = newMid;
+      clampPinch(img, getContainerFor(img));
+      applyPinchTransform(img);
+    } else if(mode==='pan' && e.touches.length===1 && img){
+      e.preventDefault();
+      const z = getPinchState(img);
+      const t = e.touches[0];
+      z.tx += t.clientX - lastTouch.x;
+      z.ty += t.clientY - lastTouch.y;
+      lastTouch = {x:t.clientX, y:t.clientY};
+      clampPinch(img, getContainerFor(img));
+      applyPinchTransform(img);
+    }
+  }, {passive:false});
+
+  container.addEventListener('touchend', (e)=>{
+    if(e.touches.length===0){
+      endGesture();
+    } else if(e.touches.length===1 && mode==='pinch' && img){
+      if(getPinchState(img).scale>1.01){
+        mode = 'pan';
+        lastTouch = {x:e.touches[0].clientX, y:e.touches[0].clientY};
+      } else {
+        resetPinchZoom(img);
+        img = null; mode = null;
+      }
+    }
+  }, {passive:true});
+  container.addEventListener('touchcancel', endGesture, {passive:true});
+
+  // Zoom saindo de foco (ex.: rolou pra outra página) reseta sozinho.
+  container.addEventListener('scroll', ()=>{
+    if(img && mode===null) endGesture();
+  }, {passive:true});
+}
+
+// Modo rolagem: delega pro card de página tocado; a "caixa" fixa é a
+// própria div .reader-page (que já tem o tamanho natural da imagem).
+setupPinchZoom(
+  $('#reader-scroll'),
+  (e)=>{ const page = e.target.closest('.reader-page'); return page ? page.querySelector('img') : null; },
+  (img)=> img.closest('.reader-page')
+);
+
+// Modo paginado: sempre a mesma imagem; escuta no reader-stage inteiro
+// (não só no zoom-wrap) porque os botões invisíveis de página
+// anterior/próxima ficam por cima da imagem e senão engoliriam o toque
+// antes da pinça começar. A "caixa" fixa pro cálculo é o #zoom-wrap.
+setupPinchZoom(
+  $('#reader-stage'),
+  ()=> $('#reader-img'),
+  ()=> $('#zoom-wrap')
+);
 
 function updateChapterNavButtons(){
   const list = state.reader.siblings || [];
@@ -3062,8 +3201,8 @@ $('#btn-download-reader').onclick = async ()=>{
   updateDownloadButtonReader();
 };
 
-$('#nav-prev').onclick = prevPage;
-$('#nav-next').onclick = nextPage;
+$('#nav-prev').onclick = ()=>{ if(getPinchState($('#reader-img')).scale<=1.01) prevPage(); };
+$('#nav-next').onclick = ()=>{ if(getPinchState($('#reader-img')).scale<=1.01) nextPage(); };
 $('#btn-prev-chapter').onclick = ()=>openAdjacentComic(-1);
 $('#btn-next-chapter').onclick = ()=>openAdjacentComic(1);
 $('#btn-close-reader').onclick = ()=>{ closeReader(); navSyncAfterBack(); };
@@ -3081,7 +3220,7 @@ document.addEventListener('keydown', e=>{
   let startX = null;
   stage.addEventListener('touchstart', e=>{ startX = e.touches[0].clientX; }, {passive:true});
   stage.addEventListener('touchend', e=>{
-    if(startX===null || state.reader.zoom>1) { startX=null; return; }
+    if(startX===null || getPinchState($('#reader-img')).scale>1.01) { startX=null; return; }
     const dx = e.changedTouches[0].clientX - startX;
     if(Math.abs(dx) > 50){ dx < 0 ? nextPage() : prevPage(); }
     startX = null;
