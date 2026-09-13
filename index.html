@@ -405,7 +405,11 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
    o título nunca fica vazio nem pisca em branco enquanto a logo baixa —
    ver applyHomeLogo/getHomeLogoDataUrl, que buscam isso em segundo plano,
    sem travar a pintura da seção. */
-.home-section-title .section-logo{height:22px;width:auto;object-fit:contain;vertical-align:middle;}
+.home-section-title .section-logo{height:34px;width:auto;object-fit:contain;vertical-align:middle;}
+/* Logo dos X-Men já nasce visualmente maior/mais larga que a do
+   Homem-Aranha (proporção do próprio arquivo), então recebe um aumento
+   menor que a base acima pra não ficar desproporcional na barra de título. */
+.home-section-title .section-logo[data-logo="xmen"]{height:28px;}
 .home-section-title .section-logo.hidden{display:none;}
 .home-section-title .section-logo-text.hidden{display:none;}
 .carousel{
@@ -1666,19 +1670,27 @@ async function runInitialLoad(){
   // da tela de 0-100% esperando a Home inteira (incluindo até 45s de
   // espera pelas capas) só pra revalidar dados que, na prática, quase
   // sempre ainda estão bons. Em vez disso: mostra a Home na hora usando o
-  // que já está salvo (localStorage + IndexedDB, tudo local, sem rede) e
-  // deixa a revalidação de verdade (renderHomeSections já faz isso
-  // sozinha, ver comentário lá) e o carregamento de cada capa rolarem em
-  // segundo plano, exatamente como já acontece ao voltar pra Home depois
-  // de entrar numa pasta e sair — sem bloquear nada. Isso é o que faz a
-  // diferença entre "1-2 minutos toda vez que abro o app" e "abre na
-  // hora, e vou vendo as capinhas aparecerem".
-  const hasAnyHomeCache = !!(
-    localStorage.getItem(ARANHA_CACHE_KEY) ||
-    localStorage.getItem(XMEN_CACHE_KEY) ||
-    localStorage.getItem(MANGA_CACHE_KEY) ||
-    localStorage.getItem(ALLCOMICS_CACHE_KEY)
-  );
+  // que já está salvo (tudo local, sem rede) e deixa a revalidação de
+  // verdade (renderHomeSections já faz isso sozinha, ver comentário lá) e
+  // o carregamento de cada capa rolarem em segundo plano, exatamente como
+  // já acontece ao voltar pra Home depois de entrar numa pasta e sair —
+  // sem bloquear nada. Isso é o que faz a diferença entre "1-2 minutos
+  // toda vez que abro o app" e "abre na hora, e vou vendo as capinhas
+  // aparecerem".
+  // Essa checagem usa readHomeCache (IndexedDB) — não localStorage. O
+  // cache dessas 4 seções mora no IndexedDB desde a correção do limite de
+  // armazenamento dos "Recomendados"; continuar olhando pro localStorage
+  // aqui (como era antes) fazia esta checagem nunca encontrar nada, então
+  // o app achava, TODA vez que reabria, que era a primeira instalação —
+  // e voltava a mostrar a tela de carregamento cheia (varrendo a
+  // biblioteca inteira de novo) mesmo já tendo tudo salvo localmente.
+  const [cAranha, cXMen, cManga, cComics] = await Promise.all([
+    readHomeCache(ARANHA_CACHE_KEY, 'folders'),
+    readHomeCache(XMEN_CACHE_KEY, 'folders'),
+    readHomeCache(MANGA_CACHE_KEY, 'folders'),
+    readHomeCache(ALLCOMICS_CACHE_KEY, 'comics')
+  ]);
+  const hasAnyHomeCache = !!(cAranha || cXMen || cManga || cComics);
   if(hasAnyHomeCache){
     $('#chrome').classList.remove('hidden');
     $('#view-library').classList.remove('hidden');

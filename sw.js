@@ -38,7 +38,14 @@
   navegação sempre ignora esse cache nativo e busca o index.html direto
   da rede.
 */
-const CACHE_VERSION = 'v10';
+/*
+  v11: index.html mudou de novo (velocidade do "Atualizar", cache dos
+  "Recomendados" passou a usar IndexedDB em vez de localStorage, logos das
+  seções Homem-Aranha/X-Men, e correção do carregamento instantâneo ao
+  reabrir o app). Subindo a versão aqui pra forçar os aparelhos a
+  buscarem o index.html novo em vez de continuarem numa cópia antiga.
+*/
+const CACHE_VERSION = 'v11';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
