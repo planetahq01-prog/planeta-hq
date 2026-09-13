@@ -399,15 +399,6 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
   padding:14px 16px 10px;letter-spacing:-.2px;
   display:flex;align-items:center;gap:8px;flex-wrap:wrap;
 }
-.home-section-title .title-logo{
-  height:32px;width:auto;display:inline-block;vertical-align:middle;object-fit:contain;
-}
-.home-section-title .title-logo.title-logo-lg{
-  height:56px;
-}
-.home-section-title .title-logo.title-logo-xl{
-  height:72px;
-}
 .carousel{
   display:flex;gap:10px;overflow-x:auto;overflow-y:hidden;
   scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;
@@ -540,7 +531,7 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
   <!-- ===================== TELA DE CARREGAMENTO (0% → 100%) =====================
        Fica por cima de tudo (o chrome/biblioteca já carrega por baixo, só não
        aparece ainda) enquanto: 1) as seções da Home (Aranha/X-Men/Mangás/
-       Recomendados) e a pasta raiz são buscadas, e 2) as capas e logos que
+       Recomendados) e a pasta raiz são buscadas, e 2) as capas que
        ficariam visíveis na primeira tela terminam de carregar. Só some quando
        chega em 100%, pra evitar aquela primeira impressão de tela pela metade
        com esqueletos cinza por toda parte. -->
@@ -1493,7 +1484,7 @@ function toast(msg){
    6.02) Tela de carregamento inicial (0% -> 100%)
    A biblioteca/home já carrega por baixo (o "chrome" fica visível), mas
    esta tela cobre tudo por cima até: 1) os dados da pasta raiz + seções
-   da Home chegarem, e 2) as capas/logos que apareceriam na primeira tela
+   da Home chegarem, e 2) as capas que apareceriam na primeira tela
    terminarem de carregar de verdade — só aí a pessoa vê a tela pronta,
    em vez de esqueletos cinza piscando.
    --------------------------------------------------------------------- */
@@ -1510,41 +1501,6 @@ function setLoadingSub(text){
   if(sub) sub.textContent = text;
 }
 function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
-
-// Espera os logos de seção (Aranha/X-Men, vindos de fora via postimg.cc)
-// carregarem DE VERDADE (evento load/error do navegador) — nunca um
-// tempo fixo chutado. onProgress é avisado em tempo real, a cada logo que
-// termina, com a fração já concluída (ex.: 1 de 2 -> 0.5). maxWaitMs é só
-// uma rede de segurança pra nunca travar a pessoa pra sempre se aquele
-// host externo estiver fora do ar — bem mais generosa que antes, já que
-// o carregamento completo do app costuma levar de 1 a 2 minutos.
-function waitForHomeLogos(maxWaitMs, onProgress){
-  return new Promise(resolve=>{
-    const logos = Array.from(document.querySelectorAll('#home-sections .title-logo'));
-    if(!logos.length){ if(onProgress) onProgress(1); resolve(); return; }
-    let remaining = logos.length;
-    let done = false;
-    const finish = ()=>{
-      if(done) return;
-      done = true;
-      if(onProgress) onProgress(1);
-      resolve();
-    };
-    const onOne = ()=>{
-      remaining--;
-      if(onProgress) onProgress(1 - Math.max(0, remaining) / logos.length);
-      if(remaining <= 0) finish();
-    };
-    logos.forEach(img=>{
-      if(img.complete) onOne();
-      else{
-        img.addEventListener('load', onOne, {once:true});
-        img.addEventListener('error', onOne, {once:true});
-      }
-    });
-    setTimeout(finish, maxWaitMs);
-  });
-}
 
 // Acompanha os esqueletos (placeholders cinza-animado) das capas ainda
 // carregando na pasta raiz e nas seções da Home, e avança a barra
@@ -1570,8 +1526,8 @@ function waitForVisibleCovers(maxWaitMs, onProgress){
 // Sequência completa do primeiro carregamento: mostra a tela de 0%, e só
 // esconde quando TUDO que aparece na primeira tela já estiver pronto de
 // verdade — pasta raiz, as 4 seções da Home (Aranha/X-Men/Mangás/Todos os
-// quadrinhos) já buscadas e pintadas na tela, os logos das seções (Aranha
-// e X-Men) totalmente carregados, e as capinhas visíveis já resolvidas.
+// quadrinhos) já buscadas e pintadas na tela, e as capinhas visíveis já
+// resolvidas.
 // A porcentagem é 100% "tempo real": cada etapa só soma na barra quando
 // aquele trabalho de rede realmente termina (nunca um cronômetro
 // fingindo progresso) — por isso a duração total bate com o que a pessoa
@@ -1622,12 +1578,12 @@ async function runInitialLoad(){
   // Pesos de cada etapa na barra de 0-100%. "home" pesa mais porque é,
   // de longe, a etapa mais demorada (busca as 4 seções da Home varrendo
   // a biblioteca inteira pela API do Drive).
-  const WEIGHTS = { root: 8, home: 57, logos: 10, covers: 25 };
-  const progress = { root: 0, home: 0, logos: 0, covers: 0 };
+  const WEIGHTS = { root: 8, home: 57, covers: 35 };
+  const progress = { root: 0, home: 0, covers: 0 };
   const recompute = ()=>{
     setLoadingProgress(
       WEIGHTS.root*progress.root + WEIGHTS.home*progress.home +
-      WEIGHTS.logos*progress.logos + WEIGHTS.covers*progress.covers
+      WEIGHTS.covers*progress.covers
     );
   };
 
@@ -1681,16 +1637,13 @@ async function runInitialLoad(){
   clearInterval(poll);
   progress.home = 1; recompute();
 
-  // Etapas 3 e 4: só fazem sentido depois da Home ter pintado de verdade
-  // (etapa 2) — antes disso não existe nem <img> de logo nem esqueleto de
-  // capa no DOM pra esperar. Ambas já avançam pedido a pedido / capa a
-  // capa por conta própria (ver waitForHomeLogos/waitForVisibleCovers).
-  setLoadingSub('Carregando capas e logos das seções…');
-  await Promise.all([
-    waitForHomeLogos(45000, frac=>{ progress.logos = Math.max(progress.logos, frac); recompute(); }),
-    waitForVisibleCovers(45000, frac=>{ progress.covers = Math.max(progress.covers, frac); recompute(); })
-  ]);
-  progress.logos = 1; progress.covers = 1; recompute();
+  // Etapa 3: só faz sentido depois da Home ter pintado de verdade (etapa
+  // 2) — antes disso não existe esqueleto de capa nenhum no DOM pra
+  // esperar. Já avança capa a capa por conta própria (ver
+  // waitForVisibleCovers).
+  setLoadingSub('Carregando capas das seções…');
+  await waitForVisibleCovers(45000, frac=>{ progress.covers = Math.max(progress.covers, frac); recompute(); });
+  progress.covers = 1; recompute();
 
   if(finished) return;
   finished = true;
@@ -1789,6 +1742,24 @@ async function applyLibraryFilterSort(files){
 async function renderLibrary(folderId, forceRefresh){
   $('#home-sections').classList.add('hidden');
   const grid = $('#grid-library');
+  if(folderId === CONFIG.rootFolderId){
+    // A pasta raiz É a tela Home: aqui só as seções (Continuar lendo,
+    // Coleção Homem-Aranha, Coleção X-Men, Coleção Mangás, Recomendados —
+    // ver renderHomeSections) devem aparecer, nunca as pastas soltas da
+    // raiz (Marvel Sagas, MARVEL INDIVIDUAL etc.) como cards separados.
+    // Antes elas apareciam aqui embaixo das seções, o que além de duplicar
+    // conteúdo (ex.: MANGÁS já mostra suas subpastas na seção de Mangás)
+    // obrigava a Home a listar a raiz inteira e buscar a capinha de cada
+    // uma dessas pastas soltas toda vez que abria — um bom pedaço do tempo
+    // de carregamento (etapa de capas) ia embora nisso à toa. Uma pasta
+    // solta da raiz continua totalmente acessível pela busca (que usa o
+    // índice completo da biblioteca, sem depender desta função).
+    $('#filter-bar').classList.add('hidden');
+    grid.innerHTML = '';
+    state.currentListContext = [];
+    state.currentListIsLocal = false;
+    return;
+  }
   grid.innerHTML = `<div class="empty-state"><div class="spinner" style="margin:0 auto 12px"></div>Carregando pasta...</div>`;
   try{
     if(forceRefresh) delete state.folderCache[folderId];
@@ -3487,8 +3458,14 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
   });
   if(secContinue){ wrap.appendChild(secContinue); anySection = true; }
 
+  // Antes o título destas duas seções era uma <img> de logo vinda de fora
+  // (postimg.cc). Isso obrigava a tela de carregamento inicial a esperar
+  // essas duas imagens externas baixarem (ver waitForHomeLogos, removida)
+  // antes de sumir — e, por serem hospedadas fora do Drive, sua
+  // velocidade nem sempre era confiável. Título em texto resolve na hora,
+  // sem depender de nenhuma rede externa.
   const secAranha = buildHomeSection(
-    '<img class="title-logo title-logo-xl" src="https://i.postimg.cc/x1cRhdkq/XRecorder-17092024-211205-removebg-preview.png" alt="Homem-Aranha">',
+    'COLEÇÃO HOMEM-ARANHA',
     aranhaFolders,
     (it)=>{
       return buildCarouselCard(it, { isFolder:true });
@@ -3497,7 +3474,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
   if(secAranha){ wrap.appendChild(secAranha); anySection = true; }
 
   const secXMen = buildHomeSection(
-    '<img class="title-logo title-logo-xl" src="https://i.postimg.cc/cJzP2j41/x-men-seeklogo.png" alt="X-Men">',
+    'COLEÇÃO X-MEN',
     xmenFolders,
     (it)=>{
       return buildCarouselCard(it, { isFolder:true });
