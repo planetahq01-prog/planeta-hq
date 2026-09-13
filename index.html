@@ -4089,6 +4089,25 @@ async function boot(){
 boot();
 
 if('serviceWorker' in navigator){
+  // Guarda ANTES de registrar se esta aba já era controlada por algum
+  // service worker. Isso é o que diferencia "app sendo aberto pela
+  // primeira vez neste aparelho" de "já tinha um service worker rodando e
+  // agora uma versão nova acabou de assumir".
+  //
+  // Bug corrigido: o evento 'controllerchange' abaixo dispara não só
+  // quando uma versão NOVA substitui uma antiga, mas também na
+  // PRIMEIRÍSSIMA vez que qualquer service worker passa a controlar a
+  // página (indo de "nenhum controller" pra "tem um controller"). Como o
+  // primeiro carregamento (runInitialLoad) pode levar 1-2 minutos varrendo
+  // a biblioteca, e o service worker costuma terminar de instalar/ativar
+  // bem no meio desse tempo, o location.reload() disparava ali no meio —
+  // derrubando a página e voltando a barra de carregamento pra 0% mesmo
+  // sem nenhuma versão nova de verdade existir ainda. Agora só recarrega
+  // quando JÁ havia um controller antes (ou seja, é uma atualização real
+  // de uma versão pra outra) — na primeira instalação, o novo service
+  // worker simplesmente passa a valer nas próximas requisições, sem
+  // precisar (nem dever) recarregar a página no meio do carregamento.
+  const hadControllerBefore = !!navigator.serviceWorker.controller;
   window.addEventListener('load', ()=>{
     navigator.serviceWorker.register('./sw.js').then(reg=>{
       // Força checar se há uma versão nova agora, em vez de esperar o
@@ -4100,17 +4119,19 @@ if('serviceWorker' in navigator){
       console.warn('Falha ao registrar service worker (app pode não funcionar offline):', err);
     });
   });
-  // Quando uma versão nova do service worker assume o controle da página
-  // (após instalar e ativar), recarrega uma única vez pra já rodar sob a
-  // versão nova — sem isso, a aba aberta continuaria usando as regras de
-  // rede da versão antiga até a pessoa fechar e reabrir o app por conta
-  // própria.
-  let swRefreshed = false;
-  navigator.serviceWorker.addEventListener('controllerchange', ()=>{
-    if(swRefreshed) return;
-    swRefreshed = true;
-    location.reload();
-  });
+  if(hadControllerBefore){
+    // Quando uma versão nova do service worker assume o controle da página
+    // (após instalar e ativar), recarrega uma única vez pra já rodar sob a
+    // versão nova — sem isso, a aba aberta continuaria usando as regras de
+    // rede da versão antiga até a pessoa fechar e reabrir o app por conta
+    // própria.
+    let swRefreshed = false;
+    navigator.serviceWorker.addEventListener('controllerchange', ()=>{
+      if(swRefreshed) return;
+      swRefreshed = true;
+      location.reload();
+    });
+  }
 }
 </script>
 </body>

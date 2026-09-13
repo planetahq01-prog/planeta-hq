@@ -55,7 +55,7 @@
   index.html, adicione a URL dela aqui também (e suba a CACHE_VERSION),
   senão essa logo nova nunca vai ficar instantânea/offline.
 */
-const CACHE_VERSION = 'v12';
+const CACHE_VERSION = 'v13';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
