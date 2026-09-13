@@ -2417,6 +2417,33 @@ async function resolveFolderCoverFile(folderId, depth){
   return file;
 }
 
+// Autocorreção leve da gaveta 'folderCovers' (qual arquivo é a capa de cada
+// pasta): antes, "Atualizar" apagava essa gaveta INTEIRA toda vez, o que
+// obrigava resolveFolderCoverFile a listar de novo, na rede, TODA pasta
+// visível pra escolher a capa outra vez do zero — daí a demora enorme
+// ("eternidade") que as capas passaram a levar pra aparecer depois de um
+// refresh. Isso também jogava fora capas que continuavam perfeitamente
+// válidas.
+// Agora, em vez de apagar tudo, aproveitamos que a própria varredura da
+// Home (crawlLibrarySections) já visitou cada pasta e deixou a listagem
+// dela pronta em state.folderCache, sem custo extra de rede — e só
+// removemos da gaveta a capa de uma pasta específica se o arquivo
+// escolhido não estiver mais nessa listagem atual. Pastas que a varredura
+// não tocou (ou cuja listagem já veio sem nenhum arquivo próprio — nesses
+// casos a capa costuma vir de uma subpasta, mais custoso de conferir) ficam
+// como estavam, sem risco de apagar à toa.
+async function revalidateFolderCovers(){
+  try{
+    const entries = await idbAll('folderCovers');
+    for(const entry of entries){
+      const listing = state.folderCache[entry.id];
+      if(!listing || listing.files.length === 0) continue;
+      const stillThere = listing.files.some(f=>f.id === entry.file.id);
+      if(!stillThere) await idbDelete('folderCovers', entry.id).catch(()=>{});
+    }
+  }catch(e){}
+}
+
 async function countPdfsRecursive(folderId){
   const listing = await driveListFolder(folderId);
   let total = listing.files.filter(f=>f._ext==='pdf').length;
@@ -3711,13 +3738,29 @@ async function getLibrarySections(forceRefresh){
     const token = ++librarySectionsToken;
     const errorState = {hadError:false};
     const raw = await crawlLibrarySections(token, t=>t!==librarySectionsToken, errorState);
+    // Se, enquanto esta varredura rodava, um clique novo em "Atualizar"
+    // (ou outra chamada com forceRefresh) já disparou a PRÓXIMA varredura,
+    // esta aqui foi abortada no meio do caminho (ver o `if(isStale(token))`
+    // dentro de crawlLibrarySections) e devolve listas vazias só porque
+    // parou de visitar pastas — não porque a biblioteca esteja vazia de
+    // verdade. Antes isso era tratado igual a "varredura terminou limpa,
+    // sem nenhum item", e a lista vazia acabava GRAVADA no cache
+    // permanente, apagando os dados bons que já existiam — bastava clicar
+    // em "Atualizar" umas duas vezes seguidas (ou o app cancelar sozinho
+    // pra começar outra) pra tudo "sumir" até uma varredura completa
+    // rodar do início ao fim sem ser interrompida. Agora uma varredura
+    // abortada nunca escreve nada no cache — só quem termina de verdade
+    // (mesmo que vazia de verdade) tem permissão de gravar.
+    const wasAborted = token !== librarySectionsToken;
+    const skipWrite = errorState.hadError || wasAborted;
+    if(!skipWrite) revalidateFolderCovers(); // sem await: não atrasa a resposta, roda em segundo plano
     const [aranhaFolders, xmenFolders, mangaFolders, comics, allFolders, batmanFolders] = await Promise.all([
-      finalizeHomeSectionResult(ARANHA_CACHE_KEY, 'folders', raw.aranhaFolders, errorState.hadError),
-      finalizeHomeSectionResult(XMEN_CACHE_KEY, 'folders', raw.xmenFolders, errorState.hadError),
-      finalizeHomeSectionResult(MANGA_CACHE_KEY, 'folders', raw.mangaFolders, errorState.hadError),
-      finalizeHomeSectionResult(ALLCOMICS_CACHE_KEY, 'comics', raw.comics, errorState.hadError),
-      finalizeHomeSectionResult(ALLFOLDERS_CACHE_KEY, 'folders', raw.folders, errorState.hadError),
-      finalizeHomeSectionResult(BATMAN_CACHE_KEY, 'folders', raw.batmanFolders, errorState.hadError)
+      finalizeHomeSectionResult(ARANHA_CACHE_KEY, 'folders', raw.aranhaFolders, skipWrite),
+      finalizeHomeSectionResult(XMEN_CACHE_KEY, 'folders', raw.xmenFolders, skipWrite),
+      finalizeHomeSectionResult(MANGA_CACHE_KEY, 'folders', raw.mangaFolders, skipWrite),
+      finalizeHomeSectionResult(ALLCOMICS_CACHE_KEY, 'comics', raw.comics, skipWrite),
+      finalizeHomeSectionResult(ALLFOLDERS_CACHE_KEY, 'folders', raw.folders, skipWrite),
+      finalizeHomeSectionResult(BATMAN_CACHE_KEY, 'folders', raw.batmanFolders, skipWrite)
     ]);
     return { aranhaFolders, xmenFolders, mangaFolders, comics, allFolders, batmanFolders,
       hadError: errorState.hadError,
@@ -4130,19 +4173,16 @@ $('#btn-refresh').onclick = async ()=>{
   // percebida). Passar forceRefresh=true já é suficiente pra ignorar o
   // cache antigo e buscar dados novos — o cache só é sobrescrito quando
   // essa busca nova termina com sucesso (finalizeHomeSectionResult).
-  // A gaveta 'folderCovers' guarda, pra sempre e sem nenhum prazo de
-  // validade, qual arquivo foi escolhido como capa de cada pasta
-  // (resolveFolderCoverFile). Ela nunca era limpa aqui — então se o
-  // arquivo escolhido como capa de uma pasta fosse depois apagado, movido
-  // ou renomeado no Drive (comum em coleções que a pessoa atualiza com
-  // frequência, como Coleção X-Men e Coleção Homem-Aranha), a capinha
-  // dessa pasta ficava quebrada PARA SEMPRE, e nem clicar em "Atualizar"
-  // resolvia, porque essa gaveta específica nunca era tocada. Agora o
-  // "Atualizar" também limpa essa gaveta, forçando reavaliar do zero qual
-  // é o arquivo-capa atual de cada pasta. Isso é uma correção de dados
-  // pontual (capas quebradas), não bloqueia a pintura das seções, então
-  // fica mantida.
-  try{ await idbClear('folderCovers'); }catch(e){}
+  // A gaveta 'folderCovers' guarda qual arquivo foi escolhido como capa de
+  // cada pasta (resolveFolderCoverFile). Ela NÃO é mais apagada inteira
+  // aqui: fazer isso a cada clique forçava relistar na rede toda pasta
+  // visível só pra re-escolher a mesma capa de novo, o que é exatamente o
+  // que fazia "Atualizar" demorar uma eternidade pra capas reaparecerem.
+  // A correção de capas quebradas (arquivo apagado/movido no Drive)
+  // continua acontecendo — só que agora de graça, sem essa varredura
+  // extra: revalidateFolderCovers() roda sozinha ao final de cada
+  // varredura bem-sucedida, usando dados que ela já buscou (ver
+  // getLibrarySections).
   // BUG CORRIGIDO: "Atualizar" forçava a varredura das seções da Home
   // (forceRefresh=true) e da pasta atual a ignorar o cache PERSISTENTE
   // (IndexedDB, 6h), mas nunca limpava o cache EM MEMÓRIA da sessão

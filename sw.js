@@ -86,6 +86,22 @@
   original), a pedido do usuário. O restante da v17 (cache:'no-store' na
   listagem do Drive) continua valendo.
 */
+/*
+  v19: index.html mudou, duas correções:
+  1) Uma varredura da Home cancelada no meio (por outro "Atualizar" ter
+     sido clicado antes dela terminar) devolvia listas vazias tratadas
+     como resultado válido, e essas listas vazias eram GRAVADAS por cima
+     do cache bom que já existia — bastava clicar em "Atualizar" umas duas
+     vezes seguidas pra a biblioteca inteira "sumir" até uma varredura
+     completa terminar sem ser interrompida. Agora varredura cancelada
+     nunca escreve no cache.
+  2) "Atualizar" apagava a gaveta 'folderCovers' (qual arquivo é a capa de
+     cada pasta) INTEIRA a cada clique, obrigando relistar na rede toda
+     pasta visível só pra re-escolher a mesma capa de novo — daí a demora
+     enorme das capas depois de atualizar. Agora essa gaveta só perde a
+     entrada de uma pasta específica se a capa dela realmente sumiu
+     (checagem de graça, sem rede extra, feita ao fim de cada varredura).
+*/
 const CACHE_VERSION = 'v19';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
