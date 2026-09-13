@@ -484,6 +484,44 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 #view-loading .loading-pct{font-size:13px;color:var(--paper);font-weight:700;letter-spacing:.3px;}
 #view-loading .loading-sub{font-size:12px;color:var(--text-muted);max-width:260px;}
 #view-loading .loading-warn{font-size:11px;color:var(--text-muted);opacity:.75;max-width:240px;margin-top:2px;}
+/* ---- Boas-vindas (primeiro acesso) ---- */
+#view-welcome{
+  position:fixed;inset:0;z-index:1100;
+  display:flex;align-items:center;justify-content:center;
+  padding:24px;
+  background:rgba(8,7,12,.72);
+  -webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);
+  animation:welcome-fade-in .25s ease;
+}
+#view-welcome.hidden{display:none;}
+@keyframes welcome-fade-in{from{opacity:0;}to{opacity:1;}}
+@keyframes welcome-pop-in{
+  from{opacity:0;transform:translateY(10px) scale(.97);}
+  to{opacity:1;transform:translateY(0) scale(1);}
+}
+.welcome-card{
+  position:relative;width:100%;max-width:360px;
+  background:var(--ink-soft);
+  background-image:radial-gradient(ellipse 260px 160px at 50% 0%, rgba(255,77,94,.16) 0%, transparent 70%);
+  border:1px solid var(--ink-border);border-radius:var(--radius-lg);
+  box-shadow:0 24px 60px -20px rgba(0,0,0,.75);
+  padding:28px 24px 24px;text-align:center;
+  animation:welcome-pop-in .3s cubic-bezier(.2,.9,.3,1.2);
+}
+.welcome-badge{
+  width:56px;height:56px;margin:0 auto 16px;border-radius:50%;
+  display:flex;align-items:center;justify-content:center;
+  background:linear-gradient(135deg,var(--accent),var(--accent-dark));
+  box-shadow:0 10px 22px -8px rgba(255,77,94,.7);
+  font-size:26px;
+}
+.welcome-card .wordmark{
+  display:block;font-size:24px;margin-bottom:12px;white-space:normal;overflow:visible;
+}
+.welcome-card p{
+  color:var(--paper-dim);font-size:14px;line-height:1.65;margin:0 0 22px;
+}
+.welcome-card .btn-primary{margin-top:0;}
 .debug-panel-head{display:flex;align-items:center;gap:10px;}
 .debug-panel-head strong{flex:1;font-size:16px;}
 #debug-panel-text{
@@ -541,6 +579,19 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
     <div class="loading-pct" id="loading-pct">0%</div>
     <div class="loading-sub" id="loading-sub">Carregando sua biblioteca…</div>
     <div class="loading-warn" id="loading-warn">Isso pode levar alguns minutos na primeira vez — não feche o app.</div>
+  </div>
+
+  <!-- ===================== BOAS-VINDAS (só no primeiro acesso, uma única vez) =====================
+       Aparece assim que a tela de carregamento inicial termina, apenas na
+       primeiríssima vez que o app é aberto neste aparelho (controlado por
+       WELCOME_SEEN_KEY no localStorage) — nunca mais depois disso. -->
+  <div id="view-welcome" class="hidden">
+    <div class="welcome-card">
+      <div class="welcome-badge">🚀</div>
+      <div class="wordmark">PLANETA <span>HQ</span></div>
+      <p>Bem vindo ao Planeta HQ!<br><br>Aqui você vai poder desfrutar dos quadrinhos e mangás mais amados da cultura pop, reviver a nostalgia das revistas de vídeo-game e muito mais! Tenha uma boa leitura ⭐</p>
+      <button class="btn-primary" id="btn-welcome-close">Fechar</button>
+    </div>
   </div>
 
   <!-- ===================== TOPO + ABAS (aparecem depois de configurado) ===================== -->
@@ -1553,6 +1604,25 @@ function waitForVisibleCovers(maxWaitMs, onProgress){
 // Agora esta função espera renderHomeSections() de ponta a ponta antes
 // de considerar a Home pronta, então a própria tela de carregamento já
 // resolve isso sozinha, sem precisar de nenhuma ação manual.
+// Mensagem de boas-vindas: aparece só uma vez, na primeiríssima vez que
+// a pessoa abre o app neste aparelho, logo depois da tela de carregamento
+// inicial sumir (em qualquer um dos jeitos que ela pode terminar — normal,
+// pelo caminho rápido com cache, ou pela rede de segurança de 3 minutos).
+// Usa uma chave própria no localStorage, independente das chaves de cache
+// da Home, pra nunca mais reaparecer depois que a pessoa fechar uma vez.
+const WELCOME_SEEN_KEY = 'planetahq_welcome_seen_v1';
+function maybeShowWelcome(){
+  try{
+    if(localStorage.getItem(WELCOME_SEEN_KEY)) return;
+  }catch(e){}
+  const el = $('#view-welcome');
+  if(el) el.classList.remove('hidden');
+}
+$('#btn-welcome-close').onclick = ()=>{
+  $('#view-welcome').classList.add('hidden');
+  try{ localStorage.setItem(WELCOME_SEEN_KEY, '1'); }catch(e){}
+};
+
 async function runInitialLoad(){
   const overlay = $('#view-loading');
 
@@ -1585,6 +1655,7 @@ async function runInitialLoad(){
       logErr('[PlanetaHQ] Falha no carregamento rápido (pasta raiz)', e);
     }
     renderHomeSections().catch(e=>logErr('[PlanetaHQ] Falha ao revalidar a Home em segundo plano', e));
+    maybeShowWelcome();
     return;
   }
 
@@ -1609,6 +1680,7 @@ async function runInitialLoad(){
     finished = true;
     setLoadingProgress(100);
     overlay.classList.add('hidden');
+    maybeShowWelcome();
   }, 180000);
 
   // Pesos de cada etapa na barra de 0-100%. "home" pesa mais porque é,
@@ -1686,6 +1758,7 @@ async function runInitialLoad(){
   clearTimeout(hardStop);
   await sleep(200);
   overlay.classList.add('hidden');
+  maybeShowWelcome();
 }
 /* ---------------------------------------------------------------------
    6) Biblioteca — navegação e renderização
@@ -3055,100 +3128,49 @@ const ARANHA_EXCLUDED_FOLDERS = [
   'Ultimate Homem-Aranha V2'
 ].map(normalizeStr);
 
-async function collectAranhaFolders(token, isStale){
-  const found = [];
-  const seen = new Set();
-  async function walk(folderId){
-    if(isStale(token)) return;
-    let listing;
-    try{ listing = await driveListFolder(folderId); }catch(e){ return; }
-    listing.folders.forEach(sub=>{
-      if(seen.has(sub.id)) return;
-      const n = normalizeStr(sub.name);
-      if(n.includes('aranha') || n.includes('spider')){
-        seen.add(sub.id);
-        found.push(sub);
-      }
-    });
-    await runLimited(listing.folders, 6, sub=>walk(sub.id));
-  }
-  await walk(CONFIG.rootFolderId);
-  const seenNames = new Set();
-  const filtered = found.filter(f=>{
-    const n = normalizeStr(f.name);
-    if(ARANHA_EXCLUDED_FOLDERS.includes(n)) return false;
-    // Descarta pastas repetidas com o mesmo nome (ex.: "Aranha-Geddon"
-    // duplicada em dois lugares da biblioteca) — mantém só a primeira.
-    if(seenNames.has(n)) return false;
-    seenNames.add(n);
-    return true;
-  });
-  filtered.sort((a,b)=>{
-    const ra = aranhaRank(a.name), rb = aranhaRank(b.name);
-    if(ra !== rb) return ra - rb;
-    return a.name.localeCompare(b.name,'pt-BR',{numeric:true});
-  });
-  return filtered;
-}
-
-// Acha uma subpasta em qualquer nível da árvore cujo nome (ignorando
-// acento/caixa/pontuação) bata com um dos nomes-alvo. Usado pra achar a
-// pasta "X - MEN" independente de estar dentro de "Marvel Sagas" ou de
-// mudar de lugar no futuro.
+// Acha, dentro de uma lista de pastas já coletada, a primeira cujo nome
+// (ignorando acento/caixa/pontuação) bate com um dos nomes-alvo. Usado pra
+// achar a pasta "X - MEN" ou "MANGÁS" independente de estar dentro de
+// "Marvel Sagas" ou de mudar de lugar no futuro.
 function normalizeForFolderMatch(s){
   return normalizeStr(s).replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ');
 }
-async function findFolderRecursive(startId, targetNames, token, isStale){
-  let result = null;
-  async function walk(folderId){
-    if(result || isStale(token)) return;
-    let listing;
-    try{ listing = await driveListFolder(folderId); }catch(e){ return; }
-    for(const sub of listing.folders){
-      if(targetNames.includes(normalizeForFolderMatch(sub.name))){ result = sub; return; }
-    }
-    await runLimited(listing.folders, 6, sub=>walk(sub.id));
-  }
-  await walk(startId);
-  return result;
-}
 
-// Coleção X-Men: diferente da do Homem-Aranha (que varre a biblioteca
-// inteira procurando "aranha"/"spider" em qualquer pasta), aqui a seção é
-// simplesmente TODO o conteúdo direto de dentro da pasta "X - MEN" — sem
-// filtro nem exclusão.
-async function collectXMenFolders(token, isStale){
-  const xmenFolder = await findFolderRecursive(CONFIG.rootFolderId, ['x men','xmen'], token, isStale);
-  if(!xmenFolder || isStale(token)) return [];
-  let listing;
-  try{ listing = await driveListFolder(xmenFolder.id); }catch(e){ return []; }
-  return listing.folders.slice().sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
-}
+const ALLFOLDERS_CACHE_KEY = 'planetahq_allfolders_cache_v1';
 
-// Coleção Mangás: mesma lógica da X-Men — acha a pasta "MANGÁS" e usa
-// TODO o conteúdo direto de dentro dela (Akira, Cavaleiros do Zodíaco,
-// Ashita no Joe etc.) como a seção, sem filtro nem exclusão.
-async function collectMangaFolders(token, isStale){
-  const mangaFolder = await findFolderRecursive(CONFIG.rootFolderId, ['mangas','manga'], token, isStale);
-  if(!mangaFolder || isStale(token)) return [];
-  let listing;
-  try{ listing = await driveListFolder(mangaFolder.id); }catch(e){ return []; }
-  return listing.folders.slice().sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
-}
-
-async function collectAllComics(token, isStale){
-  const all = [];
+// Varredura ÚNICA de toda a biblioteca, usada pra montar as 4 seções da
+// Home de uma vez só (Aranha, X-Men, Mangás e Todos os quadrinhos/
+// Recomendados).
+//
+// Antes disso, cada seção fazia sua PRÓPRIA varredura quase completa da
+// biblioteca inteira — até 4 varreduras independentes e redundantes
+// rodando ao mesmo tempo (uma pra achar pastas "aranha"/"spider" em
+// qualquer nível, uma pra achar a pasta X-Men, uma pra achar a pasta
+// Mangás, e uma pra listar todo mundo pra "Todos os quadrinhos"). O botão
+// "Atualizar" sentia isso na pele: zerava os 4 caches de uma vez e esperava
+// as 4 varreduras completas terminarem, o que podia demorar bem mais do
+// que uma varredura única levaria sozinha.
+//
+// Agora a árvore inteira é visitada UMA vez só (igual a antiga
+// collectAllComics já fazia), e as outras 3 seções são recortadas dela sem
+// nenhuma chamada extra de rede: os nomes de pasta pra Aranha são filtrados
+// da lista de pastas já coletada, e o conteúdo de X-Men/Mangás é lido do
+// próprio cache de pasta (state.folderCache, dentro de driveListFolder) —
+// que já foi preenchido durante a mesma varredura, no momento em que ela
+// passou por aquela pasta.
+async function crawlLibrarySections(token, isStale, errorState){
+  const comics = [];
   const allFolders = [];
-  const seen = new Set();
+  const seenComics = new Set();
   const seenFolders = new Set();
   async function walk(folderId, path){
     if(isStale(token)) return;
     let listing;
-    try{ listing = await driveListFolder(folderId); }catch(e){ return; }
+    try{ listing = await driveListFolder(folderId); }catch(e){ if(errorState) errorState.hadError = true; return; }
     listing.files.forEach(f=>{
-      if(seen.has(f.id)) return;
-      seen.add(f.id);
-      all.push({...f, _path: path});
+      if(seenComics.has(f.id)) return;
+      seenComics.add(f.id);
+      comics.push({...f, _path: path});
     });
     listing.folders.forEach(sub=>{
       if(seenFolders.has(sub.id)) return;
@@ -3158,11 +3180,40 @@ async function collectAllComics(token, isStale){
     await runLimited(listing.folders, 6, sub=>walk(sub.id, [...path, sub.name]));
   }
   await walk(CONFIG.rootFolderId, []);
-  if(!isStale(token)) writeHomeCache(ALLFOLDERS_CACHE_KEY, 'folders', allFolders);
-  return {comics: all, folders: allFolders};
-}
+  if(isStale(token)) return {comics: [], folders: [], aranhaFolders: [], xmenFolders: [], mangaFolders: []};
 
-const ALLFOLDERS_CACHE_KEY = 'planetahq_allfolders_cache_v1';
+  const seenAranhaNames = new Set();
+  const aranhaFolders = allFolders.filter(f=>{
+    const n = normalizeStr(f.name);
+    if(!(n.includes('aranha') || n.includes('spider'))) return false;
+    if(ARANHA_EXCLUDED_FOLDERS.includes(n)) return false;
+    // Descarta pastas repetidas com o mesmo nome (ex.: "Aranha-Geddon"
+    // duplicada em dois lugares da biblioteca) — mantém só a primeira.
+    if(seenAranhaNames.has(n)) return false;
+    seenAranhaNames.add(n);
+    return true;
+  }).sort((a,b)=>{
+    const ra = aranhaRank(a.name), rb = aranhaRank(b.name);
+    if(ra !== rb) return ra - rb;
+    return a.name.localeCompare(b.name,'pt-BR',{numeric:true});
+  });
+
+  // Conteúdo direto de dentro de uma pasta-alvo (X-Men ou Mangás) — sem
+  // filtro nem exclusão, igual sempre foi. A listagem já está em cache
+  // (foi visitada durante o walk acima), então isto não bate na rede de
+  // novo.
+  async function childrenOfNamedFolder(targetNames){
+    const folder = allFolders.find(f=>targetNames.includes(normalizeForFolderMatch(f.name)));
+    if(!folder || isStale(token)) return [];
+    let listing;
+    try{ listing = await driveListFolder(folder.id); }catch(e){ if(errorState) errorState.hadError = true; return []; }
+    return listing.folders.slice().sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
+  }
+  const xmenFolders = await childrenOfNamedFolder(['x men','xmen']);
+  const mangaFolders = await childrenOfNamedFolder(['mangas','manga']);
+
+  return {comics, folders: allFolders, aranhaFolders, xmenFolders, mangaFolders};
+}
 
 function buildCarouselCard(item, opts){
   opts = opts || {};
@@ -3295,85 +3346,87 @@ function writeHomeCache(key, arrProp, list){
   try{ localStorage.setItem(key, JSON.stringify({savedAt: Date.now(), [arrProp]: list})); }catch(e){}
 }
 
-let aranhaToken = 0;
-let aranhaCachePromise = null;
-async function getAranhaFolders(forceRefresh){
-  if(forceRefresh) aranhaCachePromise = null;
-  if(aranhaCachePromise) return aranhaCachePromise;
-  aranhaCachePromise = (async ()=>{
-    const cached = readHomeCache(ARANHA_CACHE_KEY, 'folders');
-    if(cached && Date.now()-cached.savedAt < HOME_CACHE_MAX_AGE) return cached.folders;
-    const token = ++aranhaToken;
-    const folders = await collectAranhaFolders(token, t=>t!==aranhaToken);
-    writeHomeCache(ARANHA_CACHE_KEY, 'folders', folders);
-    return folders;
-  })();
-  return aranhaCachePromise;
+// Uma varredura de seção da Home (Aranha/X-Men/Mangás/Todos os quadrinhos)
+// visita a biblioteca inteira pasta por pasta; se UMA pasta falhar no meio
+// do caminho (rede instável, limite de taxa da API do Drive esgotado após
+// as tentativas de driveFetchJson), o erro era engolido em silêncio e a
+// função devolvia uma lista incompleta — às vezes vazia — como se fosse o
+// resultado definitivo. Essa lista quebrada acabava GRAVADA no cache local
+// com data/hora válida, então a seção ficava presa mostrando vazio (ou
+// trocando de lugar com outra seção, dependendo de qual varredura falhou
+// naquela hora) até a pessoa apertar "Atualizar" ou passarem 6h — mesmo
+// fechando e reabrindo o app. Agora: se a varredura teve QUALQUER erro
+// parcial, o cache local NÃO é sobrescrito — mantém os dados bons que já
+// existiam (se existirem) e só grava de verdade quando uma varredura
+// termina 100% limpa, sem nenhuma pasta ter falhado.
+function finalizeHomeSectionResult(key, arrProp, freshValue, hadError){
+  if(hadError){
+    const existing = readHomeCache(key, arrProp);
+    if(existing){
+      logErr(`[PlanetaHQ] Varredura de "${key}" teve erro parcial — mantendo cache anterior em vez de sobrescrever.`);
+      return existing[arrProp];
+    }
+    return freshValue;
+  }
+  writeHomeCache(key, arrProp, freshValue);
+  return freshValue;
 }
 
-let xmenToken = 0;
-let xmenCachePromise = null;
-async function getXMenFolders(forceRefresh){
-  if(forceRefresh) xmenCachePromise = null;
-  if(xmenCachePromise) return xmenCachePromise;
-  xmenCachePromise = (async ()=>{
-    const cached = readHomeCache(XMEN_CACHE_KEY, 'folders');
-    if(cached && Date.now()-cached.savedAt < HOME_CACHE_MAX_AGE) return cached.folders;
-    const token = ++xmenToken;
-    const folders = await collectXMenFolders(token, t=>t!==xmenToken);
-    writeHomeCache(XMEN_CACHE_KEY, 'folders', folders);
-    return folders;
-  })();
-  return xmenCachePromise;
-}
+let librarySectionsToken = 0;
+let librarySectionsPromise = null;
 
-let mangaToken = 0;
-let mangaCachePromise = null;
-async function getMangaFolders(forceRefresh){
-  if(forceRefresh) mangaCachePromise = null;
-  if(mangaCachePromise) return mangaCachePromise;
-  mangaCachePromise = (async ()=>{
-    const cached = readHomeCache(MANGA_CACHE_KEY, 'folders');
-    if(cached && Date.now()-cached.savedAt < HOME_CACHE_MAX_AGE) return cached.folders;
-    const token = ++mangaToken;
-    const folders = await collectMangaFolders(token, t=>t!==mangaToken);
-    writeHomeCache(MANGA_CACHE_KEY, 'folders', folders);
-    return folders;
-  })();
-  return mangaCachePromise;
-}
+// Único ponto de entrada pras 4 seções da Home + índice completo de
+// pastas — todas nascem da mesma varredura (crawlLibrarySections), então
+// pedir mais de uma ao mesmo tempo (como renderHomeSections faz) não
+// dispara mais de uma varredura. O cache "fresco" (menos de 6h) só é usado
+// se TODAS as 5 gavetas estiverem em dia; se qualquer uma estiver faltando
+// ou vencida, refaz a varredura inteira de uma vez (o que também as
+// resssincroniza).
+async function getLibrarySections(forceRefresh){
+  if(forceRefresh) librarySectionsPromise = null;
+  if(librarySectionsPromise) return librarySectionsPromise;
 
-let libraryIndexToken = 0;
-let libraryIndexPromise = null;
-async function refreshLibraryIndex(){
-  if(libraryIndexPromise) return libraryIndexPromise;
-  libraryIndexPromise = (async ()=>{
-    const token = ++libraryIndexToken;
-    const {comics, folders} = await collectAllComics(token, t=>t!==libraryIndexToken);
-    writeHomeCache(ALLCOMICS_CACHE_KEY, 'comics', comics);
-    writeHomeCache(ALLFOLDERS_CACHE_KEY, 'folders', folders);
-    return {comics, folders};
+  if(!forceRefresh){
+    const now = Date.now();
+    const cAranha = readHomeCache(ARANHA_CACHE_KEY, 'folders');
+    const cXMen = readHomeCache(XMEN_CACHE_KEY, 'folders');
+    const cManga = readHomeCache(MANGA_CACHE_KEY, 'folders');
+    const cComics = readHomeCache(ALLCOMICS_CACHE_KEY, 'comics');
+    const cAllFolders = readHomeCache(ALLFOLDERS_CACHE_KEY, 'folders');
+    const fresh = c=>c && (now - c.savedAt < HOME_CACHE_MAX_AGE);
+    if(fresh(cAranha) && fresh(cXMen) && fresh(cManga) && fresh(cComics) && fresh(cAllFolders)){
+      return {
+        aranhaFolders: cAranha.folders,
+        xmenFolders: cXMen.folders,
+        mangaFolders: cManga.folders,
+        comics: cComics.comics,
+        allFolders: cAllFolders.folders
+      };
+    }
+  }
+
+  librarySectionsPromise = (async ()=>{
+    const token = ++librarySectionsToken;
+    const errorState = {hadError:false};
+    const raw = await crawlLibrarySections(token, t=>t!==librarySectionsToken, errorState);
+    return {
+      aranhaFolders: finalizeHomeSectionResult(ARANHA_CACHE_KEY, 'folders', raw.aranhaFolders, errorState.hadError),
+      xmenFolders: finalizeHomeSectionResult(XMEN_CACHE_KEY, 'folders', raw.xmenFolders, errorState.hadError),
+      mangaFolders: finalizeHomeSectionResult(MANGA_CACHE_KEY, 'folders', raw.mangaFolders, errorState.hadError),
+      comics: finalizeHomeSectionResult(ALLCOMICS_CACHE_KEY, 'comics', raw.comics, errorState.hadError),
+      allFolders: finalizeHomeSectionResult(ALLFOLDERS_CACHE_KEY, 'folders', raw.folders, errorState.hadError)
+    };
   })();
-  try{ return await libraryIndexPromise; }
-  finally{ libraryIndexPromise = null; }
+  try{ return await librarySectionsPromise; }
+  finally{ librarySectionsPromise = null; }
 }
 
 async function getAllComicsCached(forceRefresh){
-  if(!forceRefresh){
-    const cached = readHomeCache(ALLCOMICS_CACHE_KEY, 'comics');
-    if(cached && Date.now()-cached.savedAt < HOME_CACHE_MAX_AGE) return cached.comics;
-  }
-  const {comics} = await refreshLibraryIndex();
-  return comics;
+  return (await getLibrarySections(forceRefresh)).comics;
 }
 
 async function getAllFoldersCached(forceRefresh){
-  if(!forceRefresh){
-    const cached = readHomeCache(ALLFOLDERS_CACHE_KEY, 'folders');
-    if(cached && Date.now()-cached.savedAt < HOME_CACHE_MAX_AGE) return cached.folders;
-  }
-  const {folders} = await refreshLibraryIndex();
-  return folders;
+  return (await getLibrarySections(forceRefresh)).allFolders;
 }
 
 function hashStr(s){
@@ -3501,7 +3554,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
   // velocidade nem sempre era confiável. Título em texto resolve na hora,
   // sem depender de nenhuma rede externa.
   const secAranha = buildHomeSection(
-    'COLEÇÃO HOMEM-ARANHA',
+    'Coleção Homem-Aranha',
     aranhaFolders,
     (it)=>{
       return buildCarouselCard(it, { isFolder:true });
@@ -3510,7 +3563,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
   if(secAranha){ wrap.appendChild(secAranha); anySection = true; }
 
   const secXMen = buildHomeSection(
-    'COLEÇÃO X-MEN',
+    'Coleção X-Men',
     xmenFolders,
     (it)=>{
       return buildCarouselCard(it, { isFolder:true });
@@ -3543,17 +3596,20 @@ async function renderHomeSections(forceRefresh, onProgress){
   const myToken = ++homeToken;
   const isStale = t=>t!==homeToken;
 
-  // 1) Se já temos algo em cache (mesmo desatualizado), pinta na hora — a
-  // sensação é de carregamento instantâneo — e atualiza tudo em segundo
-  // plano logo em seguida, sem travar a tela.
-  const cachedAranha = !forceRefresh && readHomeCache(ARANHA_CACHE_KEY, 'folders');
-  const cachedXMen = !forceRefresh && readHomeCache(XMEN_CACHE_KEY, 'folders');
-  const cachedManga = !forceRefresh && readHomeCache(MANGA_CACHE_KEY, 'folders');
-  const cachedComics = !forceRefresh && readHomeCache(ALLCOMICS_CACHE_KEY, 'comics');
+  // 1) Se já temos algo em cache (mesmo desatualizado, mesmo durante um
+  // "Atualizar" forçado), pinta na hora — a sensação é de carregamento
+  // instantâneo, e a tela NUNCA fica em branco esperando a rede, nem
+  // quando a pessoa aperta "Atualizar" (antes disso, "Atualizar" apagava
+  // o cache antes de buscar de novo, e por isso todas as seções sumiam da
+  // tela até a busca nova terminar). A busca de verdade (item 2 abaixo)
+  // troca pelos dados frescos assim que chegar, sem travar nada.
+  const cachedAranha = readHomeCache(ARANHA_CACHE_KEY, 'folders');
+  const cachedXMen = readHomeCache(XMEN_CACHE_KEY, 'folders');
+  const cachedManga = readHomeCache(MANGA_CACHE_KEY, 'folders');
+  const cachedComics = readHomeCache(ALLCOMICS_CACHE_KEY, 'comics');
   const continueItemsFast = await getContinueItems();
   if(isStale(myToken)) return;
 
-  let paintedFast = false;
   if(cachedAranha || cachedXMen || cachedManga || cachedComics){
     wrap.classList.remove('hidden');
     paintHomeSections(wrap, {
@@ -3563,30 +3619,37 @@ async function renderHomeSections(forceRefresh, onProgress){
       mangaFolders: cachedManga ? cachedManga.folders : [],
       allComics: cachedComics ? cachedComics.comics : []
     });
-    paintedFast = true;
   } else {
     wrap.innerHTML = `<div class="home-section"><div class="home-section-title">Carregando seções…</div></div>`;
     wrap.classList.remove('hidden');
   }
 
-  // 2) Busca (ou revalida) tudo em paralelo — antes isso era sequencial,
-  // agora roda ao mesmo tempo, o que já corta bastante o tempo de espera.
-  // Cada uma das 4 buscas conta como 1/4 do progresso desta etapa, e
-  // avisa quem chamou (onProgress) assim que termina DE VERDADE — em
-  // tempo real, sem estimar duração — usado pela tela de carregamento
-  // inicial pra saber exatamente quando a Home está pronta.
-  let doneCount = 0;
-  const tick = ()=>{ doneCount++; if(onProgress) onProgress(doneCount/4); };
-  const [continueItems, aranhaFolders, xmenFolders, mangaFolders, allComics] = await Promise.all([
+  // 2) Busca (ou revalida) as 4 seções numa varredura ÚNICA da biblioteca
+  // (ver crawlLibrarySections) — antes eram até 4 varreduras quase
+  // inteiras e redundantes rodando em paralelo, o que fazia o "Atualizar"
+  // demorar bem mais do que precisava.
+  const [continueItems, sections] = await Promise.all([
     getContinueItems(),
-    getAranhaFolders(forceRefresh).catch(()=>paintedFast && cachedAranha ? cachedAranha.folders : []).then(r=>{ tick(); return r; }),
-    getXMenFolders(forceRefresh).catch(()=>paintedFast && cachedXMen ? cachedXMen.folders : []).then(r=>{ tick(); return r; }),
-    getMangaFolders(forceRefresh).catch(()=>paintedFast && cachedManga ? cachedManga.folders : []).then(r=>{ tick(); return r; }),
-    getAllComicsCached(forceRefresh).catch(()=>paintedFast && cachedComics ? cachedComics.comics : []).then(r=>{ tick(); return r; })
+    getLibrarySections(forceRefresh).catch(e=>{
+      logErr('[PlanetaHQ] Falha ao buscar as seções da Home — mantendo o que já estava na tela.', e);
+      return {
+        aranhaFolders: cachedAranha ? cachedAranha.folders : [],
+        xmenFolders: cachedXMen ? cachedXMen.folders : [],
+        mangaFolders: cachedManga ? cachedManga.folders : [],
+        comics: cachedComics ? cachedComics.comics : []
+      };
+    })
   ]);
+  if(onProgress) onProgress(1);
   if(isStale(myToken)) return;
 
-  paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, mangaFolders, allComics});
+  paintHomeSections(wrap, {
+    continueItems,
+    aranhaFolders: sections.aranhaFolders,
+    xmenFolders: sections.xmenFolders,
+    mangaFolders: sections.mangaFolders,
+    allComics: sections.comics
+  });
 }
 
 /* ---------------------------------------------------------------------
@@ -3635,11 +3698,17 @@ $('#sort-select').addEventListener('change', e=>{
 
 $('#btn-refresh').onclick = async ()=>{
   coverMemoryCache.clear();
-  localStorage.removeItem(ARANHA_CACHE_KEY);
-  localStorage.removeItem(XMEN_CACHE_KEY);
-  localStorage.removeItem(MANGA_CACHE_KEY);
-  localStorage.removeItem(ALLCOMICS_CACHE_KEY);
-  localStorage.removeItem(ALLFOLDERS_CACHE_KEY);
+  // IMPORTANTE: não apagamos mais o cache do localStorage (ARANHA/XMEN/
+  // MANGA/ALLCOMICS/ALLFOLDERS_CACHE_KEY) aqui. renderHomeSections já foi
+  // feita pra pintar os dados antigos na hora e só trocar pelos novos
+  // quando a varredura fresca terminar (ver comentário lá) — mas isso só
+  // funciona se sobrar cache pra pintar. Apagando o cache ANTES de chamar
+  // renderHomeSections, não sobrava nada: por isso as seções todas
+  // desapareciam da tela no clique em "Atualizar" e só reapareciam depois
+  // da varredura inteira da biblioteca terminar (a causa da demora
+  // percebida). Passar forceRefresh=true já é suficiente pra ignorar o
+  // cache antigo e buscar dados novos — o cache só é sobrescrito quando
+  // essa busca nova termina com sucesso (finalizeHomeSectionResult).
   // A gaveta 'folderCovers' guarda, pra sempre e sem nenhum prazo de
   // validade, qual arquivo foi escolhido como capa de cada pasta
   // (resolveFolderCoverFile). Ela nunca era limpa aqui — então se o
@@ -3649,7 +3718,9 @@ $('#btn-refresh').onclick = async ()=>{
   // dessa pasta ficava quebrada PARA SEMPRE, e nem clicar em "Atualizar"
   // resolvia, porque essa gaveta específica nunca era tocada. Agora o
   // "Atualizar" também limpa essa gaveta, forçando reavaliar do zero qual
-  // é o arquivo-capa atual de cada pasta.
+  // é o arquivo-capa atual de cada pasta. Isso é uma correção de dados
+  // pontual (capas quebradas), não bloqueia a pintura das seções, então
+  // fica mantida.
   try{ await idbClear('folderCovers'); }catch(e){}
   aranhaCachePromise = null;
   xmenCachePromise = null;
