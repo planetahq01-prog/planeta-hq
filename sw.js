@@ -73,7 +73,20 @@
   forçada terminava, TODOS os cards eram recriados do zero — fazendo as
   capas já certas piscarem e recarregarem à toa.
 */
-const CACHE_VERSION = 'v16';
+/*
+  v17: index.html mudou — a chamada que lista pastas/HQs no Google Drive
+  (driveFetchJson) agora usa cache:'no-store', igual as outras chamadas de
+  rede do app. Sem isso, o navegador podia reaproveitar pra sempre uma
+  resposta antiga (até vazia) pra mesma URL de consulta, fazendo a
+  biblioteca "sumir" e nem "Atualizar" trazer de volta — só reinstalar o
+  app (que limpa esse cache) resolvia.
+*/
+/*
+  v18: index.html mudou — HOME_CACHE_MAX_AGE voltou de 72h pra 6h (valor
+  original), a pedido do usuário. O restante da v17 (cache:'no-store' na
+  listagem do Drive) continua valendo.
+*/
+const CACHE_VERSION = 'v19';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [

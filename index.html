@@ -1075,7 +1075,13 @@ async function driveFetchJson(url){
     await driveAcquireSlot();
     let res, errBody, networkErr;
     try{
-      res = await fetch(url);
+      // cache:'no-store' é essencial aqui: sem isso, o navegador pode
+      // reaproveitar pra sempre uma resposta antiga (inclusive uma lista
+      // vazia, se por azar foi isso que veio numa falha passageira) pra
+      // essa mesma URL de consulta, em vez de perguntar de novo pro Google
+      // Drive — mesmo clicando em "Atualizar". Foi essa a causa da
+      // biblioteca "sumir" e não voltar sem reinstalar o app.
+      res = await fetch(url, {cache:'no-store'});
       if(res.ok){ driveRequestsDone++; return await res.json(); }
       errBody = await res.text().catch(()=> '');
     } catch(e){
