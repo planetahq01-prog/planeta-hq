@@ -405,6 +405,9 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 .home-section-title .title-logo.title-logo-lg{
   height:56px;
 }
+.home-section-title .title-logo.title-logo-xl{
+  height:72px;
+}
 .carousel{
   display:flex;gap:10px;overflow-x:auto;overflow-y:hidden;
   scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;
@@ -3364,7 +3367,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
   if(secContinue){ wrap.appendChild(secContinue); anySection = true; }
 
   const secAranha = buildHomeSection(
-    '🕷️ Coleção <img class="title-logo title-logo-lg" src="https://i.postimg.cc/x1cRhdkq/XRecorder-17092024-211205-removebg-preview.png" alt="Homem-Aranha">',
+    '<img class="title-logo title-logo-xl" src="https://i.postimg.cc/x1cRhdkq/XRecorder-17092024-211205-removebg-preview.png" alt="Homem-Aranha">',
     aranhaFolders,
     (it)=>{
       return buildCarouselCard(it, { isFolder:true });
@@ -3373,7 +3376,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
   if(secAranha){ wrap.appendChild(secAranha); anySection = true; }
 
   const secXMen = buildHomeSection(
-    'Coleção <img class="title-logo" src="https://i.postimg.cc/cJzP2j41/x-men-seeklogo.png" alt="X-Men">',
+    '<img class="title-logo title-logo-xl" src="https://i.postimg.cc/cJzP2j41/x-men-seeklogo.png" alt="X-Men">',
     xmenFolders,
     (it)=>{
       return buildCarouselCard(it, { isFolder:true });
