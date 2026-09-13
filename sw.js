@@ -25,8 +25,20 @@
 
   Sempre que você editar o index.html, aumente o número da versão abaixo
   (v1 -> v2 -> v3...) para forçar os dispositivos a buscarem a versão nova.
+
+  v10: a navegação (abrir/recarregar a tela do app) usava fetch(req) puro,
+  sem 'cache: no-store'. Isso significa que o pedido de rede respeitava o
+  cache HTTP nativo do navegador — então, dependendo de como o servidor
+  onde o app está hospedado configura os cabeçalhos de cache, o navegador
+  podia devolver uma cópia antiga do index.html já guardada em disco SEM
+  nem chegar a perguntar pro servidor se havia versão nova, mesmo com
+  internet disponível e mesmo depois do arquivo ter sido substituído no
+  servidor. Isso explicava a sensação de "troquei o arquivo mas o app
+  continua exatamente igual, com as logos antigas e tudo". Agora a
+  navegação sempre ignora esse cache nativo e busca o index.html direto
+  da rede.
 */
-const CACHE_VERSION = 'v9';
+const CACHE_VERSION = 'v10';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
@@ -50,9 +62,11 @@ self.addEventListener('install', (event) => {
     caches.open(CACHE_NAME).then((cache) => {
       // 'no-cors' é necessário pros recursos de outro domínio (cdnjs, google fonts);
       // a resposta fica "opaca", mas ainda é cacheada e servida normalmente offline.
+      // 'cache: no-store' evita que esta busca inicial já traga uma cópia
+      // antiga do cache HTTP nativo do navegador.
       return Promise.all(
         APP_SHELL.map((url) =>
-          fetch(url, { mode: url.startsWith('http') ? 'no-cors' : 'same-origin' })
+          fetch(url, { mode: url.startsWith('http') ? 'no-cors' : 'same-origin', cache: 'no-store' })
             .then((res) => cache.put(url, res))
             .catch(() => {})
         )
@@ -77,9 +91,14 @@ self.addEventListener('fetch', (event) => {
   // Navegação (abrir/atualizar a tela do app): tenta a rede primeiro
   // (pra sempre pegar a versão mais nova quando tem internet) e, se
   // falhar por falta de conexão, cai pro index.html salvo em cache.
+  // 'cache: no-store' é essencial aqui: sem isso, esse fetch ainda
+  // respeitava o cache HTTP nativo do navegador, que podia devolver uma
+  // cópia antiga do arquivo sem nem perguntar pro servidor se havia
+  // versão nova — fazendo parecer que o app "não atualizou" mesmo com o
+  // arquivo já trocado no servidor e internet disponível.
   if (req.mode === 'navigate') {
     event.respondWith(
-      fetch(req).catch(() => caches.match('./index.html'))
+      fetch(req, { cache: 'no-store' }).catch(() => caches.match('./index.html'))
     );
     return;
   }
