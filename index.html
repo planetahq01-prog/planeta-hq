@@ -1388,36 +1388,72 @@ async function openComicPDF(source, onProgress, knownSize){
   // quantas ficam guardadas ao mesmo tempo evita que o app fique pesado
   // ou trave em aparelhos com pouca RAM.
   const cache = createPageCache(14);
+  // Bug corrigido: ao abrir a leitura, cacheCoverFromDoc() dispara em
+  // segundo plano (sem esperar) um getPage(0) neste MESMO doc pra gerar a
+  // capinha. Se a pessoa voltar pra biblioteca rápido, closeReader()
+  // chamava pdf.destroy() enquanto esse getPage(0) ainda estava
+  // renderizando — e o pdf.js tem um bug conhecido em que destruir o
+  // documento no meio de um page.render() faz a promise do render nunca
+  // resolver nem rejeitar (fica pendurada pra sempre, vazando o worker).
+  // Com o tempo, workers vazados assim esgotam o limite que o navegador
+  // permite, e é isso que trava de verdade as filas de capa (elas
+  // dependem de conseguir abrir novos documentos pdf.js) — só fechar o
+  // app de verdade "zerava" o problema.
+  // Correção: dispose() agora espera qualquer getPage() em andamento
+  // terminar sozinho (sem ser interrompido) antes de chamar
+  // pdf.destroy(). Como ninguém espera o retorno de dispose() (é
+  // "dispara e esquece" nos dois lugares que chamam), isso não atrasa a
+  // navegação nem a troca de HQ — só adia a destruição real do
+  // documento por, no máximo, o tempo de terminar essa única
+  // renderização pendente.
+  let activePageRenders = 0;
+  let notifyAllRendersDone = null;
   return {
     pageCount: pdf.numPages,
     async getPage(i){
       const cached = cache.get(i);
       if(cached) return cached;
-      const page = await pdf.getPage(i+1);
-      // Antes: scale fixo de 2, sempre a mesma resolução não importa a
-      // tela do aparelho. Isso ficava nitidamente pior que o visualizador
-      // do Google Drive (que desenha na resolução real da tela) em
-      // qualquer celular com tela de alta densidade — a maioria hoje —,
-      // e a compressão JPEG por cima ainda borrava mais os traços e as
-      // tramas de pontos comuns em gibi antigo.
-      // Agora: renderiza na largura física real da tela (CSS width ×
-      // devicePixelRatio), com um teto pra não estourar memória em
-      // telas gigantes/muito densas, e nunca abaixo do scale 2 de antes
-      // (telas antigas/pequenas continuam pelo menos como estavam).
-      const base = page.getViewport({scale: 1});
-      const targetPhysicalWidth = Math.min(2400, (window.innerWidth || 1080) * (window.devicePixelRatio || 2));
-      const scale = Math.max(2, targetPhysicalWidth / base.width);
-      const viewport = page.getViewport({scale});
-      const canvas = document.createElement('canvas');
-      canvas.width = viewport.width; canvas.height = viewport.height;
-      await page.render({canvasContext: canvas.getContext('2d'), viewport}).promise;
-      const url = canvas.toDataURL('image/jpeg', 0.95); // 0.9 → 0.95: menos artefato JPEG nos traços/tramas
-      canvas.width = 0; canvas.height = 0;
-      page.cleanup && page.cleanup();
-      cache.set(i, url, false);
-      return url;
+      activePageRenders++;
+      try{
+        const page = await pdf.getPage(i+1);
+        // Antes: scale fixo de 2, sempre a mesma resolução não importa a
+        // tela do aparelho. Isso ficava nitidamente pior que o visualizador
+        // do Google Drive (que desenha na resolução real da tela) em
+        // qualquer celular com tela de alta densidade — a maioria hoje —,
+        // e a compressão JPEG por cima ainda borrava mais os traços e as
+        // tramas de pontos comuns em gibi antigo.
+        // Agora: renderiza na largura física real da tela (CSS width ×
+        // devicePixelRatio), com um teto pra não estourar memória em
+        // telas gigantes/muito densas, e nunca abaixo do scale 2 de antes
+        // (telas antigas/pequenas continuam pelo menos como estavam).
+        const base = page.getViewport({scale: 1});
+        const targetPhysicalWidth = Math.min(2400, (window.innerWidth || 1080) * (window.devicePixelRatio || 2));
+        const scale = Math.max(2, targetPhysicalWidth / base.width);
+        const viewport = page.getViewport({scale});
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width; canvas.height = viewport.height;
+        await page.render({canvasContext: canvas.getContext('2d'), viewport}).promise;
+        const url = canvas.toDataURL('image/jpeg', 0.95); // 0.9 → 0.95: menos artefato JPEG nos traços/tramas
+        canvas.width = 0; canvas.height = 0;
+        page.cleanup && page.cleanup();
+        cache.set(i, url, false);
+        return url;
+      } finally {
+        activePageRenders--;
+        if(activePageRenders === 0 && notifyAllRendersDone){ notifyAllRendersDone(); notifyAllRendersDone = null; }
+      }
     },
-    dispose(){
+    async dispose(){
+      if(activePageRenders > 0){
+        // Prazo de segurança: se isso nunca terminar por algum outro
+        // motivo (ex.: página realmente travada por rede), não ficamos
+        // presos pra sempre esperando — destruímos mesmo assim depois de
+        // um tempo razoável.
+        await Promise.race([
+          new Promise(resolve=>{ notifyAllRendersDone = resolve; }),
+          new Promise(resolve=>setTimeout(resolve, 10000))
+        ]);
+      }
       cache.disposeAll();
       pdf.destroy();
     }
@@ -1459,6 +1495,23 @@ function runLimited(items, limit, worker){
    simultâneas — então telas com muita coisa abrem mais rápido e gastam
    bem menos dado.
    --------------------------------------------------------------------- */
+// Rede de segurança das filas de capa: cada "vaga" só é liberada quando a
+// tarefa termina (sucesso ou erro), então qualquer tarefa que nunca
+// resolva nem rejeite prende aquela vaga para sempre — e como a fila é
+// compartilhada por tudo (pastas e HQs), isso trava as capas seguintes
+// até a aba/app ser fechado de verdade (é o que acontecia com o bug do
+// pdf.js corrigido em openComicPDF() acima). Envolvendo toda tarefa
+// num timeout, garantimos que a vaga sempre é liberada depois de um
+// tempo, não importa a causa do travamento — inclusive causas futuras
+// que a gente ainda não previu.
+const COVER_TASK_TIMEOUT_MS = 20000;
+function withCoverTimeout(promise){
+  let timer;
+  const timeout = new Promise((_, reject)=>{
+    timer = setTimeout(()=> reject(new Error('tempo esgotado gerando capa')), COVER_TASK_TIMEOUT_MS);
+  });
+  return Promise.race([promise, timeout]).finally(()=> clearTimeout(timer));
+}
 const COVER_MAX_CONCURRENT = 9;
 let coverActiveCount = 0;
 const coverQueue = [];
@@ -1466,7 +1519,7 @@ function pumpCoverQueue(){
   while(coverActiveCount < COVER_MAX_CONCURRENT && coverQueue.length){
     const task = coverQueue.shift();
     coverActiveCount++;
-    Promise.resolve().then(task).catch(()=>{}).finally(()=>{
+    withCoverTimeout(Promise.resolve().then(task)).catch(e=>{ logWarn('[PlanetaHQ] capa (fila): tarefa não terminou —', e); }).finally(()=>{
       coverActiveCount--; pumpCoverQueue();
     });
   }
@@ -1485,7 +1538,7 @@ function pumpNetworkCoverQueue(){
   while(networkCoverActiveCount < NETWORK_COVER_MAX_CONCURRENT && networkCoverQueueTasks.length){
     const {task, resolve, reject} = networkCoverQueueTasks.shift();
     networkCoverActiveCount++;
-    Promise.resolve().then(task).then(resolve, reject).finally(()=>{
+    withCoverTimeout(Promise.resolve().then(task)).then(resolve, reject).finally(()=>{
       networkCoverActiveCount--; pumpNetworkCoverQueue();
     });
   }
