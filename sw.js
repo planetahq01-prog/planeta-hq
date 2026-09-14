@@ -111,7 +111,27 @@
   que no visualizador do Google Drive, principalmente em telas de alta
   densidade e em gibis antigos com traço fino e trama de pontos.
 */
-const CACHE_VERSION = 'v20';
+/*
+  v21: index.html mudou — a logo "Coleção Batman" estava com 100px de
+  altura (bem acima das outras: Aranha 52px, X-Men 28px), o que deixava a
+  barra de título dessa seção bem mais alta e parecia um espaçamento
+  grande até as subpastas. Reduzida pra 48px.
+*/
+/*
+  v22: index.html mudou — logo do Homem-Aranha e do Batman trocadas por
+  novas imagens (URLs fornecidas pelo usuário), ambas fixadas em 52px de
+  altura (revertendo o ajuste pontual de 48px da v21, que não era mais
+  necessário).
+*/
+/*
+  v23: index.html mudou — nova seção "Coleção Graphic Novels Marvel
+  (Salvat)" na Home, com as subpastas de dentro de "Graphic Novels
+  Marvel" (mesma lógica de X-Men/Mangás/Batman). As capas dessas 15
+  primeiras subpastas (001 a 015) foram fixadas manualmente por número de
+  3 dígitos no início do nome da pasta (novo mapa
+  SALVAT_NUMBERED_COVER_OVERRIDES), sem precisar bater o nome inteiro.
+*/
+const CACHE_VERSION = 'v23';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
