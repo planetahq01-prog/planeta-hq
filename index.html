@@ -3415,43 +3415,6 @@ function syncReaderSettingsUI(){
 }/* ---------------------------------------------------------------------
    9) HOME — seções em carrossel estilo Tomato
    --------------------------------------------------------------------- */
-const ARANHA_PRIORITY = [
-  'amazing spider-man','amazing spiderman','amazing spider man',
-  'ultimate spider-man','ultimate spiderman','ultimate spider man',
-  'spectacular spider-man','spectacular spiderman','spectacular spider man',
-  'web of spider-man','web of spiderman',
-  'superior spider-man','superior spiderman',
-  'spider-man','spiderman',
-  'miles morales','spider-verse','spiderverse'
-];
-function aranhaRank(name){
-  const n = normalizeStr(name.replace(/\.(pdf|cbz|cbr)$/i,''));
-  for(let i=0;i<ARANHA_PRIORITY.length;i++){
-    if(n === ARANHA_PRIORITY[i]) return i;
-  }
-  for(let i=0;i<ARANHA_PRIORITY.length;i++){
-    if(n.startsWith(ARANHA_PRIORITY[i])) return i + 0.5;
-  }
-  return 999;
-}
-
-// Pastas que não devem aparecer na coleção do Homem-Aranha, mesmo
-// contendo "aranha"/"spider" no nome.
-const ARANHA_EXCLUDED_FOLDERS = [
-  'Ultimate Spider-Man',
-  'Aranhaverso (2014)',
-  'Arquivos Secretos do Homem-Aranha (1995)',
-  'Homem Aranha & Dr. Octopus: Exposição Negativa (2004)',
-  'Homem-Aranha Ultimate Vol 01',
-  'Homem-Aranha: A Vingança do Duende Verde (2000)',
-  'Homem-Aranha: Renovando Votos',
-  'No Limiar do Aranhaverso (2022)',
-  'No Limiar do Aranhaverso (2023)',
-  'O Espantoso Homem-Aranha (2016)',
-  'O Vingador Homem-Aranha (2011)',
-  'Ultimate Homem-Aranha V2'
-].map(normalizeStr);
-
 // Acha, dentro de uma lista de pastas já coletada, a primeira cujo nome
 // (ignorando acento/caixa/pontuação) bate com um dos nomes-alvo. Usado pra
 // achar a pasta "X - MEN" ou "MANGÁS" independente de estar dentro de
@@ -3510,26 +3473,16 @@ async function crawlLibrarySections(token, isStale, errorState){
   await walk(CONFIG.rootFolderId, []);
   if(isStale(token)) return {comics: [], folders: [], aranhaFolders: [], xmenFolders: [], mangaFolders: [], batmanFolders: [], salvatFolders: [], hadError:false, errorMessage:null};
 
-  const seenAranhaNames = new Set();
-  const aranhaFolders = allFolders.filter(f=>{
-    const n = normalizeStr(f.name);
-    if(!(n.includes('aranha') || n.includes('spider'))) return false;
-    if(ARANHA_EXCLUDED_FOLDERS.includes(n)) return false;
-    // Descarta pastas repetidas com o mesmo nome (ex.: "Aranha-Geddon"
-    // duplicada em dois lugares da biblioteca) — mantém só a primeira.
-    if(seenAranhaNames.has(n)) return false;
-    seenAranhaNames.add(n);
-    return true;
-  }).sort((a,b)=>{
-    const ra = aranhaRank(a.name), rb = aranhaRank(b.name);
-    if(ra !== rb) return ra - rb;
-    return a.name.localeCompare(b.name,'pt-BR',{numeric:true});
-  });
-
-  // Conteúdo direto de dentro de uma pasta-alvo (X-Men ou Mangás) — sem
-  // filtro nem exclusão, igual sempre foi. A listagem já está em cache
-  // (foi visitada durante o walk acima), então isto não bate na rede de
-  // novo.
+  // Antes: a seção "Coleção Homem-Aranha" juntava, de QUALQUER lugar da
+  // biblioteca, toda pasta cujo nome contivesse "aranha" ou "spider" (com
+  // uma lista de exclusões manual pra pastas que davam falso positivo).
+  // Agora, igual X-Men/Mangás/Batman/Graphic Novels Marvel: acha a pasta
+  // chamada "Coleção Homem-Aranha" e lista só o que está DENTRO dela
+  // (ex.: "Sem Limites", "(1963) O Espantoso Homem-Aranha" etc.), sem
+  // filtro por nome e sem precisar de lista de exclusão.
+  // Graphic Novels Marvel...) — sem filtro nem exclusão, igual sempre
+  // foi. A listagem já está em cache (foi visitada durante o walk acima),
+  // então isto não bate na rede de novo.
   async function childrenOfNamedFolder(targetNames){
     const folder = allFolders.find(f=>targetNames.includes(normalizeForFolderMatch(f.name)));
     if(!folder || isStale(token)) return [];
@@ -3541,6 +3494,7 @@ async function crawlLibrarySections(token, isStale, errorState){
     }
     return listing.folders.slice().sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
   }
+  const aranhaFolders = await childrenOfNamedFolder(['colecao homem aranha']);
   const xmenFolders = await childrenOfNamedFolder(['x men','xmen']);
   const mangaFolders = await childrenOfNamedFolder(['mangas','manga']);
   // Pasta "Batman" (dentro de "DC" na prática, mas achamos pelo nome em
@@ -3689,7 +3643,7 @@ function attachCarouselDrag(carousel){
   }, true);
 }
 
-const ARANHA_CACHE_KEY = 'planetahq_aranha_cache_v2';
+const ARANHA_CACHE_KEY = 'planetahq_aranha_cache_v3'; // v3: seção passou a ser baseada na pasta "Coleção Homem-Aranha", não mais filtro por nome
 const XMEN_CACHE_KEY = 'planetahq_xmen_cache_v1';
 const MANGA_CACHE_KEY = 'planetahq_manga_cache_v1';
 const ALLCOMICS_CACHE_KEY = 'planetahq_allcomics_cache_v1';

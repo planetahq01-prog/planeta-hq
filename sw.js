@@ -131,7 +131,28 @@
   3 dígitos no início do nome da pasta (novo mapa
   SALVAT_NUMBERED_COVER_OVERRIDES), sem precisar bater o nome inteiro.
 */
-const CACHE_VERSION = 'v23';
+/*
+  v24: index.html mudou — childrenOfNamedFolder (usada por X-Men, Mangás,
+  Batman e Graphic Novels Marvel) agora junta o conteúdo de TODAS as
+  pastas que encontrar com aquele nome, em vez de só a primeira. Essa
+  biblioteca tem pastas duplicadas confirmadas (ex.: "Aranha-Geddon" já
+  tratada à parte) — se a primeira pasta "Graphic Novels Marvel"
+  encontrada fosse uma cópia vazia, a seção inteira saía vazia mesmo com
+  o nome certo, e foi isso que aconteceu.
+*/
+/*
+  v25: index.html mudou — revertida a mudança da v24 (juntar todas as
+  pastas com o mesmo nome). childrenOfNamedFolder voltou a pegar só a
+  primeira pasta encontrada com aquele nome, como era antes.
+*/
+/*
+  v26: index.html mudou — "Coleção Homem-Aranha" deixou de juntar toda
+  pasta com "aranha"/"spider" no nome (espalhadas pela biblioteca) e
+  passou a mostrar só o que está DENTRO da pasta "Coleção Homem-Aranha",
+  igual X-Men/Mangás/Batman/Graphic Novels Marvel. Cache dessa seção
+  também foi resetado (v2 → v3) pra não reaproveitar a lista antiga.
+*/
+const CACHE_VERSION = 'v26';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
