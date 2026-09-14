@@ -164,7 +164,18 @@
   que substitui um grid/seção libera primeiro (releaseCoverObservers) os
   cards ainda pendentes.
 */
-const CACHE_VERSION = 'v27';
+/*
+  v28: as URLs da logo "Homem-Aranha" e "Batman" na casca do app
+  (APP_SHELL, abaixo) estavam desatualizadas — ficaram apontando pras
+  imagens antigas de antes de serem trocadas no index.html (ver HOME_LOGOS
+  lá). Como a URL nova nunca batia com nada guardado em cache, essas duas
+  logos caíam sempre no caminho lento (buscar na rede, do zero, toda vez
+  que o app abria) — daí aparecerem em branco por um tempo antes de
+  carregar. A logo do X-Men não teve esse problema porque a URL dela nunca
+  mudou desde que entrou na casca. Agora as três URLs abaixo batem
+  exatamente com o HOME_LOGOS atual do index.html.
+*/
+const CACHE_VERSION = 'v28';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
@@ -179,9 +190,9 @@ const APP_SHELL = [
   'https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700;800&display=swap',
   // Logos das seções da Home — precisam ser EXATAMENTE as mesmas URLs de
   // HOME_LOGOS no index.html.
-  'https://i.postimg.cc/x1cRhdkq/XRecorder-17092024-211205-removebg-preview.png',
+  'https://i.postimg.cc/T2BgjCPP/amazing-spiderman-seeklogo.png',
   'https://i.postimg.cc/cJzP2j41/x-men-seeklogo.png',
-  'https://i.postimg.cc/bJBSv7pv/batman-1-logo-png-transparent.png'
+  'https://i.postimg.cc/vBNHsqK1/IMG-20260914-002543.png'
 ];
 // URLs absolutas resolvidas uma única vez, pra comparar por igualdade exata
 // (nunca mais por sufixo/heurística) na hora de decidir o que é "casca".
