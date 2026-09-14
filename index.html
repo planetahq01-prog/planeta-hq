@@ -1621,6 +1621,32 @@ const coverObserver = ('IntersectionObserver' in window) ? new IntersectionObser
 // capas ainda não começaram a carregar de jeito nenhum.
 const pendingCoverNodes = new Set();
 
+// VAZAMENTO DE MEMÓRIA CORRIGIDO (causa raiz do travamento progressivo):
+// todo card que ainda não tinha entrado na tela (ex.: capas mais abaixo
+// numa pasta grande, ou qualquer seção da Home) ficava registrado pra
+// sempre em coverObserver + pendingCoverNodes. Quando a pessoa trocava de
+// pasta, buscava algo, ou clicava em "Atualizar", o grid/seção antigo era
+// substituído (innerHTML=''), mas NINGUÉM tirava esses cards ainda não
+// vistos da observação — então tanto o IntersectionObserver quanto o Set
+// continuavam segurando uma referência forte a eles pra sempre. Isso
+// impedia o navegador de liberar da memória não só o card em si, mas tudo
+// que ele carregava junto (closures com os dados do arquivo, listeners,
+// etc.). Quanto mais a pessoa navegava pela biblioteca (que é exatamente
+// o uso normal do app), mais isso se acumulava, até esgotar a memória
+// disponível e travar/derrubar a aba — igual ao bug do carrossel logo
+// abaixo (attachCarouselDrag), só que sem a correção equivalente até agora.
+// Esta função deve ser chamada ANTES de remover/substituir qualquer
+// container que possa ter cards com capa pendente.
+function releaseCoverObservers(root){
+  if(!root || pendingCoverNodes.size === 0) return;
+  pendingCoverNodes.forEach(node=>{
+    if(root === node || root.contains(node)){
+      if(coverObserver) coverObserver.unobserve(node);
+      pendingCoverNodes.delete(node);
+    }
+  });
+}
+
 // Agenda a capa de `node` pra carregar só quando ele estiver perto da
 // tela. Sem suporte a IntersectionObserver (raríssimo), cai pro
 // comportamento antigo (carrega direto, só respeitando o teto de fila).
@@ -2014,6 +2040,7 @@ async function applyLibraryFilterSort(files){
 async function renderLibrary(folderId, forceRefresh){
   $('#home-sections').classList.add('hidden');
   const grid = $('#grid-library');
+  releaseCoverObservers(grid);
   if(folderId === CONFIG.rootFolderId){
     // A pasta raiz É a tela Home: aqui só as seções (Continuar lendo,
     // Coleção Homem-Aranha, Coleção X-Men, Coleção Mangás, Recomendados —
@@ -2067,7 +2094,7 @@ async function renderLibrary(folderId, forceRefresh){
     // pastas recém-vistas realmente têm conteúdo, e some com as vazias.
     runLimited(folderCards.filter(({f})=>getCachedFolderOk(f.id)===undefined), 2, async ({card, f})=>{
       const ok = await folderHasQualifyingContent(f.id);
-      if(!ok && card.isConnected) card.remove();
+      if(!ok && card.isConnected){ releaseCoverObservers(card); card.remove(); }
     });
   }catch(err){
     grid.innerHTML = `<div class="empty-state">${ICONS.warning}<h3>Não foi possível carregar</h3>${escapeHtml(err.message)}</div>`;
@@ -2756,6 +2783,7 @@ async function runSearch(term){
   const myToken = ++searchToken;
   $('#home-sections').classList.add('hidden');
   const grid = $('#grid-library');
+  releaseCoverObservers(grid);
   grid.innerHTML = `<div class="empty-state"><div class="spinner" style="margin:0 auto 12px"></div>Buscando em toda a biblioteca...</div>`;
   let folders, allFiles;
   try{
@@ -2807,6 +2835,7 @@ async function renderDownloads(){
   const grid = $('#grid-downloads');
   const items = (await idbAll('downloads')).filter(it=>(it.ext||guessExt(it))!=='cbr');
   renderDownloadsUsage(items.reduce((sum,it)=>sum+(Number(it.size)||0),0));
+  releaseCoverObservers(grid);
   grid.innerHTML = '';
   if(items.length===0){
     grid.innerHTML = `<div class="empty-state">${ICONS.download}<h3>Nada baixado ainda</h3>Toque em "Baixar" em qualquer HQ da biblioteca para ler offline.</div>`;
@@ -2859,6 +2888,7 @@ function openFavoriteFolder(f){
 async function renderFavorites(){
   const grid = $('#grid-favorites');
   const items = (await idbAll('favorites')).filter(it=>it.mimeType==='application/vnd.google-apps.folder');
+  releaseCoverObservers(grid);
   grid.innerHTML = '';
   if(items.length===0){
     grid.innerHTML = `<div class="empty-state">${ICONS.star}<h3>Nenhum favorito ainda</h3>Toque na estrela de qualquer pasta para adicioná-la aqui.</div>`;
@@ -2890,6 +2920,7 @@ async function renderHistory(){
     };
     toolbar.appendChild(clearBtn);
   }
+  releaseCoverObservers(grid);
   grid.innerHTML = '';
   if(items.length===0){
     grid.innerHTML = `<div class="empty-state">${ICONS.history}<h3>Nenhum histórico ainda</h3>As HQs que você abrir vão aparecer aqui.</div>`;
@@ -3992,6 +4023,7 @@ function wireHomeLogoFallback(section, id){
 
 function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, allComics, hadError, errorMessage}){
   const recommended = buildRecommended(allComics);
+  releaseCoverObservers(wrap);
   wrap.innerHTML = '';
   let anySection = false;
 

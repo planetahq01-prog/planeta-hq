@@ -152,7 +152,19 @@
   igual X-Men/Mangás/Batman/Graphic Novels Marvel. Cache dessa seção
   também foi resetado (v2 → v3) pra não reaproveitar a lista antiga.
 */
-const CACHE_VERSION = 'v26';
+/*
+  v27: index.html mudou — corrigido um vazamento de memória real no
+  carregamento preguiçoso das capas: cards de capa que ainda não tinham
+  entrado na tela (ex.: mais abaixo numa pasta grande, ou em qualquer
+  seção da Home) ficavam presos pra sempre em coverObserver +
+  pendingCoverNodes sempre que a pessoa trocava de pasta, buscava algo ou
+  clicava em "Atualizar" — o grid antigo era substituído sem ninguém
+  liberar essas observações. Isso acumulava a cada navegação (uso normal
+  do app) até esgotar a memória e travar/derrubar a aba. Agora todo lugar
+  que substitui um grid/seção libera primeiro (releaseCoverObservers) os
+  cards ainda pendentes.
+*/
+const CACHE_VERSION = 'v27';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
