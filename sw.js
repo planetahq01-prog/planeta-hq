@@ -102,7 +102,16 @@
      entrada de uma pasta específica se a capa dela realmente sumiu
      (checagem de graça, sem rede extra, feita ao fim de cada varredura).
 */
-const CACHE_VERSION = 'v19';
+/*
+  v20: index.html mudou — as páginas de PDF no leitor agora são
+  desenhadas na resolução real da tela do aparelho (largura × densidade
+  de pixels), em vez de um "scale" fixo de 2 igual pra qualquer celular,
+  e a compressão JPEG ficou um pouco mais leve (0.9 → 0.95). Antes disso,
+  páginas de PDF apareciam nitidamente mais borradas/granuladas no app do
+  que no visualizador do Google Drive, principalmente em telas de alta
+  densidade e em gibis antigos com traço fino e trama de pontos.
+*/
+const CACHE_VERSION = 'v20';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
