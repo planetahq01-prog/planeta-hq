@@ -1061,6 +1061,14 @@ function driveReleaseSlot(){
   if(next) next();
   else driveActiveRequests--;
 }
+function withStallTimeout(promise, ms, message){
+  let timer;
+  const timeout = new Promise((_, reject)=>{
+    timer = setTimeout(()=>reject(new Error(message || 'Tempo esgotado.')), ms);
+  });
+  return Promise.race([promise, timeout]).finally(()=>clearTimeout(timer));
+}
+
 function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
 
 // Contagem de pedidos concluídos com sucesso à API do Drive desde que o
@@ -1082,7 +1090,7 @@ async function driveFetchJson(url){
       // essa mesma URL de consulta, em vez de perguntar de novo pro Google
       // Drive — mesmo clicando em "Atualizar". Foi essa a causa da
       // biblioteca "sumir" e não voltar sem reinstalar o app.
-      res = await fetch(url, {cache:'no-store'});
+      res = await withStallTimeout(fetch(url, {cache:'no-store'}), 15000, 'Tempo esgotado ao contatar o Google Drive.');
       if(res.ok){ driveRequestsDone++; return await res.json(); }
       errBody = await res.text().catch(()=> '');
     } catch(e){
@@ -1210,7 +1218,7 @@ async function driveFetchBlob(fileId, onProgress, knownSize){
     // de uma HQ só porque ela foi aberta/baixada; quem decide o que fica
     // salvo é exclusivamente o idbSet('downloads', ...) feito por quem chama
     // esta função, não o cache HTTP do navegador.
-    res = await fetch(url, {cache:'no-store'});
+    res = await withStallTimeout(fetch(url, {cache:'no-store'}), 15000, 'Tempo esgotado ao contatar o Google Drive.');
   }catch(networkErr){
     if(CONFIG.proxyUrl){
       throw new Error('Não foi possível contatar o proxy configurado. Verifique a URL nas configurações.');
@@ -1227,7 +1235,7 @@ async function driveFetchBlob(fileId, onProgress, knownSize){
   let received = 0;
   let lastPct = -1;
   while(true){
-    const {done, value} = await reader.read();
+    const {done, value} = await withStallTimeout(reader.read(), 20000, 'A conexão travou no meio do download.');
     if(done) break;
     chunks.push(value);
     received += value.length;
