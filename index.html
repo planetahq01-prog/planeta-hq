@@ -1163,10 +1163,9 @@ async function driveListFolderUncached(folderId){
     .filter(f=>f.mimeType === 'application/vnd.google-apps.folder')
     .sort((a,b)=>a.name.localeCompare(b.name,'pt-BR'));
 
-  // CBR não é suportado pelo leitor do app (só PDF e CBZ) — nunca aparece.
   const comics = files
     .map(f=>({...f, _ext: guessExt(f)}))
-    .filter(f=>f._ext && f._ext !== 'cbr')
+    .filter(f=>f._ext)
     .sort((a,b)=>a.name.localeCompare(b.name,'pt-BR', {numeric:true}));
 
   // A listagem em si NÃO espera mais verificar se cada subpasta tem
@@ -1309,46 +1308,59 @@ async function openComicCBZ(blob){
   };
 }
 
-let rarLibPromise = null;
+let unrarAssetsPromise = null;
 function ensureRarLib(){
-  if(rarLibPromise) return rarLibPromise;
+  if(unrarAssetsPromise) return unrarAssetsPromise;
   const sources = [
-    { main:'https://cdn.jsdelivr.net/npm/libarchive.js/main.js', worker:'https://cdn.jsdelivr.net/npm/libarchive.js/dist/worker-bundle.js' },
-    { main:'https://unpkg.com/libarchive.js/main.js', worker:'https://unpkg.com/libarchive.js/dist/worker-bundle.js' },
-    { main:'https://cdn.jsdelivr.net/npm/[email protected]/main.js', worker:'https://cdn.jsdelivr.net/npm/[email protected]/dist/worker-bundle.js' }
+    { mod: 'https://cdn.jsdelivr.net/npm/[email protected]/esm/index.esm.js', wasm: 'https://cdn.jsdelivr.net/npm/[email protected]/esm/js/unrar.wasm' },
+    { mod: 'https://unpkg.com/[email protected]/esm/index.esm.js', wasm: 'https://unpkg.com/[email protected]/esm/js/unrar.wasm' }
   ];
-  rarLibPromise = (async()=>{
+  unrarAssetsPromise = (async()=>{
+    let lastErr;
     for(const src of sources){
       try{
-        const mod = await import(/* @vite-ignore */ src.main);
-        const ArchiveCls = mod.Archive || (mod.default && mod.default.Archive) || mod.default;
-        if(!ArchiveCls) throw new Error('módulo carregado sem export Archive');
-        window.Archive = ArchiveCls;
-        ArchiveCls.init({ workerUrl: src.worker });
-        return true;
-      }catch(e){ console.warn('[PlanetaHQ] Falha ao carregar libarchive de', src.main, e); }
+        const [mod, wasmBinary] = await Promise.all([
+          import(/* @vite-ignore */ src.mod),
+          fetch(src.wasm).then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.arrayBuffer(); })
+        ]);
+        const createExtractorFromData = mod.createExtractorFromData || (mod.default && mod.default.createExtractorFromData);
+        if(!createExtractorFromData) throw new Error('módulo carregado sem createExtractorFromData');
+        return { createExtractorFromData, wasmBinary };
+      }catch(e){ lastErr = e; console.warn('[PlanetaHQ] Falha ao carregar suporte a CBR de', src.mod, e); }
     }
-    throw new Error('Não foi possível carregar o suporte a CBR (todas as fontes falharam).');
+    throw new Error('Não foi possível carregar o suporte a CBR (todas as fontes falharam). ' + (lastErr && lastErr.message || ''));
   })();
-  return rarLibPromise;
+  return unrarAssetsPromise;
 }
 
 async function openComicCBR(blob){
-  await ensureRarLib();
-  const archive = await Archive.open(blob);
-  const filesObj = await archive.getFilesArray();
-  const entries = filesObj
-    .filter(f=>/\.(jpe?g|png|webp|gif)$/i.test(f.file.name))
-    .sort((a,b)=>naturalSort(a.file.name, b.file.name));
-  if(entries.length === 0) throw new Error('Nenhuma imagem encontrada dentro do CBR.');
+  const { createExtractorFromData, wasmBinary } = await ensureRarLib();
+  const data = await blob.arrayBuffer();
+  // wasmBinary é reaproveitado (já baixado uma vez), mas cada HQ aberta
+  // precisa do seu próprio extractor — não dá pra reaproveitar entre
+  // arquivos RAR diferentes.
+  const extractor = await createExtractorFromData({ data, wasmBinary });
+  const list = extractor.getFileList();
+  const names = [...list.fileHeaders]
+    .filter(h=>!h.flags.directory && /\.(jpe?g|png|webp|gif)$/i.test(h.name))
+    .map(h=>h.name)
+    .sort(naturalSort);
+  if(names.length === 0) throw new Error('Nenhuma imagem encontrada dentro do CBR.');
   const cache = createPageCache(24);
   return {
-    pageCount: entries.length,
+    pageCount: names.length,
     async getPage(i){
       const cached = cache.get(i);
       if(cached) return cached;
-      const f = await entries[i].file.extract();
-      const url = URL.createObjectURL(f);
+      const name = names[i];
+      // Extrai só a página pedida, uma de cada vez (igual ao CBZ) — evita
+      // guardar o gibi inteiro descompactado na memória ao mesmo tempo.
+      const extracted = extractor.extract({ files: [name] });
+      const first = [...extracted.files][0];
+      if(!first || !first.extraction) throw new Error('Falha ao extrair página do CBR: ' + name);
+      const mime = /\.png$/i.test(name) ? 'image/png' : /\.webp$/i.test(name) ? 'image/webp' : /\.gif$/i.test(name) ? 'image/gif' : 'image/jpeg';
+      const pageBlob = new Blob([first.extraction], { type: mime });
+      const url = URL.createObjectURL(pageBlob);
       cache.set(i, url, true);
       return url;
     },
@@ -2240,7 +2252,7 @@ async function resolveCoverFallback(f){
   // já usado (e comprovadamente funcional) pra abrir/baixar a HQ. Fica
   // mais lento e gasta mais dado nessa HQ especificamente, mas a capa
   // realmente aparece, que é o que importa.
-  if(!dataUrl && (ext === 'pdf' || ext === 'cbz')){
+  if(!dataUrl && (ext === 'pdf' || ext === 'cbz' || ext === 'cbr')){
     try{
       dataUrl = await networkCoverQueue(async ()=>{
         const blob = await driveFetchBlob(f.id, null, Number(f.size)||0);
@@ -2736,7 +2748,7 @@ async function searchLibrary(normTerm, rawTerm, token, isStale){
         .sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
       const comics = direct
         .map(f=>({...f, _ext: guessExt(f)}))
-        .filter(f=>f._ext && f._ext !== 'cbr' && normalizeStr(f.name).includes(normTerm))
+        .filter(f=>f._ext && normalizeStr(f.name).includes(normTerm))
         .sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
       if(folders.length || comics.length) return {folders, files: comics};
     }
@@ -2833,7 +2845,7 @@ function renderDownloadsUsage(totalBytes){
 
 async function renderDownloads(){
   const grid = $('#grid-downloads');
-  const items = (await idbAll('downloads')).filter(it=>(it.ext||guessExt(it))!=='cbr');
+  const items = await idbAll('downloads');
   renderDownloadsUsage(items.reduce((sum,it)=>sum+(Number(it.size)||0),0));
   releaseCoverObservers(grid);
   grid.innerHTML = '';
@@ -2908,7 +2920,7 @@ async function renderFavorites(){
 async function renderHistory(){
   const grid = $('#grid-history');
   const toolbar = $('#history-toolbar');
-  const items = (await idbAll('progress')).filter(it=>(it._ext||guessExt(it))!=='cbr');
+  const items = await idbAll('progress');
   items.sort((a,b)=>b.updatedAt-a.updatedAt);
   toolbar.innerHTML = '';
   if(items.length){

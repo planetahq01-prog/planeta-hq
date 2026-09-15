@@ -175,7 +175,18 @@
   mudou desde que entrou na casca. Agora as três URLs abaixo batem
   exatamente com o HOME_LOGOS atual do index.html.
 */
-const CACHE_VERSION = 'v28';
+/*
+  v29: index.html trocou o suporte a CBR de libarchive.js pra node-unrar-js
+  — a lib antiga carregava um Worker de um arquivo separado hospedado no
+  CDN (worker-bundle.js), e criar um Worker a partir de um script de outra
+  origem é bloqueado/instável em vários navegadores por causa de CORS. Era
+  por isso que CBR nunca funcionava de verdade (o app chegava a esconder
+  esses arquivos da biblioteca inteira por causa disso). A lib nova roda o
+  unrar (compilado pra WebAssembly) direto no código principal, sem
+  precisar de um Worker de outra origem — só um arquivo .wasm, que entra
+  no cache abaixo pra funcionar offline também.
+*/
+const CACHE_VERSION = 'v29';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
@@ -187,6 +198,10 @@ const APP_SHELL = [
   // baixado na aba "Baixados") falha assim que o aparelho está offline, com
   // o erro "Setting up fake worker failed: Cannot load script at: ...".
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js',
+  // Suporte a CBR (ver ensureRarLib no index.html) — precisam ser
+  // EXATAMENTE as mesmas URLs da primeira fonte ali.
+  'https://cdn.jsdelivr.net/npm/[email protected]/esm/index.esm.js',
+  'https://cdn.jsdelivr.net/npm/[email protected]/esm/js/unrar.wasm',
   'https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700;800&display=swap',
   // Logos das seções da Home — precisam ser EXATAMENTE as mesmas URLs de
   // HOME_LOGOS no index.html.
@@ -198,6 +213,15 @@ const APP_SHELL = [
 // (nunca mais por sufixo/heurística) na hora de decidir o que é "casca".
 const APP_SHELL_URLS = new Set(APP_SHELL.map((u) => new URL(u, self.location.href).href));
 
+// Buscados com CORS de verdade (não 'no-cors') porque um import() de
+// módulo JS rejeita resposta "opaca" mesmo vinda do cache, e o .wasm
+// ficaria com 0 bytes do mesmo jeito se servido opaco — o jsDelivr manda
+// os cabeçalhos CORS certos pra isso funcionar.
+const CORS_URLS = new Set([
+  'https://cdn.jsdelivr.net/npm/[email protected]/esm/index.esm.js',
+  'https://cdn.jsdelivr.net/npm/[email protected]/esm/js/unrar.wasm'
+]);
+
 self.addEventListener('install', (event) => {
   self.skipWaiting();
   event.waitUntil(
@@ -208,7 +232,7 @@ self.addEventListener('install', (event) => {
       // antiga do cache HTTP nativo do navegador.
       return Promise.all(
         APP_SHELL.map((url) =>
-          fetch(url, { mode: url.startsWith('http') ? 'no-cors' : 'same-origin', cache: 'no-store' })
+          fetch(url, { mode: CORS_URLS.has(url) ? 'cors' : (url.startsWith('http') ? 'no-cors' : 'same-origin'), cache: 'no-store' })
             .then((res) => cache.put(url, res))
             .catch(() => {})
         )
