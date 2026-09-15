@@ -215,17 +215,7 @@
   (ou o leitor é fechado), e mesmo que ainda tente atualizar a tela antes
   de perceber o cancelamento, um token de controle impede.
 */
-/*
-  v34: index.html mudou — botão de engrenagem (⚙️) deixou de apagar a
-  configuração inteira direto; agora abre um painel de Configurações onde
-  dá pra editar (ou só adicionar) a URL do proxy, a chave de API e a pasta
-  raiz sem perder nada, com "Apagar configuração" como opção separada
-  dentro do painel. Também: erros ao baixar o conteúdo de uma HQ (CBR/CBZ/
-  PDF) agora mostram o motivo real devolvido pelo Google Drive/proxy (ex.:
-  cota de download excedida, chave de API restrita) em vez de só o número
-  do status HTTP (ex.: "403").
-*/
-const CACHE_VERSION = 'v34';
+const CACHE_VERSION = 'v32';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [

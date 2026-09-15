@@ -486,12 +486,6 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
   padding:16px;display:flex;flex-direction:column;
 }
 #debug-panel.hidden{display:none;}
-#settings-panel{
-  position:fixed;inset:0;z-index:999;background:var(--ink-bg,#0b0b10);
-  padding:16px;display:flex;flex-direction:column;overflow-y:auto;
-}
-#settings-panel.hidden{display:none;}
-.field-hint{font-size:12px;color:var(--text-muted);margin:-10px 0 16px;line-height:1.5;}
 /* ---- Tela de carregamento inicial (0% -> 100%) ---- */
 #view-loading{
   position:fixed;inset:0;z-index:1000;
@@ -591,8 +585,8 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
           <li>Em "Credenciais", crie uma <code>Chave de API</code> e (recomendado) restrinja-a à Drive API.</li>
           <li>No Google Drive, clique com o botão direito na pasta raiz das HQs → <code>Compartilhar</code> → mude para <code>"Qualquer pessoa com o link" → "Leitor"</code>. Isso é necessário para o app ler os arquivos sem exigir login de cada usuário.</li>
           <li>Abra a pasta no navegador; o ID é o trecho da URL depois de <code>/folders/</code>.</li>
-          <li>Se ao abrir uma HQ der erro <code>Failed to fetch</code> ou <code>403</code>, o navegador (ou o próprio Google Drive) está bloqueando o download do conteúdo do arquivo (isso acontece com PDF/CBR/CBZ, mas não com a listagem, que é só metadado). Cole ali a URL de um Cloudflare Worker proxy — o código pronto do worker (<code>cf-worker-proxy.js</code>) acompanha este app; publique-o em <code>workers.dev</code> e cole a URL dele aqui.</li>
-          <li>Cole os valores acima. Eles ficam salvos só neste dispositivo (não são enviados a nenhum servidor além do próprio Google e, se você configurar, do seu proxy). Depois de configurado, dá pra trocar só a URL do proxy a qualquer momento pela engrenagem ⚙️ no topo do app, sem precisar apagar tudo.</li>
+          <li>Se ao abrir uma HQ der erro <code>Failed to fetch</code>, o navegador está bloqueando o download do conteúdo do arquivo por CORS (isso acontece com PDF/CBR mas não com a listagem, que é só metadado). Cole ali a URL de um Cloudflare Worker proxy — veja o texto abaixo do formulário para o código pronto.</li>
+          <li>Cole os valores acima. Eles ficam salvos só neste dispositivo (não são enviados a nenhum servidor além do próprio Google e, se você configurar, do seu proxy).</li>
         </ol>
       </details>
     </div>
@@ -648,27 +642,6 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
       </div>
       <p style="font-size:13px;opacity:.75;margin:4px 0 10px;">Toque em "Copiar tudo" e cole numa mensagem pra enviar. Se estiver vazio, tente entrar de novo na pasta com problema antes de abrir isso aqui.</p>
       <textarea id="debug-panel-text" readonly></textarea>
-    </div>
-    <div id="settings-panel" class="hidden">
-      <div class="debug-panel-head">
-        <strong>Configurações</strong>
-        <button id="btn-settings-close" class="icon-btn"></button>
-      </div>
-      <div class="field">
-        <label>Chave de API do Google (API key)</label>
-        <input type="text" id="in-settings-apikey" placeholder="AIzaSy...">
-      </div>
-      <div class="field">
-        <label>ID da pasta raiz no Drive</label>
-        <input type="text" id="in-settings-folderid" placeholder="1AbCdEfGhIjKlMnOpQrSt...">
-      </div>
-      <div class="field">
-        <label>URL do proxy (opcional, corrige erros 403 / "Failed to fetch")</label>
-        <input type="text" id="in-settings-proxyurl" placeholder="https://seu-worker.workers.dev">
-      </div>
-      <p class="field-hint">Deixe o campo de proxy em branco pra acessar o Google Drive direto, sem proxy. Salvar aqui recarrega o app pra aplicar a configuração nova.</p>
-      <button class="btn-primary" id="btn-settings-save">Salvar</button>
-      <button class="btn-secondary" id="btn-settings-reset" style="margin-top:12px;width:100%;">Apagar configuração e recomeçar</button>
     </div>
     <div class="tabs">
       <button class="tab active" data-tab="library">Biblioteca</button>
@@ -1307,29 +1280,7 @@ async function driveFetchBlob(fileId, onProgress, knownSize, signal){
     }
     throw new Error('Falha de rede/CORS ao baixar o arquivo. Configure uma URL de proxy nas configurações.');
   }
-  if(!res.ok){
-    // Antes só mostrávamos o número do status (ex.: "403"), o que não dá pra
-    // saber SE é chave de API restrita, cota de download do arquivo excedida
-    // no Drive, permissão de compartilhamento errada, etc. — cada uma exige
-    // uma correção diferente. O Google Drive (e nosso proxy, quando repassa
-    // o erro dele) devolve o motivo real no corpo da resposta em JSON:
-    // {"error":{"errors":[{"reason":"...","message":"..."}]}} ou, vindo do
-    // proxy, {"error":"mensagem"}. Lemos e mostramos esse texto agora.
-    let detail = '';
-    try{
-      const text = await res.text();
-      if(text){
-        try{
-          const json = JSON.parse(text);
-          detail = (json && json.error && json.error.errors && json.error.errors[0] && json.error.errors[0].message)
-            || (json && json.error && json.error.message)
-            || (json && typeof json.error === 'string' ? json.error : '')
-            || '';
-        }catch(e){ detail = text.slice(0,200); }
-      }
-    }catch(e){ /* corpo não pôde ser lido — segue só com o status */ }
-    throw new Error(detail ? `Não foi possível baixar o arquivo (${res.status}): ${detail}` : `Não foi possível baixar o arquivo (${res.status}).`);
-  }
+  if(!res.ok) throw new Error(`Não foi possível baixar o arquivo (${res.status}).`);
   // Alguns proxies/CDNs não expõem o header Content-Length via CORS, então usamos
   // o tamanho já conhecido pela listagem do Drive (f.size) como alternativa, para
   // que a porcentagem sempre consiga avançar de forma real.
@@ -1588,32 +1539,8 @@ async function openComicPDF(source, onProgress, knownSize){
   };
 }
 
-// Confere a "assinatura" real do arquivo (os primeiros bytes) em vez de
-// confiar cegamente na extensão do nome/mimeType. Corrige o caso (raro,
-// mas acontece) de alguém renomear um CBR para .cbz (ou vice-versa) sem
-// de fato converter o arquivo — o app tentava abrir como ZIP um arquivo
-// que na verdade é RAR por dentro, e travava com um erro confuso do
-// JSZip ("Can't find end of central directory"). ZIP sempre começa com
-// os bytes "PK"; RAR sempre começa com "Rar!".
-async function sniffArchiveKind(blob){
-  try{
-    const head = new Uint8Array(await blob.slice(0, 8).arrayBuffer());
-    if(head[0]===0x50 && head[1]===0x4B) return 'cbz'; // "PK"
-    if(head[0]===0x52 && head[1]===0x61 && head[2]===0x72 && head[3]===0x21) return 'cbr'; // "Rar!"
-  }catch(e){}
-  return null;
-}
-
 async function openComicFromBlob(fileObj, blob){
-  const declaredExt = fileObj._ext || guessExt(fileObj) || fileObj.name.split('.').pop().toLowerCase();
-  let ext = declaredExt;
-  if(ext === 'cbz' || ext === 'cbr'){
-    const realKind = await sniffArchiveKind(blob);
-    if(realKind && realKind !== ext){
-      logWarn(`[PlanetaHQ] "${fileObj.name}" está com extensão .${ext}, mas o conteúdo é na verdade .${realKind} — abrindo pelo formato real.`);
-      ext = realKind;
-    }
-  }
+  const ext = fileObj._ext || guessExt(fileObj) || fileObj.name.split('.').pop().toLowerCase();
   if(ext === 'cbz') return openComicCBZ(blob);
   if(ext === 'cbr') return openComicCBR(blob);
   if(ext === 'pdf') return openComicPDF(blob);
@@ -1727,47 +1654,6 @@ coverMemoryCache.set = function(key, value){
   }
   return coverMemoryCache;
 };
-
-// Pré-aquecimento em memória das capas de pasta já resolvidas antes.
-// Sem isso, mesmo uma pasta já vista (capa salva no IndexedDB) só pintava
-// depois de: 1) o IntersectionObserver perceber o card, 2) entrar na fila
-// de capas, 3) uma leitura assíncrona em 'folderCovers' (qual arquivo é a
-// capa), 4) outra leitura assíncrona em 'covers' (a miniatura desse
-// arquivo) — daí o placeholder/skeleton sempre aparecia primeiro, mesmo
-// quando a capa já estava 100% disponível localmente.
-// Agora, uma única vez no boot, lemos as duas gavetas inteiras de uma vez
-// (idbAll — o mesmo custo de uma leitura só, não um custo por pasta) e
-// guardamos tudo em dois Maps na RAM. A partir daí, renderFolderCard
-// consegue checar na hora (sem await nenhum) se já tem a capa pronta, e
-// já nasce com ela pintada — sem placeholder, sem fila, sem fade.
-// Pastas novas (ainda sem entrada aqui) continuam caindo no caminho
-// assíncrono normal (lazyLoadCover), exatamente como antes.
-const folderCoverFileMemoryCache = new Map();
-let folderCoverMemoryWarmed = false;
-async function warmFolderCoverMemoryCache(){
-  if(folderCoverMemoryWarmed) return;
-  try{
-    const [folderEntries, coverEntries] = await Promise.all([idbAll('folderCovers'), idbAll('covers')]);
-    folderEntries.forEach(entry=>{ if(entry && entry.file) folderCoverFileMemoryCache.set(entry.id, entry.file); });
-    coverEntries.forEach(entry=>{ if(entry) coverMemoryCache.set(entry.id, entry.dataUrl); });
-    folderCoverMemoryWarmed = true;
-  }catch(e){
-    // Sem banco (ex.: bloqueado por outra aba) — segue sem pré-aquecimento;
-    // as capas ainda carregam normalmente, só que pelo caminho assíncrono.
-    logWarn('[PlanetaHQ] não deu pra pré-aquecer o cache de capas em memória —', e);
-  }
-}
-// Uma pasta já tem capa pronta pra pintar na hora (sem placeholder nem
-// espera) quando: tem um override manual (URL fixa), OU já sabemos qual
-// arquivo é a capa dela E a miniatura desse arquivo já está em memória.
-function getImmediateFolderCoverSrc(folderObj){
-  const override = getFolderCoverOverride(folderObj.name);
-  if(override) return override;
-  const file = folderCoverFileMemoryCache.get(folderObj.id);
-  if(!file) return null;
-  const memo = coverMemoryCache.get(file.id);
-  return (typeof memo === 'string') ? memo : null;
-}
 
 /* ---------------------------------------------------------------------
    6.06) Painel de diagnóstico
@@ -2331,12 +2217,7 @@ async function renderLibrary(folderId, forceRefresh){
       grid.appendChild(card);
       return {card, f};
     });
-    folderCards.forEach(({card, f})=>{
-      // Já nasceu com a capa pintada (ver renderFolderCard) — não precisa
-      // entrar na fila nem no IntersectionObserver pra isso.
-      if(card.classList.contains('cover-immediate')) return;
-      lazyLoadCover(card, ()=>attachFolderCoverAsync(card, f));
-    });
+    folderCards.forEach(({card, f})=>lazyLoadCover(card, ()=>attachFolderCoverAsync(card, f)));
     comicCards.forEach(({card, f})=>lazyLoadCover(card, ()=>attachCoverAsync(card, f)));
     // Confere em segundo plano (baixa prioridade, sem travar nada) quais
     // pastas recém-vistas realmente têm conteúdo, e some com as vazias.
@@ -2354,19 +2235,8 @@ function renderFolderCard(f, opts){
   const card = el('div','card folder');
   card.dataset.id = f.id;
   const cover = el('div','folder-cover');
-  // Capa já disponível localmente (override ou já resolvida antes): pinta
-  // direto, sem placeholder/skeleton e sem passar pela fila de carregamento
-  // — a pasta já nasce com a capinha, em vez de esperar entrar na tela.
-  const immediateSrc = getImmediateFolderCoverSrc(f);
-  if(immediateSrc){
-    const img = buildCoverNode(immediateSrc);
-    img.classList.add('loaded'); // sem fade: já está pronta desde o primeiro frame
-    cover.appendChild(img);
-    card.classList.add('has-cover','cover-immediate');
-  } else {
-    const ph = elHtml('div','cover-placeholder skeleton', ICONS.folder);
-    cover.appendChild(ph);
-  }
+  const ph = elHtml('div','cover-placeholder skeleton', ICONS.folder);
+  cover.appendChild(ph);
   cover.appendChild(buildFavButton(f));
   card.appendChild(cover);
   card.appendChild(el('div','label', f.name));
@@ -2755,9 +2625,8 @@ async function attachCoverAsync(card, f){
 
 async function resolveFolderCoverFile(folderId, depth){
   depth = depth || 0;
-  if(folderCoverFileMemoryCache.has(folderId)) return folderCoverFileMemoryCache.get(folderId);
   const cached = await idbGet('folderCovers', folderId);
-  if(cached){ folderCoverFileMemoryCache.set(folderId, cached.file); return cached.file; }
+  if(cached) return cached.file;
   if(depth > 2) return null;
   let listing;
   try{ listing = await driveListFolder(folderId); }catch(e){ return null; }
@@ -2768,15 +2637,10 @@ async function resolveFolderCoverFile(folderId, depth){
     file = await resolveFolderCoverFile(listing.folders[0].id, depth+1);
   }
   if(file){
-    const record = {
+    await idbSet('folderCovers', {id: folderId, file: {
       id:file.id, name:file.name, mimeType:file.mimeType, size:file.size,
       thumbnailLink:file.thumbnailLink, _ext:file._ext
-    };
-    await idbSet('folderCovers', {id: folderId, file: record});
-    // Guarda também na RAM: se esta mesma pasta reaparecer na tela ainda
-    // nesta sessão (ex.: voltar pra Home, trocar de aba), já nasce com a
-    // capa pintada, sem precisar reconsultar o IndexedDB.
-    folderCoverFileMemoryCache.set(folderId, record);
+    }});
   }
   return file;
 }
@@ -2803,10 +2667,7 @@ async function revalidateFolderCovers(){
       const listing = state.folderCache[entry.id];
       if(!listing || listing.files.length === 0) continue;
       const stillThere = listing.files.some(f=>f.id === entry.file.id);
-      if(!stillThere){
-        await idbDelete('folderCovers', entry.id).catch(()=>{});
-        folderCoverFileMemoryCache.delete(entry.id);
-      }
+      if(!stillThere) await idbDelete('folderCovers', entry.id).catch(()=>{});
     }
   }catch(e){}
 }
@@ -3086,10 +2947,7 @@ async function runSearch(term){
     grid.appendChild(card);
     return {card, f};
   });
-  folderCards.forEach(({card, f})=>{
-    if(card.classList.contains('cover-immediate')) return;
-    lazyLoadCover(card, ()=>attachFolderCoverAsync(card, f));
-  });
+  folderCards.forEach(({card, f})=>lazyLoadCover(card, ()=>attachFolderCoverAsync(card, f)));
   comicCards.forEach(({card, f})=>lazyLoadCover(card, ()=>attachCoverAsync(card, f)));
 }
 
@@ -3169,7 +3027,6 @@ async function renderFavorites(){
   items.forEach(it=>{
     const card = renderFolderCard(it, {onOpen: openFavoriteFolder});
     grid.appendChild(card);
-    if(card.classList.contains('cover-immediate')) return;
     lazyLoadCover(card, ()=>attachFolderCoverAsync(card, {id: it.id, name: it.name}));
   });
 }
@@ -3948,22 +3805,7 @@ function buildCarouselCard(item, opts){
   btn.dataset.id = item.id;
 
   const cover = el('div','cc-cover');
-  // Mesma ideia dos cards de pasta da biblioteca: se a capa (de pasta ou
-  // de HQ) já foi resolvida antes e está pré-aquecida em memória, pinta
-  // direto — sem placeholder, sem fila — em vez de esperar o
-  // IntersectionObserver + a busca assíncrona de novo.
-  const immediateSrc = isFolder
-    ? getImmediateFolderCoverSrc(item)
-    : (typeof coverMemoryCache.get(item.id) === 'string' ? coverMemoryCache.get(item.id) : null);
-  let hasImmediateCover = false;
-  if(immediateSrc){
-    const img = buildCoverNode(immediateSrc, isFolder ? null : item);
-    img.classList.add('loaded');
-    cover.appendChild(img);
-    hasImmediateCover = true;
-  } else {
-    cover.appendChild(elHtml('div','cc-placeholder skeleton', isFolder ? ICONS.folder : ICONS.page));
-  }
+  cover.appendChild(elHtml('div','cc-placeholder skeleton', isFolder ? ICONS.folder : ICONS.page));
   if(opts.progressPct){
     cover.appendChild(elHtml('div','cc-progress', `<i style="width:${opts.progressPct}%"></i>`));
   }
@@ -4008,7 +3850,7 @@ function buildCarouselCard(item, opts){
       if(ph) ph.replaceWith(img);
     }catch(e){ if(ph) ph.classList.remove('skeleton'); }
   };
-  if(!hasImmediateCover) lazyLoadCover(btn, loadCover);
+  lazyLoadCover(btn, loadCover);
 
   btn.onclick = async ()=>{
     if(isFolder){ enterFolder(item.id, item.name); return; }
@@ -4674,35 +4516,7 @@ $('#btn-refresh').onclick = async ()=>{
   if(current) renderLibrary(current.id, true);
   if(current && current.id === CONFIG.rootFolderId) renderHomeSections(true);
 };
-// O botão de engrenagem ABRIA direto a confirmação de "apagar tudo" — a única
-// forma de trocar a URL do proxy era apagar a configuração inteira (chave de
-// API + pasta) e preencher tudo de novo do zero na tela inicial. Agora ele
-// abre um painel de configurações de verdade, pré-preenchido com os valores
-// atuais, onde dá pra só trocar/adicionar a URL do proxy sem perder o resto.
-// A opção de apagar tudo continua existindo, só que como um botão à parte
-// dentro do painel (btn-settings-reset), não mais como a ação padrão.
 $('#btn-settings').onclick = ()=>{
-  $('#in-settings-apikey').value = CONFIG.apiKey || '';
-  $('#in-settings-folderid').value = CONFIG.rootFolderId || '';
-  $('#in-settings-proxyurl').value = CONFIG.proxyUrl || '';
-  $('#settings-panel').classList.remove('hidden');
-};
-$('#btn-settings-close').onclick = ()=>{
-  $('#settings-panel').classList.add('hidden');
-};
-$('#btn-settings-save').onclick = ()=>{
-  const apiKey = $('#in-settings-apikey').value.trim();
-  const folderId = $('#in-settings-folderid').value.trim();
-  const proxyUrl = $('#in-settings-proxyurl').value.trim();
-  if(!apiKey || !folderId){ toast('Preencha a chave de API e o ID da pasta'); return; }
-  saveConfig(apiKey, folderId, proxyUrl);
-  // Recarrega em vez de só atualizar a variável CONFIG em memória: assim a
-  // biblioteca inteira (cache em memória, capas em IndexedDB, etc.) é
-  // buscada de novo já com a pasta/proxy novos, sem deixar resíduo da
-  // configuração anterior espalhado pelos caches da sessão.
-  location.reload();
-};
-$('#btn-settings-reset').onclick = ()=>{
   if(confirm('Apagar a configuração da biblioteca (chave de API e pasta)? Seus downloads offline serão mantidos.')){
     localStorage.removeItem(CONFIG_KEY);
     location.reload();
@@ -4738,7 +4552,6 @@ Object.entries({
   'btn-debug': ICONS.bug,
   'btn-debug-close': ICONS.close,
   'btn-settings': ICONS.settings,
-  'btn-settings-close': ICONS.close,
   'btn-back': ICONS.chevLeft,
   'btn-close-reader': ICONS.close,
   'btn-reader-settings': ICONS.settings,
@@ -4766,10 +4579,6 @@ $('#btn-save-config').onclick = async ()=>{
 async function boot(){
   try{ history.replaceState({appNav:true, root:true}, ''); }catch(e){}
   navPushedCount = 0;
-  // Dispara em paralelo com o resto do boot (não depende de config nem de
-  // rede) — assim já está pronto quando a Home/biblioteca começar a
-  // desenhar os primeiros cards, sem atrasar nada.
-  const coverWarmupPromise = warmFolderCoverMemoryCache();
   let hasConfig = await loadConfig();
   if(!hasConfig){
     // Ninguém configurou nada neste aparelho ainda: usa a biblioteca
@@ -4787,7 +4596,6 @@ async function boot(){
     hasConfig = true;
   }
   $('#view-setup').classList.add('hidden');
-  await coverWarmupPromise;
   await runInitialLoad();
 }
 
