@@ -3604,7 +3604,12 @@ async function crawlLibrarySections(token, isStale, errorState){
   const comics = [];
   const allFolders = [];
   const seenComics = new Set();
-  const seenFolders = new Set();
+  // A raiz entra aqui desde já, como proteção extra: se por acaso ela
+  // também aparecer como "subpasta" de alguma outra pasta mais fundo na
+  // árvore (ex.: um atalho apontando de volta pra raiz), o walk() abaixo
+  // não tenta visitá-la de novo (o que reiniciaria a varredura inteira
+  // dentro dela mesma).
+  const seenFolders = new Set([CONFIG.rootFolderId]);
   async function walk(folderId, path){
     if(isStale(token)) return;
     let listing;
@@ -3618,12 +3623,29 @@ async function crawlLibrarySections(token, isStale, errorState){
       seenComics.add(f.id);
       comics.push({...f, _path: path, _parentId: folderId});
     });
+    // CRÍTICO: uma pasta só pode ser visitada (recursada) UMA vez, não
+    // importa quantos "pais" diferentes apontem pra ela. Antes, esta
+    // checagem só decidia se a pasta entrava na lista `allFolders`
+    // (pra não duplicar no resultado) — mas o walk() recursivo abaixo
+    // rodava pra TODA pasta da listagem, mesmo uma já visitada antes por
+    // outro caminho. Numa biblioteca de Drive com qualquer pasta
+    // compartilhada em mais de um lugar formando um ciclo (A contém B que
+    // contém A de volta, direto ou através de mais níveis), isso vira uma
+    // recursão infinita de verdade — nunca termina, consumindo memória
+    // sem parar até a aba travar e fechar sozinha (exatamente o sintoma
+    // relatado: a barra trava por perto de 40% e o app às vezes fecha
+    // sozinho depois de um tempo). Agora a pasta só entra na fila de
+    // "próximas a visitar" (toVisit) se for a primeira vez que aparece em
+    // TODA a varredura, então cada pasta só é visitada uma única vez,
+    // não importa quantos pais ela tenha.
+    const toVisit = [];
     listing.folders.forEach(sub=>{
       if(seenFolders.has(sub.id)) return;
       seenFolders.add(sub.id);
       allFolders.push(sub);
+      toVisit.push(sub);
     });
-    await runLimited(listing.folders, 6, sub=>walk(sub.id, [...path, sub.name]));
+    await runLimited(toVisit, 6, sub=>walk(sub.id, [...path, sub.name]));
   }
   await walk(CONFIG.rootFolderId, []);
   if(isStale(token)) return {comics: [], folders: [], aranhaFolders: [], xmenFolders: [], mangaFolders: [], batmanFolders: [], salvatFolders: [], hadError:false, errorMessage:null};

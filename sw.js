@@ -186,7 +186,17 @@
   precisar de um Worker de outra origem — só um arquivo .wasm, que entra
   no cache abaixo pra funcionar offline também.
 */
-const CACHE_VERSION = 'v29';
+/*
+  v30: index.html mudou — corrigida uma recursão infinita real na
+  varredura da biblioteca (crawlLibrarySections/walk): uma pasta
+  compartilhada em mais de um lugar (formando um ciclo, ex.: A contém B
+  que contém A de volta) fazia a varredura nunca terminar, travando a
+  barra de carregamento pra sempre e, depois de um tempo, derrubando a
+  aba por consumo de memória. Agora cada pasta só é visitada (recursada)
+  uma única vez em toda a varredura, não importa quantos "pais"
+  diferentes apontem pra ela.
+*/
+const CACHE_VERSION = 'v30';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
