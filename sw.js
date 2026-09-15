@@ -196,7 +196,16 @@
   uma única vez em toda a varredura, não importa quantos "pais"
   diferentes apontem pra ela.
 */
-const CACHE_VERSION = 'v30';
+/*
+  v31: index.html mudou — adicionado um vigia de travamento na tela de
+  carregamento inicial: se ficar 12s+ sem nenhum pedido ao Drive
+  terminar, a própria tela passa a mostrar quantas pastas já foram
+  visitadas e o NOME da(s) pasta(s) especificamente penduradas (não só
+  travar em silêncio). Serve pra identificar com certeza onde um
+  travamento acontece, já que o painel de Diagnóstico fica inacessível
+  atrás da tela de carregamento enquanto ela trava.
+*/
+const CACHE_VERSION = 'v31';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [

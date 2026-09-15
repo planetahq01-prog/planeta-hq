@@ -1111,6 +1111,18 @@ function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
 // já que o número final de pastas a visitar não é conhecido de antemão.
 let driveRequestsDone = 0;
 
+// Diagnóstico de travamento: qual(is) pasta(s) estão sendo pedidas AGORA
+// (folderId -> {name, startedAt}) e quantas já foram visitadas com
+// sucesso desde que o app abriu. Serve só pra mostrar, na própria tela de
+// carregamento, ONDE exatamente a varredura está presa quando ela para de
+// avançar — sem isso, um travamento é só "travou", sem pista nenhuma de
+// qual pasta (ou pedido) específico nunca voltou.
+const driveInFlightFolders = new Map();
+let driveFoldersVisited = 0;
+// folderId -> caminho legível ("Marvel Sagas / Aranha-Geddon / ..."),
+// preenchido durante crawlLibrarySections só pra diagnóstico — ver ali.
+const crawlFolderLabels = {};
+
 async function driveFetchJson(url){
   const MAX_ATTEMPTS = 6;
   for(let attempt=1; attempt<=MAX_ATTEMPTS; attempt++){
@@ -1183,40 +1195,46 @@ function resolveShortcuts(rawFiles){
 }
 
 async function driveListFolderUncached(folderId){
-  let files = [];
-  let pageToken = null;
-  do{
-    const params = new URLSearchParams({
-      q: `'${folderId}' in parents and trashed = false`,
-      fields: 'nextPageToken, files(id,name,mimeType,size,modifiedTime,shortcutDetails,thumbnailLink)',
-      pageSize: '1000',
-      supportsAllDrives: 'true',
-      includeItemsFromAllDrives: 'true',
-      key: CONFIG.apiKey
-    });
-    if(pageToken) params.set('pageToken', pageToken);
-    const data = await driveFetchJson(`https://www.googleapis.com/drive/v3/files?${params.toString()}`);
-    files = files.concat(resolveShortcuts(data.files));
-    pageToken = data.nextPageToken || null;
-  } while(pageToken);
+  driveInFlightFolders.set(folderId, Date.now());
+  try{
+    let files = [];
+    let pageToken = null;
+    do{
+      const params = new URLSearchParams({
+        q: `'${folderId}' in parents and trashed = false`,
+        fields: 'nextPageToken, files(id,name,mimeType,size,modifiedTime,shortcutDetails,thumbnailLink)',
+        pageSize: '1000',
+        supportsAllDrives: 'true',
+        includeItemsFromAllDrives: 'true',
+        key: CONFIG.apiKey
+      });
+      if(pageToken) params.set('pageToken', pageToken);
+      const data = await driveFetchJson(`https://www.googleapis.com/drive/v3/files?${params.toString()}`);
+      files = files.concat(resolveShortcuts(data.files));
+      pageToken = data.nextPageToken || null;
+    } while(pageToken);
 
-  const rawFolders = files
-    .filter(f=>f.mimeType === 'application/vnd.google-apps.folder')
-    .sort((a,b)=>a.name.localeCompare(b.name,'pt-BR'));
+    const rawFolders = files
+      .filter(f=>f.mimeType === 'application/vnd.google-apps.folder')
+      .sort((a,b)=>a.name.localeCompare(b.name,'pt-BR'));
 
-  const comics = files
-    .map(f=>({...f, _ext: guessExt(f)}))
-    .filter(f=>f._ext)
-    .sort((a,b)=>a.name.localeCompare(b.name,'pt-BR', {numeric:true}));
+    const comics = files
+      .map(f=>({...f, _ext: guessExt(f)}))
+      .filter(f=>f._ext)
+      .sort((a,b)=>a.name.localeCompare(b.name,'pt-BR', {numeric:true}));
 
-  // A listagem em si NÃO espera mais verificar se cada subpasta tem
-  // conteúdo em profundidade — isso é o que deixava tudo lento (varria a
-  // árvore inteira antes de mostrar qualquer coisa). Todas as subpastas
-  // aparecem de imediato; a checagem de "está vazia?" roda depois, em
-  // segundo plano, e usa cache — ver filterEmptyFoldersInBackground().
-  const result = {folders: rawFolders, files: comics};
-  state.folderCache[folderId] = result;
-  return result;
+    // A listagem em si NÃO espera mais verificar se cada subpasta tem
+    // conteúdo em profundidade — isso é o que deixava tudo lento (varria a
+    // árvore inteira antes de mostrar qualquer coisa). Todas as subpastas
+    // aparecem de imediato; a checagem de "está vazia?" roda depois, em
+    // segundo plano, e usa cache — ver filterEmptyFoldersInBackground().
+    const result = {folders: rawFolders, files: comics};
+    state.folderCache[folderId] = result;
+    driveFoldersVisited++;
+    return result;
+  } finally {
+    driveInFlightFolders.delete(folderId);
+  }
 }
 
 async function folderHasQualifyingContent(folderId){
@@ -1975,6 +1993,37 @@ async function runInitialLoad(){
     }, 200);
   }
 
+  // Vigia de travamento: se ficar muito tempo sem NENHUM pedido ao Drive
+  // terminar, escreve direto na própria tela de carregamento quantas
+  // pastas já foram visitadas e qual(is) pasta(s) especificamente estão
+  // penduradas (por nome, não só ID) — sem essa pista, um travamento é só
+  // "travou", sem jeito de descobrir onde. O painel de Diagnóstico (🐛)
+  // fica atrás da tela de carregamento, inacessível enquanto ela trava,
+  // então a informação precisa aparecer aqui mesmo, onde dá pra ler.
+  let stallLastCount = driveRequestsDone;
+  let stallLastChangeAt = Date.now();
+  let stallLogged = false;
+  const stallWatch = setInterval(()=>{
+    if(driveRequestsDone !== stallLastCount){
+      stallLastCount = driveRequestsDone;
+      stallLastChangeAt = Date.now();
+      stallLogged = false;
+      return;
+    }
+    const stalledFor = Math.round((Date.now()-stallLastChangeAt)/1000);
+    if(stalledFor < 12) return;
+    const pending = [...driveInFlightFolders.keys()]
+      .map(id=>crawlFolderLabels[id] || id)
+      .slice(0,5);
+    const msg = `Sem resposta do Drive há ${stalledFor}s — ${driveFoldersVisited} pastas já visitadas até agora. ` +
+      (pending.length ? `Pendurado em: ${pending.join(' | ')}` : 'Nenhum pedido pendente no momento (pode ser processamento local).');
+    setLoadingSub(msg);
+    if(!stallLogged){
+      stallLogged = true;
+      pushDebugLog('TRAVAMENTO', [msg]);
+    }
+  }, 1000);
+
   // Etapa 1: pasta raiz da biblioteca. skipHome:true porque esta função
   // cuida de disparar e ESPERAR a Home explicitamente logo abaixo, em vez
   // de deixar o enterFolder() disparar aquilo sem ninguém aguardar.
@@ -2002,6 +2051,7 @@ async function runInitialLoad(){
     logErr('[PlanetaHQ] Falha ao carregar as seções da Home', e);
   }
   clearInterval(poll);
+  clearInterval(stallWatch);
   progress.home = 1; recompute();
 
   // Etapa 3: só faz sentido depois da Home ter pintado de verdade (etapa
@@ -3610,6 +3660,11 @@ async function crawlLibrarySections(token, isStale, errorState){
   // não tenta visitá-la de novo (o que reiniciaria a varredura inteira
   // dentro dela mesma).
   const seenFolders = new Set([CONFIG.rootFolderId]);
+  // Só pra diagnóstico (ver crawlFolderLabels/driveInFlightFolders): guarda
+  // o caminho legível de cada pasta assim que decidimos visitá-la, pra
+  // conseguir mostrar o NOME dela (não só o ID técnico) se a varredura
+  // travar exatamente ali.
+  crawlFolderLabels[CONFIG.rootFolderId] = 'Biblioteca (raiz)';
   async function walk(folderId, path){
     if(isStale(token)) return;
     let listing;
@@ -3643,6 +3698,7 @@ async function crawlLibrarySections(token, isStale, errorState){
       if(seenFolders.has(sub.id)) return;
       seenFolders.add(sub.id);
       allFolders.push(sub);
+      crawlFolderLabels[sub.id] = [...path, sub.name].join(' / ');
       toVisit.push(sub);
     });
     await runLimited(toVisit, 6, sub=>walk(sub.id, [...path, sub.name]));
