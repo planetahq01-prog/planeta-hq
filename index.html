@@ -932,6 +932,28 @@ function openDB(){
   if(dbPromise) return dbPromise;
   dbPromise = new Promise((resolve, reject)=>{
     const req = indexedDB.open(DB_NAME, DB_VERSION);
+    let settled = false;
+    // Se outra aba/instância deste app (ex.: uma cópia que ficou suspensa
+    // em segundo plano em vez de fechar de verdade) ainda tiver uma
+    // conexão aberta numa versão MAIS ANTIGA do banco, o navegador dispara
+    // 'onblocked' — e, sem tratar esse evento, o pedido de abertura fica
+    // parado esperando pra sempre a outra aba fechar, sem nunca resolver
+    // NEM rejeitar. Como TUDO no app que usa IndexedDB (capas, downloads,
+    // favoritos, progresso de leitura, cache da Home) passa por aqui,
+    // isso travava a coisa toda em silêncio — inclusive a tela de
+    // carregamento inicial, que precisa do banco já na primeira checagem
+    // (ver runInitialLoad). Agora, depois de um prazo curto sem
+    // resolver, desistimos de esperar a outra aba e seguimos esta sessão
+    // sem banco (rejeitando de forma normal, capturável por try/catch)
+    // em vez de travar a pessoa pra sempre.
+    const blockedTimeout = setTimeout(()=>{
+      if(settled) return;
+      settled = true;
+      dbPromise = null; // permite tentar abrir de novo mais tarde (ex.: depois da outra aba fechar)
+      logWarn('[PlanetaHQ] IndexedDB bloqueado por outra aba/instância do app aberta — seguindo sem banco nesta tentativa.');
+      reject(new Error('IndexedDB bloqueado por outra instância do app aberta.'));
+    }, 4000);
+    req.onblocked = ()=>{}; // o timeout acima já cobre esse caso; só evita warning padrão do navegador no console
     req.onupgradeneeded = ()=>{
       const db = req.result;
       if(!db.objectStoreNames.contains('downloads')) db.createObjectStore('downloads', {keyPath:'id'});
@@ -954,8 +976,19 @@ function openDB(){
       // fica automaticamente livre desse mesmo problema.
       if(!db.objectStoreNames.contains('homeCache')) db.createObjectStore('homeCache', {keyPath:'id'});
     };
-    req.onsuccess = ()=>resolve(req.result);
-    req.onerror = ()=>reject(req.error);
+    req.onsuccess = ()=>{
+      if(settled) return;
+      settled = true;
+      clearTimeout(blockedTimeout);
+      resolve(req.result);
+    };
+    req.onerror = ()=>{
+      if(settled) return;
+      settled = true;
+      clearTimeout(blockedTimeout);
+      dbPromise = null;
+      reject(req.error);
+    };
   });
   return dbPromise;
 }
@@ -1824,6 +1857,26 @@ $('#btn-welcome-close').onclick = ()=>{
 async function runInitialLoad(){
   const overlay = $('#view-loading');
 
+  // Rede de segurança-mestra: cobre a função INTEIRA desde a primeira
+  // linha, incluindo a checagem rápida de cache logo abaixo — antes ela
+  // só existia mais à frente, no "ramo lento" (primeira instalação), o
+  // que deixava a checagem de cache sem nenhuma proteção. Isso importa
+  // porque essa checagem depende do IndexedDB (ver openDB/readHomeCache):
+  // se o banco travar por qualquer motivo, mesmo já com a correção lá,
+  // é melhor ter uma segunda camada aqui garantindo que a tela de
+  // carregamento NUNCA fica presa pra sempre, aconteça o que acontecer.
+  let finished = false;
+  const hardStop = setTimeout(()=>{
+    if(finished) return;
+    finished = true;
+    logWarn('[PlanetaHQ] Carregamento inicial excedeu o prazo máximo — liberando a tela mesmo assim.');
+    setLoadingProgress(100);
+    $('#chrome').classList.remove('hidden');
+    $('#view-library').classList.remove('hidden');
+    overlay.classList.add('hidden');
+    maybeShowWelcome();
+  }, 180000);
+
   // Caminho rápido: se já existe QUALQUER cache de uma sessão anterior
   // (mesmo vencido, mesmo só um dos quatro), a pessoa já abriu o app
   // antes neste aparelho — não faz sentido nenhum prendê-la de novo atrás
@@ -1844,16 +1897,28 @@ async function runInitialLoad(){
   // o app achava, TODA vez que reabria, que era a primeira instalação —
   // e voltava a mostrar a tela de carregamento cheia (varrendo a
   // biblioteca inteira de novo) mesmo já tendo tudo salvo localmente.
-  const [cAranha, cXMen, cManga, cComics, cBatman, cSalvat] = await Promise.all([
-    readHomeCache(ARANHA_CACHE_KEY, 'folders'),
-    readHomeCache(XMEN_CACHE_KEY, 'folders'),
-    readHomeCache(MANGA_CACHE_KEY, 'folders'),
-    readHomeCache(ALLCOMICS_CACHE_KEY, 'comics'),
-    readHomeCache(BATMAN_CACHE_KEY, 'folders'),
-    readHomeCache(SALVAT_CACHE_KEY, 'folders')
-  ]);
+  let cAranha=null, cXMen=null, cManga=null, cComics=null, cBatman=null, cSalvat=null;
+  try{
+    [cAranha, cXMen, cManga, cComics, cBatman, cSalvat] = await Promise.all([
+      readHomeCache(ARANHA_CACHE_KEY, 'folders'),
+      readHomeCache(XMEN_CACHE_KEY, 'folders'),
+      readHomeCache(MANGA_CACHE_KEY, 'folders'),
+      readHomeCache(ALLCOMICS_CACHE_KEY, 'comics'),
+      readHomeCache(BATMAN_CACHE_KEY, 'folders'),
+      readHomeCache(SALVAT_CACHE_KEY, 'folders')
+    ]);
+  }catch(e){
+    // Cada readHomeCache já engole os próprios erros e devolve null, mas
+    // isto aqui é uma segunda rede de segurança: se AINDA ASSIM algo
+    // vazar (ex.: um erro fora do IndexedDB), trata como "sem cache
+    // nenhum" e segue pro carregamento completo, em vez de travar.
+    logErr('[PlanetaHQ] Falha ao checar cache local no boot', e);
+  }
+  if(finished) return; // o hardStop já disparou enquanto esperávamos o cache — nada mais a fazer
   const hasAnyHomeCache = !!(cAranha || cXMen || cManga || cComics || cBatman || cSalvat);
   if(hasAnyHomeCache){
+    finished = true;
+    clearTimeout(hardStop);
     $('#chrome').classList.remove('hidden');
     $('#view-library').classList.remove('hidden');
     overlay.classList.add('hidden');
@@ -1876,20 +1941,6 @@ async function runInitialLoad(){
   overlay.classList.remove('hidden');
   $('#chrome').classList.remove('hidden');
   $('#view-library').classList.remove('hidden');
-
-  // Rede de segurança: nunca prender a pessoa numa tela de carregamento
-  // eterna se algo travar de vez (ex.: Drive fora do ar). O prazo é bem
-  // maior que antes (3 minutos, contra os 20s de antes) porque um
-  // carregamento real e saudável já costuma levar de 1 a 2 minutos —
-  // um prazo curto escondia a tela antes da hora mesmo sem bug nenhum.
-  let finished = false;
-  const hardStop = setTimeout(()=>{
-    if(finished) return;
-    finished = true;
-    setLoadingProgress(100);
-    overlay.classList.add('hidden');
-    maybeShowWelcome();
-  }, 180000);
 
   // Pesos de cada etapa na barra de 0-100%. "home" pesa mais porque é,
   // de longe, a etapa mais demorada (busca as 5 seções da Home varrendo
