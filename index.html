@@ -1261,7 +1261,7 @@ function driveMediaUrl(fileId){
     : `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&key=${CONFIG.apiKey}`;
 }
 
-async function driveFetchBlob(fileId, onProgress, knownSize){
+async function driveFetchBlob(fileId, onProgress, knownSize, signal){
   const url = driveMediaUrl(fileId);
   let res;
   try{
@@ -1269,8 +1269,12 @@ async function driveFetchBlob(fileId, onProgress, knownSize){
     // de uma HQ só porque ela foi aberta/baixada; quem decide o que fica
     // salvo é exclusivamente o idbSet('downloads', ...) feito por quem chama
     // esta função, não o cache HTTP do navegador.
-    res = await withStallTimeout(fetch(url, {cache:'no-store'}), 15000, 'Tempo esgotado ao contatar o Google Drive.');
+    res = await withStallTimeout(fetch(url, {cache:'no-store', signal}), 15000, 'Tempo esgotado ao contatar o Google Drive.');
   }catch(networkErr){
+    // Cancelamento de propósito (signal.abort() chamado por quem pediu o
+    // download) — repassa como está, sem trocar pela mensagem de erro de
+    // rede/proxy abaixo, que é só pra falhas de verdade.
+    if(signal && signal.aborted) throw networkErr;
     if(CONFIG.proxyUrl){
       throw new Error('Não foi possível contatar o proxy configurado. Verifique a URL nas configurações.');
     }
@@ -1286,6 +1290,10 @@ async function driveFetchBlob(fileId, onProgress, knownSize){
   let received = 0;
   let lastPct = -1;
   while(true){
+    if(signal && signal.aborted){
+      reader.cancel().catch(()=>{});
+      throw new DOMException('Download cancelado.', 'AbortError');
+    }
     const {done, value} = await withStallTimeout(reader.read(), 20000, 'A conexão travou no meio do download.');
     if(done) break;
     chunks.push(value);
@@ -3132,7 +3140,30 @@ function buildFavButton(fileMeta, tag){
   return btn;
 }
 
+// Cada chamada a openReader() ganha um número sequencial próprio
+// (readerLoadToken). Se a pessoa sair de uma HQ em CBR/CBZ antes do
+// download terminar e abrir outra na sequência, o download da PRIMEIRA
+// continua rodando sozinho em segundo plano (ninguém nunca cancelava
+// isso) — e como o "Baixando... X%" da tela é só um <span> com um ID
+// fixo, os dois downloads ficavam escrevendo a porcentagem um por cima
+// do outro ali, misturando os números das duas HQs. Agora cada chamada
+// só tem permissão de atualizar a tela (ou de assumir o leitor no final)
+// se o token dela ainda for o mais recente — uma chamada mais nova
+// automaticamente "aposenta" a anterior. Além disso, o download antigo é
+// cancelado de verdade (ver readerAbortController) em vez de só ignorado,
+// pra não gastar dados/bateria baixando algo que ninguém vai ler.
+let readerLoadToken = 0;
+let readerAbortController = null;
+
 async function openReader(fileMeta, forceLocal, parentId){
+  // Cancela de verdade qualquer download de HQ ainda em andamento de uma
+  // chamada anterior (a pessoa saiu antes dele terminar) e assume este
+  // como o carregamento "atual" — ver comentário acima de readerLoadToken.
+  if(readerAbortController) readerAbortController.abort();
+  const myToken = ++readerLoadToken;
+  const myAbort = new AbortController();
+  readerAbortController = myAbort;
+
   const wasHidden = $('#view-reader').classList.contains('hidden');
   $('#view-reader').classList.remove('hidden');
   // Só empilha um nível de histórico ao abrir o leitor pela primeira vez;
@@ -3169,7 +3200,11 @@ async function openReader(fileMeta, forceLocal, parentId){
       if(forceLocal) throw new Error('Este arquivo não está mais salvo offline.');
       state.reader.fromDownload = false;
       const ext = fileMeta._ext || guessExt(fileMeta) || fileMeta.name.split('.').pop().toLowerCase();
-      const setPct = (v)=>{ const pctEl = document.getElementById('reader-status-pct'); if(pctEl) pctEl.textContent = `${v}%`; };
+      const setPct = (v)=>{
+        if(myToken !== readerLoadToken) return; // esta chamada já foi "aposentada" por uma HQ aberta depois
+        const pctEl = document.getElementById('reader-status-pct');
+        if(pctEl) pctEl.textContent = `${v}%`;
+      };
       if(ext === 'pdf'){
         // Abre o PDF por partes (range requests), sob demanda, sem baixar o
         // arquivo inteiro antes — e sem callback/ticker de progresso, já que
@@ -3179,10 +3214,16 @@ async function openReader(fileMeta, forceLocal, parentId){
         doc = await openComicPDF(driveMediaUrl(fileMeta.id), null, Number(fileMeta.size)||0);
       } else {
         status.innerHTML = '<div class="spinner"></div><div>Baixando... <span id="reader-status-pct">0%</span></div>';
-        const blob = await driveFetchBlob(fileMeta.id, p=>{ setPct(Math.round(p*100)); }, Number(fileMeta.size)||0);
+        const blob = await driveFetchBlob(fileMeta.id, p=>{ setPct(Math.round(p*100)); }, Number(fileMeta.size)||0, myAbort.signal);
         doc = await openComicFromBlob(fileMeta, blob);
       }
     }
+    // Se, enquanto isto tudo baixava/abria, a pessoa já saiu pra outra HQ
+    // (um token mais novo assumiu), esta chamada está obsoleta — não deve
+    // mais mexer no leitor (que já pertence à HQ nova). Sai em silêncio,
+    // sem mostrar erro nenhum: não é uma falha, só uma corrida que esta
+    // chamada perdeu de propósito.
+    if(myToken !== readerLoadToken) return;
     state.reader.doc = doc;
     state.reader.fileMeta = fileMeta;
     state.reader.pageIndex = 0;
@@ -3197,6 +3238,12 @@ async function openReader(fileMeta, forceLocal, parentId){
     cacheCoverFromDoc(fileMeta.id, doc); // sem await: não atrasa a leitura
     await rebuildReaderView();
   }catch(err){
+    // Cancelamento de propósito (ver readerAbortController acima): a tela
+    // de status já foi tomada por uma chamada mais nova, então não há
+    // nada certo pra mostrar aqui — mexer nela agora só pisaria na HQ que
+    // a pessoa já está vendo.
+    if(err && err.name === 'AbortError') return;
+    if(myToken !== readerLoadToken) return;
     status.innerHTML = `<div>⚠ ${escapeHtml(err.message)}</div><button class="btn-secondary" id="btn-reader-close2">Fechar</button>`;
     $('#btn-reader-close2').onclick = ()=>{ closeReader(); navSyncAfterBack(); };
   }
@@ -3497,6 +3544,11 @@ async function openAdjacentComic(delta){
 }
 
 function closeReader(){
+  // Mesmo motivo do início de openReader(): se a pessoa fechar o leitor
+  // com uma HQ em CBR/CBZ ainda baixando, cancela de verdade em vez de
+  // deixar rodando sozinho em segundo plano gastando dados à toa.
+  if(readerAbortController) readerAbortController.abort();
+  readerLoadToken++;
   if(state.reader.doc && state.reader.fileMeta){
     saveProgress(state.reader.fileMeta, state.reader.pageIndex, state.reader.doc.pageCount);
   }

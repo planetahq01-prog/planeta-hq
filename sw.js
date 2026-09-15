@@ -205,7 +205,17 @@
   travamento acontece, já que o painel de Diagnóstico fica inacessível
   atrás da tela de carregamento enquanto ela trava.
 */
-const CACHE_VERSION = 'v31';
+/*
+  v32: index.html mudou — corrigido o "Baixando... X%" ficando bugado
+  (misturando números) quando a pessoa sai de uma HQ em CBR/CBZ antes do
+  download terminar e abre outra logo em seguida. O download antigo
+  continuava rodando sozinho em segundo plano e escrevendo por cima da
+  porcentagem da HQ nova (mesmo <span> de ID fixo na tela). Agora o
+  download antigo é cancelado de verdade assim que uma HQ nova é aberta
+  (ou o leitor é fechado), e mesmo que ainda tente atualizar a tela antes
+  de perceber o cancelamento, um token de controle impede.
+*/
+const CACHE_VERSION = 'v32';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
