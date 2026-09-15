@@ -186,36 +186,7 @@
   precisar de um Worker de outra origem — só um arquivo .wasm, que entra
   no cache abaixo pra funcionar offline também.
 */
-/*
-  v30: index.html mudou — corrigida uma recursão infinita real na
-  varredura da biblioteca (crawlLibrarySections/walk): uma pasta
-  compartilhada em mais de um lugar (formando um ciclo, ex.: A contém B
-  que contém A de volta) fazia a varredura nunca terminar, travando a
-  barra de carregamento pra sempre e, depois de um tempo, derrubando a
-  aba por consumo de memória. Agora cada pasta só é visitada (recursada)
-  uma única vez em toda a varredura, não importa quantos "pais"
-  diferentes apontem pra ela.
-*/
-/*
-  v31: index.html mudou — adicionado um vigia de travamento na tela de
-  carregamento inicial: se ficar 12s+ sem nenhum pedido ao Drive
-  terminar, a própria tela passa a mostrar quantas pastas já foram
-  visitadas e o NOME da(s) pasta(s) especificamente penduradas (não só
-  travar em silêncio). Serve pra identificar com certeza onde um
-  travamento acontece, já que o painel de Diagnóstico fica inacessível
-  atrás da tela de carregamento enquanto ela trava.
-*/
-/*
-  v32: index.html mudou — corrigido o "Baixando... X%" ficando bugado
-  (misturando números) quando a pessoa sai de uma HQ em CBR/CBZ antes do
-  download terminar e abre outra logo em seguida. O download antigo
-  continuava rodando sozinho em segundo plano e escrevendo por cima da
-  porcentagem da HQ nova (mesmo <span> de ID fixo na tela). Agora o
-  download antigo é cancelado de verdade assim que uma HQ nova é aberta
-  (ou o leitor é fechado), e mesmo que ainda tente atualizar a tela antes
-  de perceber o cancelamento, um token de controle impede.
-*/
-const CACHE_VERSION = 'v32';
+const CACHE_VERSION = 'v29';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [

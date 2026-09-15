@@ -932,28 +932,6 @@ function openDB(){
   if(dbPromise) return dbPromise;
   dbPromise = new Promise((resolve, reject)=>{
     const req = indexedDB.open(DB_NAME, DB_VERSION);
-    let settled = false;
-    // Se outra aba/instância deste app (ex.: uma cópia que ficou suspensa
-    // em segundo plano em vez de fechar de verdade) ainda tiver uma
-    // conexão aberta numa versão MAIS ANTIGA do banco, o navegador dispara
-    // 'onblocked' — e, sem tratar esse evento, o pedido de abertura fica
-    // parado esperando pra sempre a outra aba fechar, sem nunca resolver
-    // NEM rejeitar. Como TUDO no app que usa IndexedDB (capas, downloads,
-    // favoritos, progresso de leitura, cache da Home) passa por aqui,
-    // isso travava a coisa toda em silêncio — inclusive a tela de
-    // carregamento inicial, que precisa do banco já na primeira checagem
-    // (ver runInitialLoad). Agora, depois de um prazo curto sem
-    // resolver, desistimos de esperar a outra aba e seguimos esta sessão
-    // sem banco (rejeitando de forma normal, capturável por try/catch)
-    // em vez de travar a pessoa pra sempre.
-    const blockedTimeout = setTimeout(()=>{
-      if(settled) return;
-      settled = true;
-      dbPromise = null; // permite tentar abrir de novo mais tarde (ex.: depois da outra aba fechar)
-      logWarn('[PlanetaHQ] IndexedDB bloqueado por outra aba/instância do app aberta — seguindo sem banco nesta tentativa.');
-      reject(new Error('IndexedDB bloqueado por outra instância do app aberta.'));
-    }, 4000);
-    req.onblocked = ()=>{}; // o timeout acima já cobre esse caso; só evita warning padrão do navegador no console
     req.onupgradeneeded = ()=>{
       const db = req.result;
       if(!db.objectStoreNames.contains('downloads')) db.createObjectStore('downloads', {keyPath:'id'});
@@ -976,19 +954,8 @@ function openDB(){
       // fica automaticamente livre desse mesmo problema.
       if(!db.objectStoreNames.contains('homeCache')) db.createObjectStore('homeCache', {keyPath:'id'});
     };
-    req.onsuccess = ()=>{
-      if(settled) return;
-      settled = true;
-      clearTimeout(blockedTimeout);
-      resolve(req.result);
-    };
-    req.onerror = ()=>{
-      if(settled) return;
-      settled = true;
-      clearTimeout(blockedTimeout);
-      dbPromise = null;
-      reject(req.error);
-    };
+    req.onsuccess = ()=>resolve(req.result);
+    req.onerror = ()=>reject(req.error);
   });
   return dbPromise;
 }
@@ -1094,14 +1061,6 @@ function driveReleaseSlot(){
   if(next) next();
   else driveActiveRequests--;
 }
-function withStallTimeout(promise, ms, message){
-  let timer;
-  const timeout = new Promise((_, reject)=>{
-    timer = setTimeout(()=>reject(new Error(message || 'Tempo esgotado.')), ms);
-  });
-  return Promise.race([promise, timeout]).finally(()=>clearTimeout(timer));
-}
-
 function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
 
 // Contagem de pedidos concluídos com sucesso à API do Drive desde que o
@@ -1110,18 +1069,6 @@ function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
 // o quanto a varredura da biblioteca (a etapa mais demorada) já avançou,
 // já que o número final de pastas a visitar não é conhecido de antemão.
 let driveRequestsDone = 0;
-
-// Diagnóstico de travamento: qual(is) pasta(s) estão sendo pedidas AGORA
-// (folderId -> {name, startedAt}) e quantas já foram visitadas com
-// sucesso desde que o app abriu. Serve só pra mostrar, na própria tela de
-// carregamento, ONDE exatamente a varredura está presa quando ela para de
-// avançar — sem isso, um travamento é só "travou", sem pista nenhuma de
-// qual pasta (ou pedido) específico nunca voltou.
-const driveInFlightFolders = new Map();
-let driveFoldersVisited = 0;
-// folderId -> caminho legível ("Marvel Sagas / Aranha-Geddon / ..."),
-// preenchido durante crawlLibrarySections só pra diagnóstico — ver ali.
-const crawlFolderLabels = {};
 
 async function driveFetchJson(url){
   const MAX_ATTEMPTS = 6;
@@ -1135,7 +1082,7 @@ async function driveFetchJson(url){
       // essa mesma URL de consulta, em vez de perguntar de novo pro Google
       // Drive — mesmo clicando em "Atualizar". Foi essa a causa da
       // biblioteca "sumir" e não voltar sem reinstalar o app.
-      res = await withStallTimeout(fetch(url, {cache:'no-store'}), 15000, 'Tempo esgotado ao contatar o Google Drive.');
+      res = await fetch(url, {cache:'no-store'});
       if(res.ok){ driveRequestsDone++; return await res.json(); }
       errBody = await res.text().catch(()=> '');
     } catch(e){
@@ -1195,46 +1142,40 @@ function resolveShortcuts(rawFiles){
 }
 
 async function driveListFolderUncached(folderId){
-  driveInFlightFolders.set(folderId, Date.now());
-  try{
-    let files = [];
-    let pageToken = null;
-    do{
-      const params = new URLSearchParams({
-        q: `'${folderId}' in parents and trashed = false`,
-        fields: 'nextPageToken, files(id,name,mimeType,size,modifiedTime,shortcutDetails,thumbnailLink)',
-        pageSize: '1000',
-        supportsAllDrives: 'true',
-        includeItemsFromAllDrives: 'true',
-        key: CONFIG.apiKey
-      });
-      if(pageToken) params.set('pageToken', pageToken);
-      const data = await driveFetchJson(`https://www.googleapis.com/drive/v3/files?${params.toString()}`);
-      files = files.concat(resolveShortcuts(data.files));
-      pageToken = data.nextPageToken || null;
-    } while(pageToken);
+  let files = [];
+  let pageToken = null;
+  do{
+    const params = new URLSearchParams({
+      q: `'${folderId}' in parents and trashed = false`,
+      fields: 'nextPageToken, files(id,name,mimeType,size,modifiedTime,shortcutDetails,thumbnailLink)',
+      pageSize: '1000',
+      supportsAllDrives: 'true',
+      includeItemsFromAllDrives: 'true',
+      key: CONFIG.apiKey
+    });
+    if(pageToken) params.set('pageToken', pageToken);
+    const data = await driveFetchJson(`https://www.googleapis.com/drive/v3/files?${params.toString()}`);
+    files = files.concat(resolveShortcuts(data.files));
+    pageToken = data.nextPageToken || null;
+  } while(pageToken);
 
-    const rawFolders = files
-      .filter(f=>f.mimeType === 'application/vnd.google-apps.folder')
-      .sort((a,b)=>a.name.localeCompare(b.name,'pt-BR'));
+  const rawFolders = files
+    .filter(f=>f.mimeType === 'application/vnd.google-apps.folder')
+    .sort((a,b)=>a.name.localeCompare(b.name,'pt-BR'));
 
-    const comics = files
-      .map(f=>({...f, _ext: guessExt(f)}))
-      .filter(f=>f._ext)
-      .sort((a,b)=>a.name.localeCompare(b.name,'pt-BR', {numeric:true}));
+  const comics = files
+    .map(f=>({...f, _ext: guessExt(f)}))
+    .filter(f=>f._ext)
+    .sort((a,b)=>a.name.localeCompare(b.name,'pt-BR', {numeric:true}));
 
-    // A listagem em si NÃO espera mais verificar se cada subpasta tem
-    // conteúdo em profundidade — isso é o que deixava tudo lento (varria a
-    // árvore inteira antes de mostrar qualquer coisa). Todas as subpastas
-    // aparecem de imediato; a checagem de "está vazia?" roda depois, em
-    // segundo plano, e usa cache — ver filterEmptyFoldersInBackground().
-    const result = {folders: rawFolders, files: comics};
-    state.folderCache[folderId] = result;
-    driveFoldersVisited++;
-    return result;
-  } finally {
-    driveInFlightFolders.delete(folderId);
-  }
+  // A listagem em si NÃO espera mais verificar se cada subpasta tem
+  // conteúdo em profundidade — isso é o que deixava tudo lento (varria a
+  // árvore inteira antes de mostrar qualquer coisa). Todas as subpastas
+  // aparecem de imediato; a checagem de "está vazia?" roda depois, em
+  // segundo plano, e usa cache — ver filterEmptyFoldersInBackground().
+  const result = {folders: rawFolders, files: comics};
+  state.folderCache[folderId] = result;
+  return result;
 }
 
 async function folderHasQualifyingContent(folderId){
@@ -1261,7 +1202,7 @@ function driveMediaUrl(fileId){
     : `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&key=${CONFIG.apiKey}`;
 }
 
-async function driveFetchBlob(fileId, onProgress, knownSize, signal){
+async function driveFetchBlob(fileId, onProgress, knownSize){
   const url = driveMediaUrl(fileId);
   let res;
   try{
@@ -1269,12 +1210,8 @@ async function driveFetchBlob(fileId, onProgress, knownSize, signal){
     // de uma HQ só porque ela foi aberta/baixada; quem decide o que fica
     // salvo é exclusivamente o idbSet('downloads', ...) feito por quem chama
     // esta função, não o cache HTTP do navegador.
-    res = await withStallTimeout(fetch(url, {cache:'no-store', signal}), 15000, 'Tempo esgotado ao contatar o Google Drive.');
+    res = await fetch(url, {cache:'no-store'});
   }catch(networkErr){
-    // Cancelamento de propósito (signal.abort() chamado por quem pediu o
-    // download) — repassa como está, sem trocar pela mensagem de erro de
-    // rede/proxy abaixo, que é só pra falhas de verdade.
-    if(signal && signal.aborted) throw networkErr;
     if(CONFIG.proxyUrl){
       throw new Error('Não foi possível contatar o proxy configurado. Verifique a URL nas configurações.');
     }
@@ -1290,11 +1227,7 @@ async function driveFetchBlob(fileId, onProgress, knownSize, signal){
   let received = 0;
   let lastPct = -1;
   while(true){
-    if(signal && signal.aborted){
-      reader.cancel().catch(()=>{});
-      throw new DOMException('Download cancelado.', 'AbortError');
-    }
-    const {done, value} = await withStallTimeout(reader.read(), 20000, 'A conexão travou no meio do download.');
+    const {done, value} = await reader.read();
     if(done) break;
     chunks.push(value);
     received += value.length;
@@ -1883,26 +1816,6 @@ $('#btn-welcome-close').onclick = ()=>{
 async function runInitialLoad(){
   const overlay = $('#view-loading');
 
-  // Rede de segurança-mestra: cobre a função INTEIRA desde a primeira
-  // linha, incluindo a checagem rápida de cache logo abaixo — antes ela
-  // só existia mais à frente, no "ramo lento" (primeira instalação), o
-  // que deixava a checagem de cache sem nenhuma proteção. Isso importa
-  // porque essa checagem depende do IndexedDB (ver openDB/readHomeCache):
-  // se o banco travar por qualquer motivo, mesmo já com a correção lá,
-  // é melhor ter uma segunda camada aqui garantindo que a tela de
-  // carregamento NUNCA fica presa pra sempre, aconteça o que acontecer.
-  let finished = false;
-  const hardStop = setTimeout(()=>{
-    if(finished) return;
-    finished = true;
-    logWarn('[PlanetaHQ] Carregamento inicial excedeu o prazo máximo — liberando a tela mesmo assim.');
-    setLoadingProgress(100);
-    $('#chrome').classList.remove('hidden');
-    $('#view-library').classList.remove('hidden');
-    overlay.classList.add('hidden');
-    maybeShowWelcome();
-  }, 180000);
-
   // Caminho rápido: se já existe QUALQUER cache de uma sessão anterior
   // (mesmo vencido, mesmo só um dos quatro), a pessoa já abriu o app
   // antes neste aparelho — não faz sentido nenhum prendê-la de novo atrás
@@ -1923,28 +1836,16 @@ async function runInitialLoad(){
   // o app achava, TODA vez que reabria, que era a primeira instalação —
   // e voltava a mostrar a tela de carregamento cheia (varrendo a
   // biblioteca inteira de novo) mesmo já tendo tudo salvo localmente.
-  let cAranha=null, cXMen=null, cManga=null, cComics=null, cBatman=null, cSalvat=null;
-  try{
-    [cAranha, cXMen, cManga, cComics, cBatman, cSalvat] = await Promise.all([
-      readHomeCache(ARANHA_CACHE_KEY, 'folders'),
-      readHomeCache(XMEN_CACHE_KEY, 'folders'),
-      readHomeCache(MANGA_CACHE_KEY, 'folders'),
-      readHomeCache(ALLCOMICS_CACHE_KEY, 'comics'),
-      readHomeCache(BATMAN_CACHE_KEY, 'folders'),
-      readHomeCache(SALVAT_CACHE_KEY, 'folders')
-    ]);
-  }catch(e){
-    // Cada readHomeCache já engole os próprios erros e devolve null, mas
-    // isto aqui é uma segunda rede de segurança: se AINDA ASSIM algo
-    // vazar (ex.: um erro fora do IndexedDB), trata como "sem cache
-    // nenhum" e segue pro carregamento completo, em vez de travar.
-    logErr('[PlanetaHQ] Falha ao checar cache local no boot', e);
-  }
-  if(finished) return; // o hardStop já disparou enquanto esperávamos o cache — nada mais a fazer
+  const [cAranha, cXMen, cManga, cComics, cBatman, cSalvat] = await Promise.all([
+    readHomeCache(ARANHA_CACHE_KEY, 'folders'),
+    readHomeCache(XMEN_CACHE_KEY, 'folders'),
+    readHomeCache(MANGA_CACHE_KEY, 'folders'),
+    readHomeCache(ALLCOMICS_CACHE_KEY, 'comics'),
+    readHomeCache(BATMAN_CACHE_KEY, 'folders'),
+    readHomeCache(SALVAT_CACHE_KEY, 'folders')
+  ]);
   const hasAnyHomeCache = !!(cAranha || cXMen || cManga || cComics || cBatman || cSalvat);
   if(hasAnyHomeCache){
-    finished = true;
-    clearTimeout(hardStop);
     $('#chrome').classList.remove('hidden');
     $('#view-library').classList.remove('hidden');
     overlay.classList.add('hidden');
@@ -1967,6 +1868,20 @@ async function runInitialLoad(){
   overlay.classList.remove('hidden');
   $('#chrome').classList.remove('hidden');
   $('#view-library').classList.remove('hidden');
+
+  // Rede de segurança: nunca prender a pessoa numa tela de carregamento
+  // eterna se algo travar de vez (ex.: Drive fora do ar). O prazo é bem
+  // maior que antes (3 minutos, contra os 20s de antes) porque um
+  // carregamento real e saudável já costuma levar de 1 a 2 minutos —
+  // um prazo curto escondia a tela antes da hora mesmo sem bug nenhum.
+  let finished = false;
+  const hardStop = setTimeout(()=>{
+    if(finished) return;
+    finished = true;
+    setLoadingProgress(100);
+    overlay.classList.add('hidden');
+    maybeShowWelcome();
+  }, 180000);
 
   // Pesos de cada etapa na barra de 0-100%. "home" pesa mais porque é,
   // de longe, a etapa mais demorada (busca as 5 seções da Home varrendo
@@ -2001,37 +1916,6 @@ async function runInitialLoad(){
     }, 200);
   }
 
-  // Vigia de travamento: se ficar muito tempo sem NENHUM pedido ao Drive
-  // terminar, escreve direto na própria tela de carregamento quantas
-  // pastas já foram visitadas e qual(is) pasta(s) especificamente estão
-  // penduradas (por nome, não só ID) — sem essa pista, um travamento é só
-  // "travou", sem jeito de descobrir onde. O painel de Diagnóstico (🐛)
-  // fica atrás da tela de carregamento, inacessível enquanto ela trava,
-  // então a informação precisa aparecer aqui mesmo, onde dá pra ler.
-  let stallLastCount = driveRequestsDone;
-  let stallLastChangeAt = Date.now();
-  let stallLogged = false;
-  const stallWatch = setInterval(()=>{
-    if(driveRequestsDone !== stallLastCount){
-      stallLastCount = driveRequestsDone;
-      stallLastChangeAt = Date.now();
-      stallLogged = false;
-      return;
-    }
-    const stalledFor = Math.round((Date.now()-stallLastChangeAt)/1000);
-    if(stalledFor < 12) return;
-    const pending = [...driveInFlightFolders.keys()]
-      .map(id=>crawlFolderLabels[id] || id)
-      .slice(0,5);
-    const msg = `Sem resposta do Drive há ${stalledFor}s — ${driveFoldersVisited} pastas já visitadas até agora. ` +
-      (pending.length ? `Pendurado em: ${pending.join(' | ')}` : 'Nenhum pedido pendente no momento (pode ser processamento local).');
-    setLoadingSub(msg);
-    if(!stallLogged){
-      stallLogged = true;
-      pushDebugLog('TRAVAMENTO', [msg]);
-    }
-  }, 1000);
-
   // Etapa 1: pasta raiz da biblioteca. skipHome:true porque esta função
   // cuida de disparar e ESPERAR a Home explicitamente logo abaixo, em vez
   // de deixar o enterFolder() disparar aquilo sem ninguém aguardar.
@@ -2059,7 +1943,6 @@ async function runInitialLoad(){
     logErr('[PlanetaHQ] Falha ao carregar as seções da Home', e);
   }
   clearInterval(poll);
-  clearInterval(stallWatch);
   progress.home = 1; recompute();
 
   // Etapa 3: só faz sentido depois da Home ter pintado de verdade (etapa
@@ -3140,30 +3023,7 @@ function buildFavButton(fileMeta, tag){
   return btn;
 }
 
-// Cada chamada a openReader() ganha um número sequencial próprio
-// (readerLoadToken). Se a pessoa sair de uma HQ em CBR/CBZ antes do
-// download terminar e abrir outra na sequência, o download da PRIMEIRA
-// continua rodando sozinho em segundo plano (ninguém nunca cancelava
-// isso) — e como o "Baixando... X%" da tela é só um <span> com um ID
-// fixo, os dois downloads ficavam escrevendo a porcentagem um por cima
-// do outro ali, misturando os números das duas HQs. Agora cada chamada
-// só tem permissão de atualizar a tela (ou de assumir o leitor no final)
-// se o token dela ainda for o mais recente — uma chamada mais nova
-// automaticamente "aposenta" a anterior. Além disso, o download antigo é
-// cancelado de verdade (ver readerAbortController) em vez de só ignorado,
-// pra não gastar dados/bateria baixando algo que ninguém vai ler.
-let readerLoadToken = 0;
-let readerAbortController = null;
-
 async function openReader(fileMeta, forceLocal, parentId){
-  // Cancela de verdade qualquer download de HQ ainda em andamento de uma
-  // chamada anterior (a pessoa saiu antes dele terminar) e assume este
-  // como o carregamento "atual" — ver comentário acima de readerLoadToken.
-  if(readerAbortController) readerAbortController.abort();
-  const myToken = ++readerLoadToken;
-  const myAbort = new AbortController();
-  readerAbortController = myAbort;
-
   const wasHidden = $('#view-reader').classList.contains('hidden');
   $('#view-reader').classList.remove('hidden');
   // Só empilha um nível de histórico ao abrir o leitor pela primeira vez;
@@ -3200,11 +3060,7 @@ async function openReader(fileMeta, forceLocal, parentId){
       if(forceLocal) throw new Error('Este arquivo não está mais salvo offline.');
       state.reader.fromDownload = false;
       const ext = fileMeta._ext || guessExt(fileMeta) || fileMeta.name.split('.').pop().toLowerCase();
-      const setPct = (v)=>{
-        if(myToken !== readerLoadToken) return; // esta chamada já foi "aposentada" por uma HQ aberta depois
-        const pctEl = document.getElementById('reader-status-pct');
-        if(pctEl) pctEl.textContent = `${v}%`;
-      };
+      const setPct = (v)=>{ const pctEl = document.getElementById('reader-status-pct'); if(pctEl) pctEl.textContent = `${v}%`; };
       if(ext === 'pdf'){
         // Abre o PDF por partes (range requests), sob demanda, sem baixar o
         // arquivo inteiro antes — e sem callback/ticker de progresso, já que
@@ -3214,16 +3070,10 @@ async function openReader(fileMeta, forceLocal, parentId){
         doc = await openComicPDF(driveMediaUrl(fileMeta.id), null, Number(fileMeta.size)||0);
       } else {
         status.innerHTML = '<div class="spinner"></div><div>Baixando... <span id="reader-status-pct">0%</span></div>';
-        const blob = await driveFetchBlob(fileMeta.id, p=>{ setPct(Math.round(p*100)); }, Number(fileMeta.size)||0, myAbort.signal);
+        const blob = await driveFetchBlob(fileMeta.id, p=>{ setPct(Math.round(p*100)); }, Number(fileMeta.size)||0);
         doc = await openComicFromBlob(fileMeta, blob);
       }
     }
-    // Se, enquanto isto tudo baixava/abria, a pessoa já saiu pra outra HQ
-    // (um token mais novo assumiu), esta chamada está obsoleta — não deve
-    // mais mexer no leitor (que já pertence à HQ nova). Sai em silêncio,
-    // sem mostrar erro nenhum: não é uma falha, só uma corrida que esta
-    // chamada perdeu de propósito.
-    if(myToken !== readerLoadToken) return;
     state.reader.doc = doc;
     state.reader.fileMeta = fileMeta;
     state.reader.pageIndex = 0;
@@ -3238,12 +3088,6 @@ async function openReader(fileMeta, forceLocal, parentId){
     cacheCoverFromDoc(fileMeta.id, doc); // sem await: não atrasa a leitura
     await rebuildReaderView();
   }catch(err){
-    // Cancelamento de propósito (ver readerAbortController acima): a tela
-    // de status já foi tomada por uma chamada mais nova, então não há
-    // nada certo pra mostrar aqui — mexer nela agora só pisaria na HQ que
-    // a pessoa já está vendo.
-    if(err && err.name === 'AbortError') return;
-    if(myToken !== readerLoadToken) return;
     status.innerHTML = `<div>⚠ ${escapeHtml(err.message)}</div><button class="btn-secondary" id="btn-reader-close2">Fechar</button>`;
     $('#btn-reader-close2').onclick = ()=>{ closeReader(); navSyncAfterBack(); };
   }
@@ -3544,11 +3388,6 @@ async function openAdjacentComic(delta){
 }
 
 function closeReader(){
-  // Mesmo motivo do início de openReader(): se a pessoa fechar o leitor
-  // com uma HQ em CBR/CBZ ainda baixando, cancela de verdade em vez de
-  // deixar rodando sozinho em segundo plano gastando dados à toa.
-  if(readerAbortController) readerAbortController.abort();
-  readerLoadToken++;
   if(state.reader.doc && state.reader.fileMeta){
     saveProgress(state.reader.fileMeta, state.reader.pageIndex, state.reader.doc.pageCount);
   }
@@ -3706,17 +3545,7 @@ async function crawlLibrarySections(token, isStale, errorState){
   const comics = [];
   const allFolders = [];
   const seenComics = new Set();
-  // A raiz entra aqui desde já, como proteção extra: se por acaso ela
-  // também aparecer como "subpasta" de alguma outra pasta mais fundo na
-  // árvore (ex.: um atalho apontando de volta pra raiz), o walk() abaixo
-  // não tenta visitá-la de novo (o que reiniciaria a varredura inteira
-  // dentro dela mesma).
-  const seenFolders = new Set([CONFIG.rootFolderId]);
-  // Só pra diagnóstico (ver crawlFolderLabels/driveInFlightFolders): guarda
-  // o caminho legível de cada pasta assim que decidimos visitá-la, pra
-  // conseguir mostrar o NOME dela (não só o ID técnico) se a varredura
-  // travar exatamente ali.
-  crawlFolderLabels[CONFIG.rootFolderId] = 'Biblioteca (raiz)';
+  const seenFolders = new Set();
   async function walk(folderId, path){
     if(isStale(token)) return;
     let listing;
@@ -3730,30 +3559,12 @@ async function crawlLibrarySections(token, isStale, errorState){
       seenComics.add(f.id);
       comics.push({...f, _path: path, _parentId: folderId});
     });
-    // CRÍTICO: uma pasta só pode ser visitada (recursada) UMA vez, não
-    // importa quantos "pais" diferentes apontem pra ela. Antes, esta
-    // checagem só decidia se a pasta entrava na lista `allFolders`
-    // (pra não duplicar no resultado) — mas o walk() recursivo abaixo
-    // rodava pra TODA pasta da listagem, mesmo uma já visitada antes por
-    // outro caminho. Numa biblioteca de Drive com qualquer pasta
-    // compartilhada em mais de um lugar formando um ciclo (A contém B que
-    // contém A de volta, direto ou através de mais níveis), isso vira uma
-    // recursão infinita de verdade — nunca termina, consumindo memória
-    // sem parar até a aba travar e fechar sozinha (exatamente o sintoma
-    // relatado: a barra trava por perto de 40% e o app às vezes fecha
-    // sozinho depois de um tempo). Agora a pasta só entra na fila de
-    // "próximas a visitar" (toVisit) se for a primeira vez que aparece em
-    // TODA a varredura, então cada pasta só é visitada uma única vez,
-    // não importa quantos pais ela tenha.
-    const toVisit = [];
     listing.folders.forEach(sub=>{
       if(seenFolders.has(sub.id)) return;
       seenFolders.add(sub.id);
       allFolders.push(sub);
-      crawlFolderLabels[sub.id] = [...path, sub.name].join(' / ');
-      toVisit.push(sub);
     });
-    await runLimited(toVisit, 6, sub=>walk(sub.id, [...path, sub.name]));
+    await runLimited(listing.folders, 6, sub=>walk(sub.id, [...path, sub.name]));
   }
   await walk(CONFIG.rootFolderId, []);
   if(isStale(token)) return {comics: [], folders: [], aranhaFolders: [], xmenFolders: [], mangaFolders: [], batmanFolders: [], salvatFolders: [], hadError:false, errorMessage:null};
