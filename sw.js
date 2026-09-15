@@ -215,7 +215,30 @@
   (ou o leitor é fechado), e mesmo que ainda tente atualizar a tela antes
   de perceber o cancelamento, um token de controle impede.
 */
-const CACHE_VERSION = 'v32';
+/*
+  v33: index.html mudou — duas melhorias de velocidade no carregamento de
+  HQs:
+  1) O suporte a CBR (módulo JS + .wasm do node-unrar-js) agora começa a
+     ser baixado/instanciado assim que o app abre (em segundo plano, junto
+     com a varredura inicial da biblioteca), em vez de só no clique da
+     primeira HQ em CBR da sessão. Antes disso, era exatamente esse
+     download+instanciação que fazia a primeira HQ CBR de cada sessão
+     parecer lenta mesmo com os arquivos já em cache — e só "sumia" depois
+     de fechar e reabrir o app porque, nesse meio tempo, esse trabalho já
+     tinha sido feito (pela pessoa ter aberto uma HQ CBR antes) e o
+     resultado, por acaso, ainda estava quente. Agora ele é sempre feito
+     de propósito, cedo, sem depender de fechar/reabrir nada.
+  2) O download do arquivo em si (CBZ/CBR, quando não está salvo offline)
+     agora acontece em vários pedaços simultâneos (HTTP Range) em vez de
+     uma conexão só, pra arquivos grandes (4 MB+). Isso ajuda a explicar a
+     outra parte da lentidão variável: numa conexão só, o quanto uma HQ
+     grande demora pra baixar depende muito da latência até o Google Drive
+     naquele momento; com várias conexões em paralelo, a banda disponível
+     costuma ser usada de forma bem mais completa. Se o servidor não
+     confirmar suporte a esse tipo de pedido, o app cai automaticamente
+     pro download único de sempre.
+*/
+const CACHE_VERSION = 'v33';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [

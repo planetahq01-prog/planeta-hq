@@ -1261,8 +1261,99 @@ function driveMediaUrl(fileId){
     : `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&key=${CONFIG.apiKey}`;
 }
 
-async function driveFetchBlob(fileId, onProgress, knownSize, signal){
-  const url = driveMediaUrl(fileId);
+// A partir de que tamanho vale a pena abrir várias conexões em paralelo
+// pra baixar o arquivo. Abaixo disso (a maioria das capas/HQs pequenas), o
+// próprio custo de abrir N conexões (handshake de cada uma) anula o
+// ganho — melhor só baixar tudo numa conexão só, como sempre foi feito.
+const PARALLEL_DOWNLOAD_MIN_SIZE = 4 * 1024 * 1024; // 4 MB
+// Tamanho de cada pedaço e quantos pedaços baixar ao mesmo tempo. 6 é o
+// limite de conexões simultâneas que os navegadores já abrem por padrão
+// pro mesmo domínio (HTTP/1.1) — subir mais que isso não ajuda e só
+// arrisca sobrecarregar redes móveis mais fracas.
+const PARALLEL_DOWNLOAD_CHUNK_SIZE = 8 * 1024 * 1024; // 8 MB por pedaço
+const PARALLEL_DOWNLOAD_MAX_CONCURRENCY = 6;
+
+// Baixa o arquivo inteiro em vários pedaços simultâneos (HTTP Range),
+// depois remonta na ordem certa. Numa única conexão, o download de uma HQ
+// grande fica preso ao que aquela conexão sozinha consegue puxar — em
+// redes com latência mais alta (dados móveis, Wi-Fi público) isso raramente
+// usa toda a banda disponível, mesmo com boa velocidade contratada. Abrir
+// várias conexões ao mesmo tempo (o mesmo truque que gerenciadores de
+// download usam) costuma aproveitar bem mais o link nesses casos. Isso é o
+// que faz o download de uma mesma HQ, no mesmo aparelho e na mesma rede,
+// terminar em poucos segundos numa hora e demorar bem mais em outra: quanto
+// mais alta a latência até o Google Drive no momento, maior a diferença que
+// o paralelismo faz.
+async function driveFetchBlobParallel(url, total, onProgress, signal){
+  const chunkCount = Math.max(1, Math.ceil(total / PARALLEL_DOWNLOAD_CHUNK_SIZE));
+  const parts = new Array(chunkCount);
+  const receivedPerChunk = new Array(chunkCount).fill(0);
+  let lastPct = -1;
+
+  function reportProgress(){
+    if(!onProgress) return;
+    let received = 0;
+    for(let i=0;i<receivedPerChunk.length;i++) received += receivedPerChunk[i];
+    const pct = Math.min(99, Math.max(1, Math.round((received/total)*100)));
+    if(pct !== lastPct){ lastPct = pct; onProgress(pct/100); }
+  }
+
+  async function fetchChunk(i){
+    const start = i * PARALLEL_DOWNLOAD_CHUNK_SIZE;
+    const end = Math.min(total, start + PARALLEL_DOWNLOAD_CHUNK_SIZE) - 1;
+    const res = await withStallTimeout(
+      fetch(url, { cache:'no-store', signal, headers: { Range: `bytes=${start}-${end}` } }),
+      15000,
+      'Tempo esgotado ao contatar o Google Drive.'
+    );
+    // Servidor/proxy que não devolve 206 pra um pedido com Range não está
+    // dando de fato só o pedaço pedido (pode estar mandando o arquivo
+    // inteiro, ou recusando) — mais seguro abandonar o paralelo e cair pro
+    // download único de sempre do que tentar remontar algo incerto.
+    if(res.status !== 206) throw new Error('Servidor não confirmou suporte a download em pedaços (status ' + res.status + ').');
+    const reader = res.body.getReader();
+    const bytes = [];
+    let receivedHere = 0;
+    while(true){
+      if(signal && signal.aborted){
+        reader.cancel().catch(()=>{});
+        throw new DOMException('Download cancelado.', 'AbortError');
+      }
+      const {done, value} = await withStallTimeout(reader.read(), 20000, 'A conexão travou no meio do download.');
+      if(done) break;
+      bytes.push(value);
+      receivedHere += value.length;
+      receivedPerChunk[i] = receivedHere;
+      reportProgress();
+    }
+    parts[i] = new Blob(bytes);
+  }
+
+  // Fila simples: cada "trabalhador" pega o próximo pedaço livre assim que
+  // termina o seu, até acabarem os pedaços — mantém sempre até
+  // PARALLEL_DOWNLOAD_MAX_CONCURRENCY pedidos em voo ao mesmo tempo.
+  let nextIndex = 0;
+  async function worker(){
+    while(true){
+      const i = nextIndex;
+      nextIndex += 1;
+      if(i >= chunkCount) return;
+      await fetchChunk(i);
+    }
+  }
+  const workerCount = Math.min(PARALLEL_DOWNLOAD_MAX_CONCURRENCY, chunkCount);
+  await Promise.all(Array.from({length: workerCount}, worker));
+
+  if(onProgress) onProgress(1);
+  return new Blob(parts);
+}
+
+// Download de sempre, numa conexão só, lendo em stream — usado quando o
+// tamanho do arquivo não é conhecido de antemão ou quando o download em
+// paralelo (acima) falha por qualquer motivo (proxy que não repassa Range,
+// rede instável, etc.). Sempre funciona, só que sem o ganho de velocidade
+// de várias conexões simultâneas.
+async function driveFetchBlobSequential(url, onProgress, knownSize, signal){
   let res;
   try{
     // cache:'no-store' — nunca deixar o navegador guardar em disco os bytes
@@ -1305,6 +1396,22 @@ async function driveFetchBlob(fileId, onProgress, knownSize, signal){
   }
   if(onProgress) onProgress(1);
   return new Blob(chunks);
+}
+
+async function driveFetchBlob(fileId, onProgress, knownSize, signal){
+  const url = driveMediaUrl(fileId);
+  const total = Number(knownSize) || 0;
+  if(total >= PARALLEL_DOWNLOAD_MIN_SIZE){
+    try{
+      return await driveFetchBlobParallel(url, total, onProgress, signal);
+    }catch(err){
+      // Cancelamento de propósito nunca deve tentar de novo por outro
+      // caminho — só repassa.
+      if(signal && signal.aborted) throw err;
+      console.warn('[PlanetaHQ] download em paralelo falhou, caindo pro download único —', err);
+    }
+  }
+  return driveFetchBlobSequential(url, onProgress, knownSize, signal);
 }
 
 /* ---------------------------------------------------------------------
@@ -1654,47 +1761,6 @@ coverMemoryCache.set = function(key, value){
   }
   return coverMemoryCache;
 };
-
-// Pré-aquecimento em memória das capas de pasta já resolvidas antes.
-// Sem isso, mesmo uma pasta já vista (capa salva no IndexedDB) só pintava
-// depois de: 1) o IntersectionObserver perceber o card, 2) entrar na fila
-// de capas, 3) uma leitura assíncrona em 'folderCovers' (qual arquivo é a
-// capa), 4) outra leitura assíncrona em 'covers' (a miniatura desse
-// arquivo) — daí o placeholder/skeleton sempre aparecia primeiro, mesmo
-// quando a capa já estava 100% disponível localmente.
-// Agora, uma única vez no boot, lemos as duas gavetas inteiras de uma vez
-// (idbAll — o mesmo custo de uma leitura só, não um custo por pasta) e
-// guardamos tudo em dois Maps na RAM. A partir daí, renderFolderCard
-// consegue checar na hora (sem await nenhum) se já tem a capa pronta, e
-// já nasce com ela pintada — sem placeholder, sem fila, sem fade.
-// Pastas novas (ainda sem entrada aqui) continuam caindo no caminho
-// assíncrono normal (lazyLoadCover), exatamente como antes.
-const folderCoverFileMemoryCache = new Map();
-let folderCoverMemoryWarmed = false;
-async function warmFolderCoverMemoryCache(){
-  if(folderCoverMemoryWarmed) return;
-  try{
-    const [folderEntries, coverEntries] = await Promise.all([idbAll('folderCovers'), idbAll('covers')]);
-    folderEntries.forEach(entry=>{ if(entry && entry.file) folderCoverFileMemoryCache.set(entry.id, entry.file); });
-    coverEntries.forEach(entry=>{ if(entry) coverMemoryCache.set(entry.id, entry.dataUrl); });
-    folderCoverMemoryWarmed = true;
-  }catch(e){
-    // Sem banco (ex.: bloqueado por outra aba) — segue sem pré-aquecimento;
-    // as capas ainda carregam normalmente, só que pelo caminho assíncrono.
-    logWarn('[PlanetaHQ] não deu pra pré-aquecer o cache de capas em memória —', e);
-  }
-}
-// Uma pasta já tem capa pronta pra pintar na hora (sem placeholder nem
-// espera) quando: tem um override manual (URL fixa), OU já sabemos qual
-// arquivo é a capa dela E a miniatura desse arquivo já está em memória.
-function getImmediateFolderCoverSrc(folderObj){
-  const override = getFolderCoverOverride(folderObj.name);
-  if(override) return override;
-  const file = folderCoverFileMemoryCache.get(folderObj.id);
-  if(!file) return null;
-  const memo = coverMemoryCache.get(file.id);
-  return (typeof memo === 'string') ? memo : null;
-}
 
 /* ---------------------------------------------------------------------
    6.06) Painel de diagnóstico
@@ -2258,12 +2324,7 @@ async function renderLibrary(folderId, forceRefresh){
       grid.appendChild(card);
       return {card, f};
     });
-    folderCards.forEach(({card, f})=>{
-      // Já nasceu com a capa pintada (ver renderFolderCard) — não precisa
-      // entrar na fila nem no IntersectionObserver pra isso.
-      if(card.classList.contains('cover-immediate')) return;
-      lazyLoadCover(card, ()=>attachFolderCoverAsync(card, f));
-    });
+    folderCards.forEach(({card, f})=>lazyLoadCover(card, ()=>attachFolderCoverAsync(card, f)));
     comicCards.forEach(({card, f})=>lazyLoadCover(card, ()=>attachCoverAsync(card, f)));
     // Confere em segundo plano (baixa prioridade, sem travar nada) quais
     // pastas recém-vistas realmente têm conteúdo, e some com as vazias.
@@ -2281,19 +2342,8 @@ function renderFolderCard(f, opts){
   const card = el('div','card folder');
   card.dataset.id = f.id;
   const cover = el('div','folder-cover');
-  // Capa já disponível localmente (override ou já resolvida antes): pinta
-  // direto, sem placeholder/skeleton e sem passar pela fila de carregamento
-  // — a pasta já nasce com a capinha, em vez de esperar entrar na tela.
-  const immediateSrc = getImmediateFolderCoverSrc(f);
-  if(immediateSrc){
-    const img = buildCoverNode(immediateSrc);
-    img.classList.add('loaded'); // sem fade: já está pronta desde o primeiro frame
-    cover.appendChild(img);
-    card.classList.add('has-cover','cover-immediate');
-  } else {
-    const ph = elHtml('div','cover-placeholder skeleton', ICONS.folder);
-    cover.appendChild(ph);
-  }
+  const ph = elHtml('div','cover-placeholder skeleton', ICONS.folder);
+  cover.appendChild(ph);
   cover.appendChild(buildFavButton(f));
   card.appendChild(cover);
   card.appendChild(el('div','label', f.name));
@@ -2682,9 +2732,8 @@ async function attachCoverAsync(card, f){
 
 async function resolveFolderCoverFile(folderId, depth){
   depth = depth || 0;
-  if(folderCoverFileMemoryCache.has(folderId)) return folderCoverFileMemoryCache.get(folderId);
   const cached = await idbGet('folderCovers', folderId);
-  if(cached){ folderCoverFileMemoryCache.set(folderId, cached.file); return cached.file; }
+  if(cached) return cached.file;
   if(depth > 2) return null;
   let listing;
   try{ listing = await driveListFolder(folderId); }catch(e){ return null; }
@@ -2695,15 +2744,10 @@ async function resolveFolderCoverFile(folderId, depth){
     file = await resolveFolderCoverFile(listing.folders[0].id, depth+1);
   }
   if(file){
-    const record = {
+    await idbSet('folderCovers', {id: folderId, file: {
       id:file.id, name:file.name, mimeType:file.mimeType, size:file.size,
       thumbnailLink:file.thumbnailLink, _ext:file._ext
-    };
-    await idbSet('folderCovers', {id: folderId, file: record});
-    // Guarda também na RAM: se esta mesma pasta reaparecer na tela ainda
-    // nesta sessão (ex.: voltar pra Home, trocar de aba), já nasce com a
-    // capa pintada, sem precisar reconsultar o IndexedDB.
-    folderCoverFileMemoryCache.set(folderId, record);
+    }});
   }
   return file;
 }
@@ -2730,10 +2774,7 @@ async function revalidateFolderCovers(){
       const listing = state.folderCache[entry.id];
       if(!listing || listing.files.length === 0) continue;
       const stillThere = listing.files.some(f=>f.id === entry.file.id);
-      if(!stillThere){
-        await idbDelete('folderCovers', entry.id).catch(()=>{});
-        folderCoverFileMemoryCache.delete(entry.id);
-      }
+      if(!stillThere) await idbDelete('folderCovers', entry.id).catch(()=>{});
     }
   }catch(e){}
 }
@@ -3013,10 +3054,7 @@ async function runSearch(term){
     grid.appendChild(card);
     return {card, f};
   });
-  folderCards.forEach(({card, f})=>{
-    if(card.classList.contains('cover-immediate')) return;
-    lazyLoadCover(card, ()=>attachFolderCoverAsync(card, f));
-  });
+  folderCards.forEach(({card, f})=>lazyLoadCover(card, ()=>attachFolderCoverAsync(card, f)));
   comicCards.forEach(({card, f})=>lazyLoadCover(card, ()=>attachCoverAsync(card, f)));
 }
 
@@ -3096,7 +3134,6 @@ async function renderFavorites(){
   items.forEach(it=>{
     const card = renderFolderCard(it, {onOpen: openFavoriteFolder});
     grid.appendChild(card);
-    if(card.classList.contains('cover-immediate')) return;
     lazyLoadCover(card, ()=>attachFolderCoverAsync(card, {id: it.id, name: it.name}));
   });
 }
@@ -3875,22 +3912,7 @@ function buildCarouselCard(item, opts){
   btn.dataset.id = item.id;
 
   const cover = el('div','cc-cover');
-  // Mesma ideia dos cards de pasta da biblioteca: se a capa (de pasta ou
-  // de HQ) já foi resolvida antes e está pré-aquecida em memória, pinta
-  // direto — sem placeholder, sem fila — em vez de esperar o
-  // IntersectionObserver + a busca assíncrona de novo.
-  const immediateSrc = isFolder
-    ? getImmediateFolderCoverSrc(item)
-    : (typeof coverMemoryCache.get(item.id) === 'string' ? coverMemoryCache.get(item.id) : null);
-  let hasImmediateCover = false;
-  if(immediateSrc){
-    const img = buildCoverNode(immediateSrc, isFolder ? null : item);
-    img.classList.add('loaded');
-    cover.appendChild(img);
-    hasImmediateCover = true;
-  } else {
-    cover.appendChild(elHtml('div','cc-placeholder skeleton', isFolder ? ICONS.folder : ICONS.page));
-  }
+  cover.appendChild(elHtml('div','cc-placeholder skeleton', isFolder ? ICONS.folder : ICONS.page));
   if(opts.progressPct){
     cover.appendChild(elHtml('div','cc-progress', `<i style="width:${opts.progressPct}%"></i>`));
   }
@@ -3935,7 +3957,7 @@ function buildCarouselCard(item, opts){
       if(ph) ph.replaceWith(img);
     }catch(e){ if(ph) ph.classList.remove('skeleton'); }
   };
-  if(!hasImmediateCover) lazyLoadCover(btn, loadCover);
+  lazyLoadCover(btn, loadCover);
 
   btn.onclick = async ()=>{
     if(isFolder){ enterFolder(item.id, item.name); return; }
@@ -4664,10 +4686,6 @@ $('#btn-save-config').onclick = async ()=>{
 async function boot(){
   try{ history.replaceState({appNav:true, root:true}, ''); }catch(e){}
   navPushedCount = 0;
-  // Dispara em paralelo com o resto do boot (não depende de config nem de
-  // rede) — assim já está pronto quando a Home/biblioteca começar a
-  // desenhar os primeiros cards, sem atrasar nada.
-  const coverWarmupPromise = warmFolderCoverMemoryCache();
   let hasConfig = await loadConfig();
   if(!hasConfig){
     // Ninguém configurou nada neste aparelho ainda: usa a biblioteca
@@ -4685,11 +4703,28 @@ async function boot(){
     hasConfig = true;
   }
   $('#view-setup').classList.add('hidden');
-  await coverWarmupPromise;
   await runInitialLoad();
 }
 
 boot();
+
+// Pré-aquece o suporte a CBR (baixa e instancia a lib node-unrar-js) assim
+// que o app abre, em vez de só na hora em que a pessoa abre a primeira HQ
+// em CBR. Antes disso, esse download (do módulo JS + do .wasm) só
+// começava no clique da primeira HQ CBR da sessão — e como ensureRarLib()
+// guarda o resultado numa variável de módulo que é zerada a cada
+// carregamento da página, isso repetia (com a demora de ir buscar tudo de
+// novo) toda vez que o app era reaberto, mesmo com os arquivos já salvos
+// em cache pelo service worker (ler do cache do service worker ainda é
+// uma requisição de rede de verdade, só que sem esperar o servidor — e
+// depois ainda tem o custo de instanciar o WebAssembly). Disparando isso
+// aqui, em segundo plano, junto com o boot() (que já leva um tempo
+// varrendo a biblioteca), o suporte a CBR normalmente já está pronto bem
+// antes da pessoa navegar até uma HQ e clicar nela — sem precisar fechar e
+// reabrir o app pra "esquentar" nada. Erros aqui são ignorados de
+// propósito: se a pré-carga falhar (ex.: sem internet ainda), a própria
+// abertura da HQ CBR tenta de novo na hora, como já fazia antes.
+ensureRarLib().catch(()=>{});
 
 if('serviceWorker' in navigator){
   // Guarda ANTES de registrar se esta aba já era controlada por algum
