@@ -200,8 +200,8 @@ const APP_SHELL = [
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js',
   // Suporte a CBR (ver ensureRarLib no index.html) — precisam ser
   // EXATAMENTE as mesmas URLs da primeira fonte ali.
-  'https://cdn.jsdelivr.net/npm/[email protected]/esm/index.esm.js',
-  'https://cdn.jsdelivr.net/npm/[email protected]/esm/js/unrar.wasm',
+  'https://cdn.jsdelivr.net/npm/node-unrar-js@2.0.2/esm/index.esm.js',
+  'https://cdn.jsdelivr.net/npm/node-unrar-js@2.0.2/esm/js/unrar.wasm',
   'https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700;800&display=swap',
   // Logos das seções da Home — precisam ser EXATAMENTE as mesmas URLs de
   // HOME_LOGOS no index.html.
@@ -218,8 +218,8 @@ const APP_SHELL_URLS = new Set(APP_SHELL.map((u) => new URL(u, self.location.hre
 // ficaria com 0 bytes do mesmo jeito se servido opaco — o jsDelivr manda
 // os cabeçalhos CORS certos pra isso funcionar.
 const CORS_URLS = new Set([
-  'https://cdn.jsdelivr.net/npm/[email protected]/esm/index.esm.js',
-  'https://cdn.jsdelivr.net/npm/[email protected]/esm/js/unrar.wasm'
+  'https://cdn.jsdelivr.net/npm/node-unrar-js@2.0.2/esm/index.esm.js',
+  'https://cdn.jsdelivr.net/npm/node-unrar-js@2.0.2/esm/js/unrar.wasm'
 ]);
 
 self.addEventListener('install', (event) => {

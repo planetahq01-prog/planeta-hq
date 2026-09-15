@@ -1312,8 +1312,8 @@ let unrarAssetsPromise = null;
 function ensureRarLib(){
   if(unrarAssetsPromise) return unrarAssetsPromise;
   const sources = [
-    { mod: 'https://cdn.jsdelivr.net/npm/[email protected]/esm/index.esm.js', wasm: 'https://cdn.jsdelivr.net/npm/[email protected]/esm/js/unrar.wasm' },
-    { mod: 'https://unpkg.com/[email protected]/esm/index.esm.js', wasm: 'https://unpkg.com/[email protected]/esm/js/unrar.wasm' }
+    { mod: 'https://cdn.jsdelivr.net/npm/node-unrar-js@2.0.2/esm/index.esm.js', wasm: 'https://cdn.jsdelivr.net/npm/node-unrar-js@2.0.2/esm/js/unrar.wasm' },
+    { mod: 'https://unpkg.com/node-unrar-js@2.0.2/esm/index.esm.js', wasm: 'https://unpkg.com/node-unrar-js@2.0.2/esm/js/unrar.wasm' }
   ];
   unrarAssetsPromise = (async()=>{
     let lastErr;
