@@ -215,7 +215,7 @@
   (ou o leitor é fechado), e mesmo que ainda tente atualizar a tela antes
   de perceber o cancelamento, um token de controle impede.
 */
-const CACHE_VERSION = 'v32';
+const CACHE_VERSION = 'v33';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [

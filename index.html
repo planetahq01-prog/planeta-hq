@@ -1539,8 +1539,32 @@ async function openComicPDF(source, onProgress, knownSize){
   };
 }
 
+// Confere a "assinatura" real do arquivo (os primeiros bytes) em vez de
+// confiar cegamente na extensão do nome/mimeType. Corrige o caso (raro,
+// mas acontece) de alguém renomear um CBR para .cbz (ou vice-versa) sem
+// de fato converter o arquivo — o app tentava abrir como ZIP um arquivo
+// que na verdade é RAR por dentro, e travava com um erro confuso do
+// JSZip ("Can't find end of central directory"). ZIP sempre começa com
+// os bytes "PK"; RAR sempre começa com "Rar!".
+async function sniffArchiveKind(blob){
+  try{
+    const head = new Uint8Array(await blob.slice(0, 8).arrayBuffer());
+    if(head[0]===0x50 && head[1]===0x4B) return 'cbz'; // "PK"
+    if(head[0]===0x52 && head[1]===0x61 && head[2]===0x72 && head[3]===0x21) return 'cbr'; // "Rar!"
+  }catch(e){}
+  return null;
+}
+
 async function openComicFromBlob(fileObj, blob){
-  const ext = fileObj._ext || guessExt(fileObj) || fileObj.name.split('.').pop().toLowerCase();
+  const declaredExt = fileObj._ext || guessExt(fileObj) || fileObj.name.split('.').pop().toLowerCase();
+  let ext = declaredExt;
+  if(ext === 'cbz' || ext === 'cbr'){
+    const realKind = await sniffArchiveKind(blob);
+    if(realKind && realKind !== ext){
+      logWarn(`[PlanetaHQ] "${fileObj.name}" está com extensão .${ext}, mas o conteúdo é na verdade .${realKind} — abrindo pelo formato real.`);
+      ext = realKind;
+    }
+  }
   if(ext === 'cbz') return openComicCBZ(blob);
   if(ext === 'cbr') return openComicCBR(blob);
   if(ext === 'pdf') return openComicPDF(blob);
