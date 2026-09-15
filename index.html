@@ -486,6 +486,12 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
   padding:16px;display:flex;flex-direction:column;
 }
 #debug-panel.hidden{display:none;}
+#settings-panel{
+  position:fixed;inset:0;z-index:999;background:var(--ink-bg,#0b0b10);
+  padding:16px;display:flex;flex-direction:column;overflow-y:auto;
+}
+#settings-panel.hidden{display:none;}
+.field-hint{font-size:12px;color:var(--text-muted);margin:-10px 0 16px;line-height:1.5;}
 /* ---- Tela de carregamento inicial (0% -> 100%) ---- */
 #view-loading{
   position:fixed;inset:0;z-index:1000;
@@ -585,8 +591,8 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
           <li>Em "Credenciais", crie uma <code>Chave de API</code> e (recomendado) restrinja-a à Drive API.</li>
           <li>No Google Drive, clique com o botão direito na pasta raiz das HQs → <code>Compartilhar</code> → mude para <code>"Qualquer pessoa com o link" → "Leitor"</code>. Isso é necessário para o app ler os arquivos sem exigir login de cada usuário.</li>
           <li>Abra a pasta no navegador; o ID é o trecho da URL depois de <code>/folders/</code>.</li>
-          <li>Se ao abrir uma HQ der erro <code>Failed to fetch</code>, o navegador está bloqueando o download do conteúdo do arquivo por CORS (isso acontece com PDF/CBR mas não com a listagem, que é só metadado). Cole ali a URL de um Cloudflare Worker proxy — veja o texto abaixo do formulário para o código pronto.</li>
-          <li>Cole os valores acima. Eles ficam salvos só neste dispositivo (não são enviados a nenhum servidor além do próprio Google e, se você configurar, do seu proxy).</li>
+          <li>Se ao abrir uma HQ der erro <code>Failed to fetch</code> ou <code>403</code>, o navegador (ou o próprio Google Drive) está bloqueando o download do conteúdo do arquivo (isso acontece com PDF/CBR/CBZ, mas não com a listagem, que é só metadado). Cole ali a URL de um Cloudflare Worker proxy — o código pronto do worker (<code>cf-worker-proxy.js</code>) acompanha este app; publique-o em <code>workers.dev</code> e cole a URL dele aqui.</li>
+          <li>Cole os valores acima. Eles ficam salvos só neste dispositivo (não são enviados a nenhum servidor além do próprio Google e, se você configurar, do seu proxy). Depois de configurado, dá pra trocar só a URL do proxy a qualquer momento pela engrenagem ⚙️ no topo do app, sem precisar apagar tudo.</li>
         </ol>
       </details>
     </div>
@@ -642,6 +648,27 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
       </div>
       <p style="font-size:13px;opacity:.75;margin:4px 0 10px;">Toque em "Copiar tudo" e cole numa mensagem pra enviar. Se estiver vazio, tente entrar de novo na pasta com problema antes de abrir isso aqui.</p>
       <textarea id="debug-panel-text" readonly></textarea>
+    </div>
+    <div id="settings-panel" class="hidden">
+      <div class="debug-panel-head">
+        <strong>Configurações</strong>
+        <button id="btn-settings-close" class="icon-btn"></button>
+      </div>
+      <div class="field">
+        <label>Chave de API do Google (API key)</label>
+        <input type="text" id="in-settings-apikey" placeholder="AIzaSy...">
+      </div>
+      <div class="field">
+        <label>ID da pasta raiz no Drive</label>
+        <input type="text" id="in-settings-folderid" placeholder="1AbCdEfGhIjKlMnOpQrSt...">
+      </div>
+      <div class="field">
+        <label>URL do proxy (opcional, corrige erros 403 / "Failed to fetch")</label>
+        <input type="text" id="in-settings-proxyurl" placeholder="https://seu-worker.workers.dev">
+      </div>
+      <p class="field-hint">Deixe o campo de proxy em branco pra acessar o Google Drive direto, sem proxy. Salvar aqui recarrega o app pra aplicar a configuração nova.</p>
+      <button class="btn-primary" id="btn-settings-save">Salvar</button>
+      <button class="btn-secondary" id="btn-settings-reset" style="margin-top:12px;width:100%;">Apagar configuração e recomeçar</button>
     </div>
     <div class="tabs">
       <button class="tab active" data-tab="library">Biblioteca</button>
@@ -1280,7 +1307,29 @@ async function driveFetchBlob(fileId, onProgress, knownSize, signal){
     }
     throw new Error('Falha de rede/CORS ao baixar o arquivo. Configure uma URL de proxy nas configurações.');
   }
-  if(!res.ok) throw new Error(`Não foi possível baixar o arquivo (${res.status}).`);
+  if(!res.ok){
+    // Antes só mostrávamos o número do status (ex.: "403"), o que não dá pra
+    // saber SE é chave de API restrita, cota de download do arquivo excedida
+    // no Drive, permissão de compartilhamento errada, etc. — cada uma exige
+    // uma correção diferente. O Google Drive (e nosso proxy, quando repassa
+    // o erro dele) devolve o motivo real no corpo da resposta em JSON:
+    // {"error":{"errors":[{"reason":"...","message":"..."}]}} ou, vindo do
+    // proxy, {"error":"mensagem"}. Lemos e mostramos esse texto agora.
+    let detail = '';
+    try{
+      const text = await res.text();
+      if(text){
+        try{
+          const json = JSON.parse(text);
+          detail = (json && json.error && json.error.errors && json.error.errors[0] && json.error.errors[0].message)
+            || (json && json.error && json.error.message)
+            || (json && typeof json.error === 'string' ? json.error : '')
+            || '';
+        }catch(e){ detail = text.slice(0,200); }
+      }
+    }catch(e){ /* corpo não pôde ser lido — segue só com o status */ }
+    throw new Error(detail ? `Não foi possível baixar o arquivo (${res.status}): ${detail}` : `Não foi possível baixar o arquivo (${res.status}).`);
+  }
   // Alguns proxies/CDNs não expõem o header Content-Length via CORS, então usamos
   // o tamanho já conhecido pela listagem do Drive (f.size) como alternativa, para
   // que a porcentagem sempre consiga avançar de forma real.
@@ -1539,8 +1588,32 @@ async function openComicPDF(source, onProgress, knownSize){
   };
 }
 
+// Confere a "assinatura" real do arquivo (os primeiros bytes) em vez de
+// confiar cegamente na extensão do nome/mimeType. Corrige o caso (raro,
+// mas acontece) de alguém renomear um CBR para .cbz (ou vice-versa) sem
+// de fato converter o arquivo — o app tentava abrir como ZIP um arquivo
+// que na verdade é RAR por dentro, e travava com um erro confuso do
+// JSZip ("Can't find end of central directory"). ZIP sempre começa com
+// os bytes "PK"; RAR sempre começa com "Rar!".
+async function sniffArchiveKind(blob){
+  try{
+    const head = new Uint8Array(await blob.slice(0, 8).arrayBuffer());
+    if(head[0]===0x50 && head[1]===0x4B) return 'cbz'; // "PK"
+    if(head[0]===0x52 && head[1]===0x61 && head[2]===0x72 && head[3]===0x21) return 'cbr'; // "Rar!"
+  }catch(e){}
+  return null;
+}
+
 async function openComicFromBlob(fileObj, blob){
-  const ext = fileObj._ext || guessExt(fileObj) || fileObj.name.split('.').pop().toLowerCase();
+  const declaredExt = fileObj._ext || guessExt(fileObj) || fileObj.name.split('.').pop().toLowerCase();
+  let ext = declaredExt;
+  if(ext === 'cbz' || ext === 'cbr'){
+    const realKind = await sniffArchiveKind(blob);
+    if(realKind && realKind !== ext){
+      logWarn(`[PlanetaHQ] "${fileObj.name}" está com extensão .${ext}, mas o conteúdo é na verdade .${realKind} — abrindo pelo formato real.`);
+      ext = realKind;
+    }
+  }
   if(ext === 'cbz') return openComicCBZ(blob);
   if(ext === 'cbr') return openComicCBR(blob);
   if(ext === 'pdf') return openComicPDF(blob);
@@ -4601,7 +4674,35 @@ $('#btn-refresh').onclick = async ()=>{
   if(current) renderLibrary(current.id, true);
   if(current && current.id === CONFIG.rootFolderId) renderHomeSections(true);
 };
+// O botão de engrenagem ABRIA direto a confirmação de "apagar tudo" — a única
+// forma de trocar a URL do proxy era apagar a configuração inteira (chave de
+// API + pasta) e preencher tudo de novo do zero na tela inicial. Agora ele
+// abre um painel de configurações de verdade, pré-preenchido com os valores
+// atuais, onde dá pra só trocar/adicionar a URL do proxy sem perder o resto.
+// A opção de apagar tudo continua existindo, só que como um botão à parte
+// dentro do painel (btn-settings-reset), não mais como a ação padrão.
 $('#btn-settings').onclick = ()=>{
+  $('#in-settings-apikey').value = CONFIG.apiKey || '';
+  $('#in-settings-folderid').value = CONFIG.rootFolderId || '';
+  $('#in-settings-proxyurl').value = CONFIG.proxyUrl || '';
+  $('#settings-panel').classList.remove('hidden');
+};
+$('#btn-settings-close').onclick = ()=>{
+  $('#settings-panel').classList.add('hidden');
+};
+$('#btn-settings-save').onclick = ()=>{
+  const apiKey = $('#in-settings-apikey').value.trim();
+  const folderId = $('#in-settings-folderid').value.trim();
+  const proxyUrl = $('#in-settings-proxyurl').value.trim();
+  if(!apiKey || !folderId){ toast('Preencha a chave de API e o ID da pasta'); return; }
+  saveConfig(apiKey, folderId, proxyUrl);
+  // Recarrega em vez de só atualizar a variável CONFIG em memória: assim a
+  // biblioteca inteira (cache em memória, capas em IndexedDB, etc.) é
+  // buscada de novo já com a pasta/proxy novos, sem deixar resíduo da
+  // configuração anterior espalhado pelos caches da sessão.
+  location.reload();
+};
+$('#btn-settings-reset').onclick = ()=>{
   if(confirm('Apagar a configuração da biblioteca (chave de API e pasta)? Seus downloads offline serão mantidos.')){
     localStorage.removeItem(CONFIG_KEY);
     location.reload();
@@ -4637,6 +4738,7 @@ Object.entries({
   'btn-debug': ICONS.bug,
   'btn-debug-close': ICONS.close,
   'btn-settings': ICONS.settings,
+  'btn-settings-close': ICONS.close,
   'btn-back': ICONS.chevLeft,
   'btn-close-reader': ICONS.close,
   'btn-reader-settings': ICONS.settings,
