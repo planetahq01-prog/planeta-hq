@@ -144,7 +144,7 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 .view{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;}
 .grid{
   display:grid;
-  grid-template-columns:repeat(auto-fill,minmax(130px,1fr));
+  grid-template-columns:repeat(3,1fr);
   gap:10px;
   padding:12px;
 }
@@ -1308,6 +1308,70 @@ async function driveFetchBlob(fileId, onProgress, knownSize, signal){
 }
 
 /* ---------------------------------------------------------------------
+   3.4) Downloads em segundo plano — independentes da tela atual
+   Antes, o download de uma HQ vivia só dentro do botão "Baixar" daquela
+   pasta específica: sair da pasta fazia perder de vista o progresso, e
+   voltar pra ela criava um botão novo do zero (mostrando "Baixar" outra
+   vez) — arriscando iniciar um SEGUNDO download do mesmo arquivo em
+   paralelo, sem avisar, e sem nenhuma relação entre as duas
+   porcentagens mostradas. Agora cada download vive numa lista global,
+   independente de qual pasta/tela está aberta — qualquer botão que
+   represente aquele mesmo arquivo (nesta pasta, em outra, ou na aba
+   Baixados) reflete o progresso do MESMO download em andamento, em vez
+   de iniciar um novo. Abrir outra HQ pra leitura usa sua própria busca
+   de rede, completamente separada desta — uma nunca afeta a
+   porcentagem da outra.
+   --------------------------------------------------------------------- */
+const activeDownloads = new Map(); // fileId -> {fileMeta, pathStr, progress, status, listeners, error}
+
+function subscribeDownload(fileId, listener){
+  const entry = activeDownloads.get(fileId);
+  if(!entry) return ()=>{};
+  entry.listeners.add(listener);
+  return ()=>{ const e = activeDownloads.get(fileId); if(e) e.listeners.delete(listener); };
+}
+
+function notifyDownload(fileId){
+  const entry = activeDownloads.get(fileId);
+  if(!entry) return;
+  entry.listeners.forEach(fn=>{ try{ fn(entry); }catch(e){} });
+}
+
+function startBackgroundDownload(fileMeta, pathStr){
+  const existing = activeDownloads.get(fileMeta.id);
+  if(existing) return existing; // já em andamento — nunca duplica
+
+  const entry = {fileMeta, pathStr, progress: 0, status: 'downloading', listeners: new Set(), error: null};
+  activeDownloads.set(fileMeta.id, entry);
+
+  (async ()=>{
+    try{
+      const blob = await driveFetchBlob(fileMeta.id, p=>{
+        entry.progress = p;
+        notifyDownload(fileMeta.id);
+      }, Number(fileMeta.size)||0);
+      const ext = fileMeta._ext || guessExt(fileMeta);
+      await saveDownloadWithCap(fileMeta, blob, ext, pathStr);
+      entry.status = 'done';
+      notifyDownload(fileMeta.id);
+      toast(`"${fileMeta.name.replace(/\.(pdf|cbz|cbr)$/i,'')}" disponível offline`);
+      openComicFromBlob(fileMeta, blob).then(doc=>{ cacheCoverFromDoc(fileMeta.id, doc); doc.dispose && doc.dispose(); }).catch(()=>{});
+    }catch(err){
+      entry.status = 'error';
+      entry.error = err;
+      notifyDownload(fileMeta.id);
+    }finally{
+      // Mantém o resultado (concluído/erro) visível por alguns segundos
+      // pra quem estiver olhando agora, depois libera da lista — a
+      // partir daí, o botão volta a checar só o IndexedDB normalmente.
+      setTimeout(()=>{ activeDownloads.delete(fileMeta.id); }, 4000);
+    }
+  })();
+
+  return entry;
+}
+
+/* ---------------------------------------------------------------------
    3.5) Cache de páginas com limite (LRU)
    Antes, cada leitor (CBZ/CBR/PDF) guardava a URL de TODA página já vista
    num objeto simples, pra sempre, até a HQ ser fechada — em HQs longas
@@ -2338,9 +2402,42 @@ function renderComicCard(f){
   const dlBtn = elHtml('button','dl-btn', `${ICONS.download}<span>Baixar</span>`);
   card.appendChild(dlBtn);
 
-  idbGet('downloads', f.id).then(d=>{
-    if(d){ dlBtn.innerHTML = `${ICONS.check}<span>Offline</span>`; dlBtn.classList.add('done'); }
-  });
+  function renderDlBtnFromEntry(entry){
+    // Se este card já não está mais na tela (a pessoa navegou pra outro
+    // lugar), não tem sentido continuar atualizando um botão invisível —
+    // se desinscreve sozinho, sem precisar de nenhum gancho especial de
+    // "saída da tela".
+    if(!document.body.contains(dlBtn)){
+      unsubscribe();
+      return;
+    }
+    if(entry.status === 'downloading'){
+      dlBtn.disabled = true;
+      dlBtn.innerHTML = `<span>${Math.round(entry.progress*100)}%</span>`;
+    } else if(entry.status === 'done'){
+      dlBtn.disabled = false;
+      dlBtn.innerHTML = `${ICONS.check}<span>Offline</span>`;
+      dlBtn.classList.add('done');
+    } else if(entry.status === 'error'){
+      dlBtn.disabled = false;
+      dlBtn.innerHTML = `${ICONS.download}<span>Baixar</span>`;
+      toast('Erro ao baixar: ' + (entry.error && entry.error.message || ''));
+    }
+  }
+  let unsubscribe = ()=>{};
+
+  const alreadyActive = activeDownloads.get(f.id);
+  if(alreadyActive){
+    // Já tem um download deste arquivo rodando (iniciado nesta pasta, em
+    // outra, ou na aba Baixados) — só passa a acompanhar, sem começar
+    // um segundo.
+    renderDlBtnFromEntry(alreadyActive);
+    unsubscribe = subscribeDownload(f.id, renderDlBtnFromEntry);
+  } else {
+    idbGet('downloads', f.id).then(d=>{
+      if(d){ dlBtn.innerHTML = `${ICONS.check}<span>Offline</span>`; dlBtn.classList.add('done'); }
+    });
+  }
 
   card.onclick = async ()=>{
     if(card.classList.contains('loading')) return;
@@ -2351,6 +2448,7 @@ function renderComicCard(f){
   };
   dlBtn.onclick = async (e)=>{
     e.stopPropagation();
+    if(activeDownloads.has(f.id)) return; // já baixando (em qualquer tela) — ignora clique duplicado
     const existing = await idbGet('downloads', f.id);
     if(existing){
       await idbDelete('downloads', f.id);
@@ -2358,20 +2456,12 @@ function renderComicCard(f){
       toast('Removido dos baixados');
       return;
     }
-    dlBtn.disabled = true;
-    dlBtn.innerHTML = `<span>0%</span>`;
-    try{
-      const blob = await driveFetchBlob(f.id, p=>{ dlBtn.innerHTML = `<span>${Math.round(p*100)}%</span>`; }, Number(f.size)||0);
-      const ext = f._ext || guessExt(f);
-      await saveDownloadWithCap(f, blob, ext, state.path.map(p=>p.name).join(' / '));
-      dlBtn.innerHTML = `${ICONS.check}<span>Offline</span>`; dlBtn.classList.add('done');
-      toast('Disponível offline');
-      openComicFromBlob(f, blob).then(doc=>{ cacheCoverFromDoc(f.id, doc); doc.dispose && doc.dispose(); }).catch(()=>{});
-    }catch(err){
-      dlBtn.innerHTML = `${ICONS.download}<span>Baixar</span>`;
-      toast('Erro ao baixar: ' + err.message);
-    }
-    dlBtn.disabled = false;
+    const pathStr = state.path.map(p=>p.name).join(' / ');
+    const entry = startBackgroundDownload(f, pathStr);
+    unsubscribe();
+    unsubscribe = subscribeDownload(f.id, renderDlBtnFromEntry);
+    renderDlBtnFromEntry(entry);
+    toast('Baixando em segundo plano — pode navegar livremente');
   };
   return card;
 }
@@ -3059,7 +3149,40 @@ async function renderDownloads(){
   renderDownloadsUsage(items.reduce((sum,it)=>sum+(Number(it.size)||0),0));
   releaseCoverObservers(grid);
   grid.innerHTML = '';
-  if(items.length===0){
+
+  // Downloads em andamento agora, iniciados de qualquer lugar do app —
+  // aparecem aqui mesmo que a pessoa tenha navegado pra outra pasta
+  // desde que clicou em "Baixar".
+  const activeEntries = [...activeDownloads.values()].filter(e=>e.status==='downloading');
+  activeEntries.forEach(entry=>{
+    const f = entry.fileMeta;
+    const card = el('div','card comic');
+    const ph = elHtml('div','cover-placeholder skeleton', `${ICONS.page}<span class="ph-name">${escapeHtml(f.name.split('.')[0].slice(0,40))}</span>`);
+    card.appendChild(ph);
+    card.appendChild(el('div','label', f.name.replace(/\.(pdf|cbz|cbr)$/i,'')));
+    const meta = el('div','meta');
+    meta.appendChild(el('span','', entry.pathStr || ''));
+    card.appendChild(meta);
+    const pctBtn = elHtml('button','dl-btn', `<span>${Math.round(entry.progress*100)}%</span>`);
+    pctBtn.disabled = true;
+    card.appendChild(pctBtn);
+    grid.appendChild(card);
+    lazyLoadCover(card, ()=>attachCoverToEl(ph, f));
+    const unsubscribe = subscribeDownload(f.id, (e)=>{
+      if(!document.body.contains(pctBtn)){ unsubscribe(); return; }
+      if(e.status === 'downloading'){
+        pctBtn.innerHTML = `<span>${Math.round(e.progress*100)}%</span>`;
+      } else {
+        // Terminou (ou deu erro) enquanto essa aba estava aberta —
+        // redesenha a lista pra esse item entrar no lugar certo (ou
+        // sumir, em caso de erro).
+        unsubscribe();
+        renderDownloads();
+      }
+    });
+  });
+
+  if(items.length===0 && activeEntries.length===0){
     grid.innerHTML = `<div class="empty-state">${ICONS.download}<h3>Nada baixado ainda</h3>Toque em "Baixar" em qualquer HQ da biblioteca para ler offline.</div>`;
     return;
   }
@@ -3372,6 +3495,12 @@ async function showPage(i){
   $('#page-count').textContent = `${i+1} / ${doc.pageCount}`;
   $('#page-slider').value = i+1;
   saveProgress(state.reader.fileMeta, i, doc.pageCount);
+  // Prepara a próxima página (e mantém a anterior "quente") em segundo
+  // plano, sem bloquear a página atual — assim, na hora de virar de
+  // verdade, a imagem já está pronta no cache em vez de começar a
+  // extrair/renderizar só quando a pessoa clica em "próxima".
+  if(i+1 < doc.pageCount) doc.getPage(i+1).catch(()=>{});
+  if(i-1 >= 0) doc.getPage(i-1).catch(()=>{});
 }
 function nextPage(){ showPage(state.reader.pageIndex+1); }
 function prevPage(){ showPage(state.reader.pageIndex-1); }
@@ -3660,25 +3789,39 @@ function closeReader(){
 
 async function updateDownloadButtonReader(){
   const btn = $('#btn-download-reader');
-  const existing = await idbGet('downloads', state.reader.fileMeta.id);
+  const meta = state.reader.fileMeta;
+  const active = meta && activeDownloads.get(meta.id);
+  if(active){
+    btn.innerHTML = active.status === 'downloading' ? `<span>${Math.round(active.progress*100)}%</span>` : ICONS.check;
+    return;
+  }
+  const existing = await idbGet('downloads', meta.id);
   btn.innerHTML = existing ? ICONS.check : ICONS.download;
 }
 
 $('#btn-download-reader').onclick = async ()=>{
   const meta = state.reader.fileMeta;
+  if(activeDownloads.has(meta.id)) return; // já baixando (por este botão ou pelo da pasta) — ignora clique duplicado
   const existing = await idbGet('downloads', meta.id);
   if(existing){
     await idbDelete('downloads', meta.id);
     toast('Removido dos baixados');
-  } else {
-    toast('Baixando para leitura offline...');
-    try{
-      const blob = await driveFetchBlob(meta.id);
-      const ext = meta._ext || guessExt(meta) || meta.name.split('.').pop().toLowerCase();
-      await saveDownloadWithCap(meta, blob, ext, state.path.map(p=>p.name).join(' / '));
-      toast('Disponível offline');
-    }catch(err){ toast('Erro ao baixar: '+err.message); }
+    updateDownloadButtonReader();
+    return;
   }
+  const pathStr = state.path.map(p=>p.name).join(' / ');
+  const entry = startBackgroundDownload(meta, pathStr);
+  toast('Baixando em segundo plano — pode navegar livremente');
+  const unsubscribe = subscribeDownload(meta.id, (e)=>{
+    // Só atualiza o ícone se o leitor ainda estiver aberto nesta mesma
+    // HQ — senão, se desinscreve (o download continua rodando de
+    // qualquer forma, só este ícone específico para de escutar).
+    if($('#view-reader').classList.contains('hidden') || state.reader.fileMeta !== meta){
+      unsubscribe();
+      return;
+    }
+    updateDownloadButtonReader();
+  });
   updateDownloadButtonReader();
 };
 
