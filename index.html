@@ -144,7 +144,7 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 .view{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;}
 .grid{
   display:grid;
-  grid-template-columns:repeat(3,1fr);
+  grid-template-columns:repeat(auto-fill,minmax(130px,1fr));
   gap:10px;
   padding:12px;
 }
