@@ -215,14 +215,7 @@
   (ou o leitor é fechado), e mesmo que ainda tente atualizar a tela antes
   de perceber o cancelamento, um token de controle impede.
 */
-/*
-  v34: index.html mudou — o menu do leitor (barra de cima/baixo), que já
-  ficava escondido por padrão e voltava com um toque, agora também some
-  sozinho depois de alguns segundos parado, sem precisar tocar de novo
-  pra escondê-lo. Pausa enquanto o painel de configurações do leitor está
-  aberto.
-*/
-const CACHE_VERSION = 'v34';
+const CACHE_VERSION = 'v33';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [

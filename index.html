@@ -3753,38 +3753,12 @@ setupPinchZoom(
 // Tela cheia de leitura: o menu (barra de cima e de baixo) fica escondido
 // por padrão durante a leitura, e só volta a aparecer quando a pessoa toca
 // na própria HQ — assim ele não fica ocupando espaço/atrapalhando o tempo
-// todo. Um toque de novo esconde outra vez. Além disso, se a pessoa
-// deixar o menu aberto e ficar parada (sem tocar em nada), ele soma
-// sozinho depois de alguns segundos — não precisa lembrar de tocar de
-// novo pra escondê-lo.
-let readerChromeAutoHideTimer = null;
-function scheduleReaderChromeAutoHide(){
-  clearTimeout(readerChromeAutoHideTimer);
-  readerChromeAutoHideTimer = setTimeout(()=>{
-    const root = $('#view-reader');
-    if(!root || root.classList.contains('hidden')) return;
-    if(root.classList.contains('chrome-hidden')) return;
-    // Não esconde sozinho enquanto o painel de configurações (que mora
-    // dentro da barra de cima) estiver aberto — a pessoa ainda pode estar
-    // escolhendo o modo de leitura/ajuste de página.
-    const settings = $('#reader-settings');
-    if(settings && !settings.classList.contains('hidden')) return;
-    root.classList.add('chrome-hidden');
-  }, 3500);
-}
-function cancelReaderChromeAutoHide(){
-  clearTimeout(readerChromeAutoHideTimer);
-}
+// todo. Um toque de novo esconde outra vez.
 function toggleReaderChrome(){
   const root = $('#view-reader');
   const willHide = !root.classList.contains('chrome-hidden');
   root.classList.toggle('chrome-hidden');
-  if(willHide){
-    $('#reader-settings').classList.add('hidden');
-    cancelReaderChromeAutoHide();
-  } else {
-    scheduleReaderChromeAutoHide();
-  }
+  if(willHide) $('#reader-settings').classList.add('hidden');
 }
 // No modo paginado, os botões invisíveis de página anterior/próxima (35%
 // de cada lado) já cuidam da navegação — o toque no meio (sem cobertura
@@ -3831,7 +3805,6 @@ async function openAdjacentComic(delta){
 }
 
 function closeReader(){
-  cancelReaderChromeAutoHide();
   // Mesmo motivo do início de openReader(): se a pessoa fechar o leitor
   // com uma HQ em CBR/CBZ ainda baixando, cancela de verdade em vez de
   // deixar rodando sozinho em segundo plano gastando dados à toa.
@@ -3941,19 +3914,11 @@ document.addEventListener('keydown', e=>{
   }, {passive:false});
 })();
 
-$('#btn-reader-settings').onclick = (e)=>{
-  e.stopPropagation();
-  $('#reader-settings').classList.toggle('hidden');
-  if($('#reader-settings').classList.contains('hidden')) scheduleReaderChromeAutoHide();
-  else cancelReaderChromeAutoHide();
-};
+$('#btn-reader-settings').onclick = (e)=>{ e.stopPropagation(); $('#reader-settings').classList.toggle('hidden'); };
 document.addEventListener('click', (e)=>{
   const panel = $('#reader-settings');
   if(!panel || panel.classList.contains('hidden')) return;
-  if(!panel.contains(e.target) && e.target.id!=='btn-reader-settings'){
-    panel.classList.add('hidden');
-    scheduleReaderChromeAutoHide();
-  }
+  if(!panel.contains(e.target) && e.target.id!=='btn-reader-settings') panel.classList.add('hidden');
 });
 document.querySelectorAll('#mode-segmented button').forEach(btn=>{
   btn.onclick = ()=>{
