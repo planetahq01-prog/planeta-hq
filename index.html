@@ -1793,6 +1793,17 @@ function getImmediateFolderCoverSrc(folderObj){
   const memo = coverMemoryCache.get(file.id);
   return (typeof memo === 'string') ? memo : null;
 }
+// Mesma ideia acima, mas pra card de HQ (não de pasta): se a capa desse
+// arquivo específico já está pré-aquecida em memória (ver
+// warmFolderCoverMemoryCache no boot, e precacheAllCovers mais abaixo),
+// devolve ela na hora — sem isso, TODO card de HQ nascia com o esqueleto
+// cinza e só pintava a capa depois de passar pelo IntersectionObserver +
+// fila de carregamento, mesmo quando a capa (inclusive de CBR/CBZ já
+// processados antes) já estava 100% pronta localmente.
+function getImmediateCoverSrc(f){
+  const memo = coverMemoryCache.get(f.id);
+  return (typeof memo === 'string') ? memo : null;
+}
 
 /* ---------------------------------------------------------------------
    6.06) Painel de diagnóstico
@@ -2093,6 +2104,13 @@ async function runInitialLoad(){
       logErr('[PlanetaHQ] Falha no carregamento rápido (pasta raiz)', e);
     }
     renderHomeSections().catch(e=>logErr('[PlanetaHQ] Falha ao revalidar a Home em segundo plano', e));
+    // Sem bloquear nada nem mostrar tela de carregamento: pré-carrega em
+    // segundo plano a capa de qualquer HQ da biblioteca que ainda não
+    // tenha (ver precacheAllCovers) — a lista completa já está aqui, em
+    // cComics, sem precisar de nenhuma nova varredura. Cada HQ nova
+    // desde a última abertura ganha sua capa pronta agora, pra já
+    // aparecer instantânea na PRÓXIMA vez que a pessoa abrir o app.
+    precacheAllCovers(cComics ? cComics.comics : []).catch(e=>logErr('[PlanetaHQ] Falha no pré-carregamento de capas em segundo plano', e));
     maybeShowWelcome();
     return;
   }
@@ -2109,11 +2127,15 @@ async function runInitialLoad(){
 
   // Pesos de cada etapa na barra de 0-100%. "home" pesa mais porque é,
   // de longe, a etapa mais demorada (busca as 5 seções da Home varrendo
-  // a biblioteca inteira pela API do Drive).
-  const WEIGHTS = { root: 8, home: 57, covers: 35 };
-  const progress = { root: 0, home: 0, covers: 0 };
+  // a biblioteca inteira pela API do Drive). "allCovers" é a nova etapa
+  // final: só existe aqui, na primeira instalação (nas próximas aberturas
+  // isso já roda de graça em segundo plano, sem tela de carregamento —
+  // ver o caminho rápido acima).
+  const WEIGHTS = { root: 6, home: 45, covers: 24, allCovers: 25 };
+  const progress = { root: 0, home: 0, covers: 0, allCovers: 0 };
   const recompute = ()=>{
     setLoadingProgress(
+      WEIGHTS.allCovers*progress.allCovers +
       WEIGHTS.root*progress.root + WEIGHTS.home*progress.home +
       WEIGHTS.covers*progress.covers
     );
@@ -2209,6 +2231,26 @@ async function runInitialLoad(){
   forceLoadAllPendingCovers();
   await waitForVisibleCovers(20000, frac=>{ progress.covers = Math.max(progress.covers, frac); recompute(); });
   progress.covers = 1; recompute();
+
+  // Etapa 4: só acontece aqui, na primeira instalação de verdade — pré-
+  // carrega a capa de TODA a biblioteca (não só o que já está visível na
+  // tela), inclusive CBR/CBZ nunca abertos antes (ver precacheAllCovers).
+  // É isso que faz a diferença entre "capas demoram" e "capas
+  // instantâneas" a partir da 2ª abertura do app: nas próximas vezes essa
+  // mesma etapa já roda de graça em segundo plano, sem tela de
+  // carregamento nenhuma (ver o caminho rápido no início desta função).
+  // Numa biblioteca grande isso pode passar bem dos poucos segundos das
+  // outras etapas — por isso um prazo extra (PRECACHE_BUDGET_MS) em vez
+  // de esperar terminar 100%: se o prazo passar, a tela libera mesmo
+  // assim e o pré-carregamento continua sozinho, quietinho, até acabar.
+  setLoadingSub('Pré-carregando as capas de toda a biblioteca…');
+  const allComicsForPrecache = await getAllComicsCached().catch(()=>[]);
+  const PRECACHE_BUDGET_MS = 45000;
+  await Promise.race([
+    precacheAllCovers(allComicsForPrecache, frac=>{ progress.allCovers = Math.max(progress.allCovers, frac); recompute(); }),
+    sleep(PRECACHE_BUDGET_MS)
+  ]);
+  progress.allCovers = 1; recompute();
 
   if(finished) return;
   finished = true;
@@ -2362,7 +2404,10 @@ async function renderLibrary(folderId, forceRefresh){
       if(card.classList.contains('cover-immediate')) return;
       lazyLoadCover(card, ()=>attachFolderCoverAsync(card, f));
     });
-    comicCards.forEach(({card, f})=>lazyLoadCover(card, ()=>attachCoverAsync(card, f)));
+    comicCards.forEach(({card, f})=>{
+      if(card.classList.contains('cover-immediate')) return;
+      lazyLoadCover(card, ()=>attachCoverAsync(card, f));
+    });
     // Confere em segundo plano (baixa prioridade, sem travar nada) quais
     // pastas recém-vistas realmente têm conteúdo, e some com as vazias.
     runLimited(folderCards.filter(({f})=>getCachedFolderOk(f.id)===undefined), 2, async ({card, f})=>{
@@ -2402,8 +2447,20 @@ function renderFolderCard(f, opts){
 function renderComicCard(f){
   const card = el('div','card comic');
   card.dataset.id = f.id;
-  const ph = elHtml('div','cover-placeholder skeleton', `${ICONS.page}<span class="ph-name">${escapeHtml(f.name.split('.')[0].slice(0,40))}</span>`);
-  card.appendChild(ph);
+  // Capa já pré-aquecida em memória (arquivo já visto/processado antes,
+  // nesta sessão ou em qualquer sessão anterior): pinta direto, igual já
+  // acontecia com pastas (ver renderFolderCard/cover-immediate) — sem
+  // esqueleto, sem passar pela fila/IntersectionObserver.
+  const immediateSrc = getImmediateCoverSrc(f);
+  if(immediateSrc){
+    const img = buildCoverNode(immediateSrc, f);
+    img.classList.add('loaded');
+    card.appendChild(img);
+    card.classList.add('has-cover','cover-immediate');
+  } else {
+    const ph = elHtml('div','cover-placeholder skeleton', `${ICONS.page}<span class="ph-name">${escapeHtml(f.name.split('.')[0].slice(0,40))}</span>`);
+    card.appendChild(ph);
+  }
   card.appendChild(el('div','label', f.name.replace(/\.(pdf|cbz|cbr)$/i,'')));
   const meta = el('div','meta');
   meta.appendChild(el('span','ext-badge', f.name.split('.').pop().toUpperCase()));
@@ -2519,7 +2576,19 @@ async function resolveCoverSrc(f, opts){
 // issuetracker.google.com/issues/229184403 e /issues/188567656). Como o
 // único fallback antes exigia um download local já existente, HQs em
 // PDF/CBZ que a pessoa nunca tinha aberto ficavam sem capa alguma.
-async function resolveCoverFallback(f){
+// Evita gerar a mesma capa duas vezes em paralelo quando duas partes do
+// app pedem a mesma HQ quase ao mesmo tempo (ex.: a pessoa abre uma pasta
+// bem na hora em que o pré-carregamento de fundo — ver precacheAllCovers —
+// também estava chegando nela). Sem isso, ambas chamadas baixavam/extraíam
+// o mesmo CBR/CBZ do zero, dobrando rede e CPU à toa.
+const coverFallbackInFlight = new Map();
+function resolveCoverFallback(f){
+  if(coverFallbackInFlight.has(f.id)) return coverFallbackInFlight.get(f.id);
+  const p = resolveCoverFallbackReal(f).finally(()=> coverFallbackInFlight.delete(f.id));
+  coverFallbackInFlight.set(f.id, p);
+  return p;
+}
+async function resolveCoverFallbackReal(f){
   const localDl = await idbGet('downloads', f.id);
   if(localDl){
     try{
@@ -2619,6 +2688,66 @@ function cacheResolvedCover(id, dataUrl){
     idbSet('covers', {id, dataUrl, ts: Date.now()}).catch(()=>{});
     scheduleCoversTrim();
   }
+}
+
+// Pré-carrega (gera e guarda no IndexedDB) a capa de TODAS as HQs da
+// biblioteca — não só as que aparecem nos carrosséis da Home. É isso que
+// faz uma pasta NUNCA aberta antes já nascer com as capinhas prontas (sem
+// esperar a extração, que no caso de CBR é sempre a mais lenta — não tem
+// atalho por range request como o CBZ, então precisa baixar o arquivo
+// inteiro na primeira vez) a partir da 2ª abertura do app em diante.
+// Reaproveita a mesma fila/limite de concorrência já usado em qualquer
+// outro lugar do app (resolveCoverFallback -> networkCoverQueue, no
+// máximo 3 extrações pesadas ao mesmo tempo), então nunca sobrecarrega
+// mais do que o app já suporta normalmente ao rolar a biblioteca — só
+// roda por mais tempo no total, em segundo plano.
+// Cada arquivo só é processado UMA vez pra sempre: se já tem capa em
+// memória ou no IndexedDB ('covers'), pula direto sem nenhum custo de
+// rede. Isso também é o que faz este pré-carregamento ser barato de
+// rodar de novo a cada abertura do app: só as HQs realmente novas desde
+// a última vez (ver chamada em boot()/runInitialLoad) custam alguma
+// coisa; o resto é só uma leitura local instantânea.
+let coverPrecacheRunning = false;
+let coverPrecachePromise = null;
+function precacheAllCovers(comics, onProgress){
+  if(coverPrecacheRunning) return coverPrecachePromise;
+  coverPrecacheRunning = true;
+  const list = (Array.isArray(comics) ? comics : []).filter(f=>f && f.id);
+  const total = list.length;
+  let done = 0;
+  const bump = ()=>{ done++; if(onProgress) onProgress(total ? done/total : 1); };
+  coverPrecachePromise = Promise.all(list.map(async f=>{
+    try{
+      if(coverMemoryCache.has(f.id)){ bump(); return; }
+      const cached = await idbGet('covers', f.id);
+      if(cached){
+        coverMemoryCache.set(f.id, cached.dataUrl);
+        bump();
+        return;
+      }
+      if(f.thumbnailLink){
+        // Miniatura ao vivo do Drive: baixa e guarda offline, do mesmo
+        // jeito que já se faz pras capas de pasta da Home (ver
+        // schedulePersistCoverOffline) — assim ela também some da lista
+        // de "pendente" nas próximas aberturas, mesmo sem internet.
+        try{
+          const dataUrl = await toDataUrl(f.thumbnailLink.replace(/=s\d+$/, '=s400'));
+          cacheResolvedCover(f.id, dataUrl);
+        }catch(e){ /* segue sem capa offline; a miniatura ao vivo ainda funciona online */ }
+      } else {
+        // PDF, CBZ ou CBR sem miniatura do Drive: gera de verdade (com o
+        // mesmo caminho — e a mesma fila — usado quando a pessoa abre a
+        // pasta manualmente). resolveCoverFallback já guarda o resultado
+        // no IndexedDB por conta própria (cacheResolvedCover).
+        await resolveCoverFallback(f);
+      }
+    }catch(e){
+      // Melhor esforço: uma HQ com problema (corrompida, removida do
+      // Drive, etc.) não pode travar o pré-carregamento das outras.
+    }
+    bump();
+  })).finally(()=>{ coverPrecacheRunning = false; });
+  return coverPrecachePromise;
 }
 
 // Gera e guarda, em segundo plano, uma cópia offline (dataURL) da capa de
@@ -3141,7 +3270,10 @@ async function runSearch(term){
     if(card.classList.contains('cover-immediate')) return;
     lazyLoadCover(card, ()=>attachFolderCoverAsync(card, f));
   });
-  comicCards.forEach(({card, f})=>lazyLoadCover(card, ()=>attachCoverAsync(card, f)));
+  comicCards.forEach(({card, f})=>{
+      if(card.classList.contains('cover-immediate')) return;
+      lazyLoadCover(card, ()=>attachCoverAsync(card, f));
+    });
 }
 
 /* ---------------------------------------------------------------------
