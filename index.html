@@ -314,9 +314,14 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
   display:flex;flex-direction:column;
 }
 .reader-top{
+  position:absolute;top:0;left:0;right:0;
   display:flex;align-items:center;gap:10px;padding:10px 12px;
-  background:rgba(13,12,18,.92);backdrop-filter:blur(6px);color:var(--paper);z-index:2;
+  background:rgba(13,12,18,.92);backdrop-filter:blur(6px);color:var(--paper);z-index:3;
   border-bottom:1px solid rgba(255,255,255,.06);
+  transition:transform .25s ease, opacity .25s ease;
+}
+#view-reader.chrome-hidden .reader-top{
+  transform:translateY(-100%);opacity:0;pointer-events:none;
 }
 .reader-title{flex:1;font-size:13px;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
 
@@ -355,9 +360,14 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 @keyframes shimmer{0%{background-position:200% 0}100%{background-position:-200% 0}}
 
 .reader-bottom{
+  position:absolute;bottom:0;left:0;right:0;
   display:flex;align-items:center;gap:10px;padding:10px 12px;
   background:rgba(13,12,18,.92);backdrop-filter:blur(6px);color:var(--paper);
-  border-top:1px solid rgba(255,255,255,.06);
+  border-top:1px solid rgba(255,255,255,.06);z-index:3;
+  transition:transform .25s ease, opacity .25s ease;
+}
+#view-reader.chrome-hidden .reader-bottom{
+  transform:translateY(100%);opacity:0;pointer-events:none;
 }
 .reader-bottom input[type=range]{flex:1;accent-color:var(--accent);}
 .page-count{font-size:12px;min-width:56px;text-align:center;font-variant-numeric:tabular-nums;color:var(--paper-dim);}
@@ -3383,6 +3393,7 @@ async function openReader(fileMeta, forceLocal, parentId){
 
   const wasHidden = $('#view-reader').classList.contains('hidden');
   $('#view-reader').classList.remove('hidden');
+  $('#view-reader').classList.add('chrome-hidden');
   // Só empilha um nível de histórico ao abrir o leitor pela primeira vez;
   // trocar de capítulo/HQ com o leitor já aberto não deve empilhar de novo.
   if(wasHidden) navPushLevel();
@@ -3739,6 +3750,59 @@ setupPinchZoom(
   ()=> $('#zoom-wrap')
 );
 
+// Tela cheia de leitura: o menu (barra de cima e de baixo) fica escondido
+// por padrão durante a leitura, e só volta a aparecer quando a pessoa toca
+// na própria HQ — assim ele não fica ocupando espaço/atrapalhando o tempo
+// todo. Um toque de novo esconde outra vez. Além disso, se a pessoa
+// deixar o menu aberto e ficar parada (sem tocar em nada), ele soma
+// sozinho depois de alguns segundos — não precisa lembrar de tocar de
+// novo pra escondê-lo.
+let readerChromeAutoHideTimer = null;
+function scheduleReaderChromeAutoHide(){
+  clearTimeout(readerChromeAutoHideTimer);
+  readerChromeAutoHideTimer = setTimeout(()=>{
+    const root = $('#view-reader');
+    if(!root || root.classList.contains('hidden')) return;
+    if(root.classList.contains('chrome-hidden')) return;
+    // Não esconde sozinho enquanto o painel de configurações (que mora
+    // dentro da barra de cima) estiver aberto — a pessoa ainda pode estar
+    // escolhendo o modo de leitura/ajuste de página.
+    const settings = $('#reader-settings');
+    if(settings && !settings.classList.contains('hidden')) return;
+    root.classList.add('chrome-hidden');
+  }, 3500);
+}
+function cancelReaderChromeAutoHide(){
+  clearTimeout(readerChromeAutoHideTimer);
+}
+function toggleReaderChrome(){
+  const root = $('#view-reader');
+  const willHide = !root.classList.contains('chrome-hidden');
+  root.classList.toggle('chrome-hidden');
+  if(willHide){
+    $('#reader-settings').classList.add('hidden');
+    cancelReaderChromeAutoHide();
+  } else {
+    scheduleReaderChromeAutoHide();
+  }
+}
+// No modo paginado, os botões invisíveis de página anterior/próxima (35%
+// de cada lado) já cuidam da navegação — o toque no meio (sem cobertura
+// deles) é o que sobra pra alternar o menu. Se a pessoa deu zoom (pinça),
+// um toque solto é mais provável que seja pra navegar dentro da imagem
+// ampliada, então ignoramos o toggle nesse caso (mesma regra já usada
+// pelos botões de navegação de página).
+$('#zoom-wrap').addEventListener('click', ()=>{
+  if(getPinchState($('#reader-img')).scale<=1.01) toggleReaderChrome();
+});
+// No modo rolagem não existem zonas de botão — qualquer toque na área de
+// leitura alterna o menu.
+$('#reader-scroll').addEventListener('click', (e)=>{
+  const img = e.target.closest('.reader-page img');
+  if(img && getPinchState(img).scale>1.01) return;
+  toggleReaderChrome();
+});
+
 function updateChapterNavButtons(){
   const list = state.reader.siblings || [];
   const idx = state.reader.siblingIndex;
@@ -3767,6 +3831,7 @@ async function openAdjacentComic(delta){
 }
 
 function closeReader(){
+  cancelReaderChromeAutoHide();
   // Mesmo motivo do início de openReader(): se a pessoa fechar o leitor
   // com uma HQ em CBR/CBZ ainda baixando, cancela de verdade em vez de
   // deixar rodando sozinho em segundo plano gastando dados à toa.
@@ -3876,11 +3941,19 @@ document.addEventListener('keydown', e=>{
   }, {passive:false});
 })();
 
-$('#btn-reader-settings').onclick = (e)=>{ e.stopPropagation(); $('#reader-settings').classList.toggle('hidden'); };
+$('#btn-reader-settings').onclick = (e)=>{
+  e.stopPropagation();
+  $('#reader-settings').classList.toggle('hidden');
+  if($('#reader-settings').classList.contains('hidden')) scheduleReaderChromeAutoHide();
+  else cancelReaderChromeAutoHide();
+};
 document.addEventListener('click', (e)=>{
   const panel = $('#reader-settings');
   if(!panel || panel.classList.contains('hidden')) return;
-  if(!panel.contains(e.target) && e.target.id!=='btn-reader-settings') panel.classList.add('hidden');
+  if(!panel.contains(e.target) && e.target.id!=='btn-reader-settings'){
+    panel.classList.add('hidden');
+    scheduleReaderChromeAutoHide();
+  }
 });
 document.querySelectorAll('#mode-segmented button').forEach(btn=>{
   btn.onclick = ()=>{
