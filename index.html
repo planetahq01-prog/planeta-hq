@@ -1582,7 +1582,15 @@ async function loadPdfWithFallback(source, onProgress, knownSize, fileId){
     if(e && e.message !== 'stream-timeout') throw e;
     loadingTask.destroy().catch(()=>{});
     logWarn('PDF demorando demais por streaming, baixando arquivo inteiro como alternativa:', fileId);
-    const blob = await driveFetchBlob(fileId, onProgress, knownSize);
+    // Usa o download nativo do navegador (fetch + .blob()) em vez do nosso
+    // loop manual de leitura por pedaços — pra arquivos grandes, deixar o
+    // próprio navegador cuidar da montagem do arquivo é bem mais leve pra
+    // memória do celular do que acumular tudo manualmente em JavaScript.
+    if(onProgress) onProgress(0);
+    const res = await fetch(driveMediaUrl(fileId), {cache:'no-store'});
+    if(!res.ok) throw new Error(`Não foi possível baixar o arquivo (${res.status}).`);
+    const blob = await res.blob();
+    if(onProgress) onProgress(1);
     const fallbackTask = pdfjsLib.getDocument({data: await blob.arrayBuffer()});
     return await fallbackTask.promise;
   }
