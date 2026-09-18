@@ -1546,36 +1546,51 @@ async function openComicCBR(blob){
   };
 }
 
-async function openComicPDF(source, onProgress, knownSize){
-  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-  const loadingTask = typeof source === 'string'
-    ? pdfjsLib.getDocument({
-        url: source,
-        rangeChunkSize: 1 << 21, // 2MB por pedaço — cada pedido de rede custa
-                                  // ~250-300ms fixos (ida e volta), então pedir
-                                  // pedaços maiores reduz bastante o número de
-                                  // pedidos, mesmo custando um pouco mais de
-                                  // dados por pedido (o cache já entrega rápido
-                                  // em volume, então isso compensa)
-        disableAutoFetch: true,  // não baixa o resto do arquivo em segundo plano;
-                                  // isso deixava a 1ª página mais lenta, disputando
-                                  // banda com o range request da página atual
-        disableStream: false,
-        disableRange: false,
-        cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
-        cMapPacked: true
-      })
-    : pdfjsLib.getDocument({data: await source.arrayBuffer()});
+// Tenta abrir o PDF do jeito econômico (por pedacinhos, via rede). Se isso
+// travar/demorar demais — alguns PDFs, por causa de como foram criados,
+// obrigam a fazer centenas de pedidos pequenos só pra montar o índice —
+// desiste desse caminho e baixa o arquivo inteiro de uma vez (que já
+// sabemos ser rápido, mesmo em arquivos grandes) pra abrir a partir dele.
+const PDF_STREAM_TIMEOUT_MS = 12000;
+async function loadPdfWithFallback(source, onProgress, knownSize, fileId){
+  if(typeof source !== 'string'){
+    const loadingTask = pdfjsLib.getDocument({data: await source.arrayBuffer()});
+    return await loadingTask.promise;
+  }
+  const loadingTask = pdfjsLib.getDocument({
+    url: source,
+    rangeChunkSize: 1 << 18,
+    disableAutoFetch: true,
+    disableStream: false,
+    disableRange: false,
+    cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
+    cMapPacked: true
+  });
   if(onProgress){
     loadingTask.onProgress = (p)=>{
-      // Como o PDF é carregado por partes (range requests) para abrir o
-      // mais rápido possível, nem sempre o total vem no evento — nesse
-      // caso usamos o tamanho já conhecido pela listagem do Drive.
       const total = (p && p.total) || knownSize || 0;
       if(total && p && typeof p.loaded === 'number') onProgress(Math.min(1, p.loaded/total));
     };
   }
-  const pdf = await loadingTask.promise;
+  if(!fileId) return await loadingTask.promise;
+  try{
+    return await Promise.race([
+      loadingTask.promise,
+      new Promise((_,reject)=>setTimeout(()=>reject(new Error('stream-timeout')), PDF_STREAM_TIMEOUT_MS))
+    ]);
+  }catch(e){
+    if(e && e.message !== 'stream-timeout') throw e;
+    loadingTask.destroy().catch(()=>{});
+    logWarn('PDF demorando demais por streaming, baixando arquivo inteiro como alternativa:', fileId);
+    const blob = await driveFetchBlob(fileId, onProgress, knownSize);
+    const fallbackTask = pdfjsLib.getDocument({data: await blob.arrayBuffer()});
+    return await fallbackTask.promise;
+  }
+}
+
+async function openComicPDF(source, onProgress, knownSize, fileId){
+  pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  const pdf = await loadPdfWithFallback(source, onProgress, knownSize, fileId);
   // 14 em vez de 24: as páginas agora saem em resolução bem maior (ver
   // getPage abaixo), então cada uma pesa bem mais em memória — reduzir
   // quantas ficam guardadas ao mesmo tempo evita que o app fique pesado
@@ -2704,7 +2719,7 @@ async function renderPdfCoverThumb(url){
   pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   const pdf = await pdfjsLib.getDocument({
     url,
-    rangeChunkSize: 1 << 21,
+    rangeChunkSize: 1 << 18,
     disableAutoFetch: true,
     disableStream: false,
     disableRange: false,
@@ -3479,7 +3494,7 @@ async function openReader(fileMeta, forceLocal, parentId){
         // a tela não mostra mais porcentagem (evita trabalho extra na UI
         // enquanto o PDF carrega).
         status.innerHTML = '<div class="spinner"></div><div>Carregando PDF...</div>';
-        doc = await openComicPDF(driveMediaUrl(fileMeta.id), null, Number(fileMeta.size)||0);
+        doc = await openComicPDF(driveMediaUrl(fileMeta.id), null, Number(fileMeta.size)||0, fileMeta.id);
       } else {
         status.innerHTML = '<div class="spinner"></div><div>Baixando... <span id="reader-status-pct">0%</span></div>';
         const blob = await driveFetchBlob(fileMeta.id, p=>{ setPct(Math.round(p*100)); }, Number(fileMeta.size)||0, myAbort.signal);
