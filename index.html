@@ -5002,7 +5002,7 @@ async function collectAllComicsForCoverWarm(folderId, visited){
   let listing;
   try{ listing = await driveListFolder(folderId); }
   catch(e){ return []; }
-  let result = [...(listing.comics||[])];
+  let result = [...(listing.files||[])];
   for(const sub of (listing.folders||[])){
     result = result.concat(await collectAllComicsForCoverWarm(sub.id, visited));
   }
