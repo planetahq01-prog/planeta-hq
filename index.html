@@ -654,7 +654,8 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
         <button id="btn-debug-close" class="icon-btn"></button>
       </div>
       <p style="font-size:13px;opacity:.75;margin:4px 0 10px;">Toque em "Copiar tudo" e cole numa mensagem pra enviar. Se estiver vazio, tente entrar de novo na pasta com problema antes de abrir isso aqui.</p>
-      <button id="btn-warm-covers" class="btn-primary" style="padding:8px 14px;margin-bottom:10px;">🔥 Aquecer capas da biblioteca</button>
+      <button id="btn-warm-covers" class="btn-primary" style="padding:8px 14px;margin-bottom:6px;">🔥 Aquecer capas da biblioteca</button>
+      <button id="btn-warm-covers-home" class="btn-primary" style="padding:8px 14px;margin-bottom:10px;">🏠 Aquecer capas só da Home</button>
       <textarea id="debug-panel-text" readonly></textarea>
     </div>
     <div class="tabs">
@@ -5011,28 +5012,80 @@ async function collectAllComicsForCoverWarm(folderId, visited){
 
 $('#btn-warm-covers').onclick = async ()=>{
   if(!confirm('Isso vai passar pela biblioteca inteira gerando (quando necessário) e salvando as capas no cache compartilhado. Pode demorar vários minutos, dependendo do tamanho da biblioteca. Continuar?')) return;
-  const btn = $('#btn-warm-covers');
+  await runCoverWarmer($('#btn-warm-covers'), ()=>collectAllComicsForCoverWarm(CONFIG.rootFolderId, new Set()));
+};
+
+// Reaproveita as pastas já identificadas pra cada seção da Home (a mesma
+// lista que a tela Home usa: "1 - Batman: Ano Um", "Sem Limites" etc.) —
+// se a Home já foi carregada neste aparelho, isso não bate na rede pra
+// nada, só lê do cache local. Só faz a varredura completa da biblioteca
+// (mais lenta) se esse cache ainda não existir de jeito nenhum.
+async function collectHomeSectionComics(){
+  const [aranha, xmen, manga, batman, salvat, hulk, lanterna] = await Promise.all([
+    readHomeCache(ARANHA_CACHE_KEY, 'folders'),
+    readHomeCache(XMEN_CACHE_KEY, 'folders'),
+    readHomeCache(MANGA_CACHE_KEY, 'folders'),
+    readHomeCache(BATMAN_CACHE_KEY, 'folders'),
+    readHomeCache(SALVAT_CACHE_KEY, 'folders'),
+    readHomeCache(HULK_CACHE_KEY, 'folders'),
+    readHomeCache(LANTERNA_CACHE_KEY, 'folders'),
+  ]);
+  let sectionFolders = [
+    ...(aranha ? aranha.folders : []), ...(xmen ? xmen.folders : []),
+    ...(manga ? manga.folders : []), ...(batman ? batman.folders : []),
+    ...(salvat ? salvat.folders : []), ...(hulk ? hulk.folders : []),
+    ...(lanterna ? lanterna.folders : [])
+  ];
+  if(sectionFolders.length === 0){
+    const result = await crawlLibrarySections(Date.now(), ()=>false, {});
+    sectionFolders = [
+      ...result.aranhaFolders, ...result.xmenFolders, ...result.mangaFolders,
+      ...result.batmanFolders, ...result.salvatFolders, ...result.hulkFolders,
+      ...result.lanternaFolders
+    ];
+  }
+  const seen = new Set();
+  const allFiles = [];
+  for(const folder of sectionFolders){
+    let listing;
+    try{ listing = await driveListFolder(folder.id); }catch(e){ continue; }
+    for(const f of (listing.files||[])){
+      if(seen.has(f.id)) continue;
+      seen.add(f.id);
+      allFiles.push(f);
+    }
+  }
+  return allFiles;
+}
+
+async function runCoverWarmer(btn, getFiles){
   const originalText = btn.textContent;
   btn.disabled = true;
-  btn.textContent = '🔎 Listando a biblioteca...';
-
-  const allComics = await collectAllComicsForCoverWarm(CONFIG.rootFolderId, new Set());
-  const total = allComics.length;
+  btn.textContent = '🔎 Listando...';
+  const files = await getFiles();
+  const total = files.length;
   let done = 0, ok = 0;
-  btn.textContent = `🔥 Aquecendo capas... 0/${total}`;
-
-  for(const f of allComics){
-    try{
-      const src = await resolveCoverFallback(f);
-      if(src) ok++;
-    }catch(e){}
-    done++;
-    btn.textContent = `🔥 Aquecendo capas... ${done}/${total} (${ok} ok)`;
-    await new Promise(r=>setTimeout(r, 250)); // pausa curta entre cada, pra não sobrecarregar
+  const CONCURRENCY = 4;
+  let nextIndex = 0;
+  async function worker(){
+    while(nextIndex < files.length){
+      const f = files[nextIndex++];
+      try{
+        const src = await resolveCoverFallback(f);
+        if(src) ok++;
+      }catch(e){}
+      done++;
+      btn.textContent = `🔥 Aquecendo... ${done}/${total} (${ok} ok)`;
+    }
   }
-
+  await Promise.all(Array.from({length: Math.min(CONCURRENCY, total || 1)}, worker));
   btn.textContent = `✅ Concluído: ${ok}/${total} capas prontas no cache`;
   setTimeout(()=>{ btn.textContent = originalText; btn.disabled = false; }, 6000);
+}
+
+$('#btn-warm-covers-home').onclick = async ()=>{
+  if(!confirm('Isso vai gerar/checar as capas só das HQs que aparecem nas seções da Home (Aranha, X-Men, Mangás, Batman, Salvat, Hulk, Lanterna Verde). Continuar?')) return;
+  await runCoverWarmer($('#btn-warm-covers-home'), collectHomeSectionComics);
 };
 
 $('#btn-debug').onclick = ()=>{
