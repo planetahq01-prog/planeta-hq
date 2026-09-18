@@ -1551,7 +1551,12 @@ async function openComicPDF(source, onProgress, knownSize){
   const loadingTask = typeof source === 'string'
     ? pdfjsLib.getDocument({
         url: source,
-        rangeChunkSize: 1 << 18, // pedaços maiores = menos idas-e-voltas de rede
+        rangeChunkSize: 1 << 21, // 2MB por pedaço — cada pedido de rede custa
+                                  // ~250-300ms fixos (ida e volta), então pedir
+                                  // pedaços maiores reduz bastante o número de
+                                  // pedidos, mesmo custando um pouco mais de
+                                  // dados por pedido (o cache já entrega rápido
+                                  // em volume, então isso compensa)
         disableAutoFetch: true,  // não baixa o resto do arquivo em segundo plano;
                                   // isso deixava a 1ª página mais lenta, disputando
                                   // banda com o range request da página atual
@@ -2699,7 +2704,7 @@ async function renderPdfCoverThumb(url){
   pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   const pdf = await pdfjsLib.getDocument({
     url,
-    rangeChunkSize: 1 << 18,
+    rangeChunkSize: 1 << 21,
     disableAutoFetch: true,
     disableStream: false,
     disableRange: false,
