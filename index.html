@@ -1365,7 +1365,16 @@ function startBackgroundDownload(fileMeta, pathStr){
       entry.status = 'done';
       notifyDownload(fileMeta.id);
       toast(`"${fileMeta.name.replace(/\.(pdf|cbz|cbr)$/i,'')}" disponível offline`);
-      openComicFromBlob(fileMeta, blob).then(doc=>{ cacheCoverFromDoc(fileMeta.id, doc); doc.dispose && doc.dispose(); }).catch(()=>{});
+      // Gerar a capa aqui é só uma antecipação (ela também é gerada sob
+      // demanda quando a HQ aparece na estante, via resolveCoverSrc) —
+      // pra arquivos grandes, abrir o documento inteiro de novo só pra
+      // tirar a capa é pesado o bastante pra travar o app se a pessoa
+      // estiver baixando outra coisa ao mesmo tempo. Não vale a pena
+      // arriscar isso por uma antecipação que não é essencial.
+      const EAGER_COVER_MAX_SIZE = 60 * 1024 * 1024;
+      if((Number(fileMeta.size) || 0) < EAGER_COVER_MAX_SIZE){
+        openComicFromBlob(fileMeta, blob).then(doc=>{ cacheCoverFromDoc(fileMeta.id, doc); doc.dispose && doc.dispose(); }).catch(()=>{});
+      }
     }catch(err){
       entry.status = 'error';
       entry.error = err;
