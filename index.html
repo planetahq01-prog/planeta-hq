@@ -784,6 +784,32 @@ function escapeHtml(s){
 }
 
 /* ---------------------------------------------------------------------
+   0) DIAGNÓSTICO TEMPORÁRIO: contador de pedidos de rede por HQ
+   Envolve o fetch original só pra contar, sem mudar o comportamento de
+   nada. Serve pra saber, na hora, quantos pedidos "por pedacinho" o
+   pdf.js está fazendo pra abrir uma HQ específica — sem precisar contar
+   linha por linha no painel da Cloudflare.
+   --------------------------------------------------------------------- */
+window.__rangeStats = {}; // fileId -> {count, totalMs}
+(function(){
+  const originalFetch = window.fetch.bind(window);
+  window.fetch = function(input, init){
+    const url = typeof input === 'string' ? input : (input && input.url) || '';
+    const isProxyCall = CONFIG && CONFIG.proxyUrl && url.indexOf(CONFIG.proxyUrl.split('?')[0]) === 0;
+    if(!isProxyCall) return originalFetch(input, init);
+    const idMatch = /[?&]id=([^&]+)/.exec(url);
+    const fid = idMatch ? decodeURIComponent(idMatch[1]) : '(sem id)';
+    const t0 = performance.now();
+    return originalFetch(input, init).then(res=>{
+      const ms = Math.round(performance.now() - t0);
+      const s = window.__rangeStats[fid] || (window.__rangeStats[fid] = {count:0, totalMs:0});
+      s.count++; s.totalMs += ms;
+      return res;
+    });
+  };
+})();
+
+/* ---------------------------------------------------------------------
    1) CONFIGURAÇÃO / ESTADO GLOBAL
    --------------------------------------------------------------------- */
 const CONFIG_KEY = 'planetahq_config';
@@ -4822,7 +4848,14 @@ $('#btn-settings').onclick = ()=>{
   }
 };
 $('#btn-debug').onclick = ()=>{
-  $('#debug-panel-text').value = debugLog.length ? debugLog.join('\n\n') : '(sem erros registrados até agora)';
+  const statsLines = Object.entries(window.__rangeStats)
+    .sort((a,b)=>b[1].count-a[1].count)
+    .map(([fid, s])=>`id=${fid}  pedidos=${s.count}  tempo total=${s.totalMs}ms  média=${Math.round(s.totalMs/s.count)}ms`)
+    .join('\n');
+  const statsBlock = statsLines
+    ? `=== Pedidos de rede por arquivo (desde que o app abriu) ===\n${statsLines}\n\n`
+    : '';
+  $('#debug-panel-text').value = statsBlock + (debugLog.length ? debugLog.join('\n\n') : '(sem erros registrados até agora)');
   $('#debug-panel').classList.remove('hidden');
 };
 $('#btn-debug-close').onclick = ()=>{
