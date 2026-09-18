@@ -654,6 +654,7 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
         <button id="btn-debug-close" class="icon-btn"></button>
       </div>
       <p style="font-size:13px;opacity:.75;margin:4px 0 10px;">Toque em "Copiar tudo" e cole numa mensagem pra enviar. Se estiver vazio, tente entrar de novo na pasta com problema antes de abrir isso aqui.</p>
+      <button id="btn-warm-covers" class="btn-primary" style="padding:8px 14px;margin-bottom:10px;">🔥 Aquecer capas da biblioteca</button>
       <textarea id="debug-panel-text" readonly></textarea>
     </div>
     <div class="tabs">
@@ -2595,9 +2596,27 @@ async function resolveCoverFallback(f){
       const dataUrl = await toDataUrl(await doc.getPage(0));
       if(doc.dispose) doc.dispose();
       cacheResolvedCover(f.id, dataUrl);
+      uploadCoverToR2(f.id, dataUrl).catch(()=>{});
       return dataUrl;
     }catch(err){ logErr('[PlanetaHQ] capa: falha ao gerar a partir do download local —', f.name, err); }
   }
+
+  // Antes de gerar do zero (pesado — pode exigir abrir o PDF/CBZ), confere
+  // se ALGUÉM já gerou essa capa antes e ela está salva no R2 — nesse
+  // caso é só usar a URL direto, sem processar nada aqui. É isso que faz
+  // as capas carregarem instantâneas pra quem nunca abriu essa HQ antes.
+  if(CONFIG.proxyUrl){
+    try{
+      const checkRes = await fetch(`${CONFIG.proxyUrl}?cover_check=1&id=${encodeURIComponent(f.id)}`);
+      const checkData = await checkRes.json();
+      if(checkData && checkData.cached){
+        const r2Url = `${CONFIG.proxyUrl}?cover=1&id=${encodeURIComponent(f.id)}`;
+        cacheResolvedCover(f.id, r2Url);
+        return r2Url;
+      }
+    }catch(e){ /* se isso falhar, segue pro caminho normal abaixo */ }
+  }
+
   const ext = f._ext || guessExt(f);
   let dataUrl = null;
 
@@ -2633,7 +2652,27 @@ async function resolveCoverFallback(f){
   }
 
   cacheResolvedCover(f.id, dataUrl);
+  // Acabamos de gerar essa capa do zero — sobe pro R2 em segundo plano
+  // (sem esperar, sem afetar a pessoa atual) pra que a PRÓXIMA pessoa
+  // que abrir essa mesma HQ já encontre pronta, sem precisar gerar de
+  // novo.
+  if(dataUrl) uploadCoverToR2(f.id, dataUrl).catch(()=>{});
   return dataUrl;
+}
+
+// Sobe uma capa (já gerada como data URL) pro cache compartilhado no R2.
+// Falha aqui nunca afeta a experiência de quem está vendo a capa agora —
+// é só uma tentativa de "deixar pronto pra próxima pessoa".
+async function uploadCoverToR2(fileId, dataUrl){
+  if(!CONFIG.proxyUrl || !dataUrl) return;
+  try{
+    const blob = await (await fetch(dataUrl)).blob();
+    await fetch(`${CONFIG.proxyUrl}?cover_put=1&id=${encodeURIComponent(fileId)}&key=${encodeURIComponent(CONFIG.apiKey)}`, {
+      method: 'PUT',
+      headers: {'Content-Type': blob.type || 'image/jpeg'},
+      body: blob
+    });
+  }catch(e){}
 }
 
 // Guarda o resultado (capa ou null) na memória da sessão pra nunca mais
@@ -4951,6 +4990,51 @@ $('#btn-settings').onclick = ()=>{
     location.reload();
   }
 };
+// Varre a biblioteca inteira (a partir da pasta raiz) e, pra cada HQ,
+// garante que a capa dela esteja salva no cache compartilhado do R2 —
+// reaproveita exatamente a mesma lógica que já roda organicamente quando
+// alguém navega pela biblioteca (resolveCoverFallback), só que de forma
+// proposital e completa, em vez de depender do uso normal ir preenchendo
+// pouco a pouco.
+async function collectAllComicsForCoverWarm(folderId, visited){
+  if(visited.has(folderId)) return [];
+  visited.add(folderId);
+  let listing;
+  try{ listing = await driveListFolder(folderId); }
+  catch(e){ return []; }
+  let result = [...(listing.comics||[])];
+  for(const sub of (listing.folders||[])){
+    result = result.concat(await collectAllComicsForCoverWarm(sub.id, visited));
+  }
+  return result;
+}
+
+$('#btn-warm-covers').onclick = async ()=>{
+  if(!confirm('Isso vai passar pela biblioteca inteira gerando (quando necessário) e salvando as capas no cache compartilhado. Pode demorar vários minutos, dependendo do tamanho da biblioteca. Continuar?')) return;
+  const btn = $('#btn-warm-covers');
+  const originalText = btn.textContent;
+  btn.disabled = true;
+  btn.textContent = '🔎 Listando a biblioteca...';
+
+  const allComics = await collectAllComicsForCoverWarm(CONFIG.rootFolderId, new Set());
+  const total = allComics.length;
+  let done = 0, ok = 0;
+  btn.textContent = `🔥 Aquecendo capas... 0/${total}`;
+
+  for(const f of allComics){
+    try{
+      const src = await resolveCoverFallback(f);
+      if(src) ok++;
+    }catch(e){}
+    done++;
+    btn.textContent = `🔥 Aquecendo capas... ${done}/${total} (${ok} ok)`;
+    await new Promise(r=>setTimeout(r, 250)); // pausa curta entre cada, pra não sobrecarregar
+  }
+
+  btn.textContent = `✅ Concluído: ${ok}/${total} capas prontas no cache`;
+  setTimeout(()=>{ btn.textContent = originalText; btn.disabled = false; }, 6000);
+};
+
 $('#btn-debug').onclick = ()=>{
   const statsLines = Object.entries(window.__rangeStats)
     .sort((a,b)=>b[1].count-a[1].count)
