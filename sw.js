@@ -215,7 +215,14 @@
   (ou o leitor é fechado), e mesmo que ainda tente atualizar a tela antes
   de perceber o cancelamento, um token de controle impede.
 */
-const CACHE_VERSION = 'v33';
+/*
+  v34: index.html mudou — o menu do leitor (barra de cima/baixo), que já
+  ficava escondido por padrão e voltava com um toque, agora também some
+  sozinho depois de alguns segundos parado, sem precisar tocar de novo
+  pra escondê-lo. Pausa enquanto o painel de configurações do leitor está
+  aberto.
+*/
+const CACHE_VERSION = 'v35';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
@@ -236,7 +243,9 @@ const APP_SHELL = [
   // HOME_LOGOS no index.html.
   'https://i.postimg.cc/T2BgjCPP/amazing-spiderman-seeklogo.png',
   'https://i.postimg.cc/cJzP2j41/x-men-seeklogo.png',
-  'https://i.postimg.cc/vBNHsqK1/IMG-20260914-002543.png'
+  'https://i.postimg.cc/vBNHsqK1/IMG-20260914-002543.png',
+  'https://i.postimg.cc/SQTJZ8Lv/kindpng-1834284.png',
+  'https://i.postimg.cc/QNwj9qJK/Green-Lantern-Logo-Light-Green-Text-png.png'
 ];
 // URLs absolutas resolvidas uma única vez, pra comparar por igualdade exata
 // (nunca mais por sufixo/heurística) na hora de decidir o que é "casca".
