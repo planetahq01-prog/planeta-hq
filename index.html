@@ -435,6 +435,8 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 /* Hulk e Lanterna Verde: 50px a pedido. */
 .home-section-title .section-logo[data-logo="hulk"]{height:50px;}
 .home-section-title .section-logo[data-logo="lanterna"]{height:50px;}
+.home-section-title .section-logo[data-logo="ironman"]{height:50px;}
+.home-section-title .section-logo[data-logo="superman"]{height:50px;}
 .home-section-title .section-logo.hidden{display:none;}
 .home-section-title .section-logo-text.hidden{display:none;}
 .carousel{
@@ -2138,9 +2140,9 @@ async function runInitialLoad(){
   // o app achava, TODA vez que reabria, que era a primeira instalação —
   // e voltava a mostrar a tela de carregamento cheia (varrendo a
   // biblioteca inteira de novo) mesmo já tendo tudo salvo localmente.
-  let cAranha=null, cXMen=null, cManga=null, cComics=null, cBatman=null, cSalvat=null, cHulk=null, cLanterna=null;
+  let cAranha=null, cXMen=null, cManga=null, cComics=null, cBatman=null, cSalvat=null, cHulk=null, cLanterna=null, cIronman=null, cSuperman=null;
   try{
-    [cAranha, cXMen, cManga, cComics, cBatman, cSalvat, cHulk, cLanterna] = await Promise.all([
+    [cAranha, cXMen, cManga, cComics, cBatman, cSalvat, cHulk, cLanterna, cIronman, cSuperman] = await Promise.all([
       readHomeCache(ARANHA_CACHE_KEY, 'folders'),
       readHomeCache(XMEN_CACHE_KEY, 'folders'),
       readHomeCache(MANGA_CACHE_KEY, 'folders'),
@@ -2148,7 +2150,9 @@ async function runInitialLoad(){
       readHomeCache(BATMAN_CACHE_KEY, 'folders'),
       readHomeCache(SALVAT_CACHE_KEY, 'folders'),
       readHomeCache(HULK_CACHE_KEY, 'folders'),
-      readHomeCache(LANTERNA_CACHE_KEY, 'folders')
+      readHomeCache(LANTERNA_CACHE_KEY, 'folders'),
+      readHomeCache(IRONMAN_CACHE_KEY, 'folders'),
+      readHomeCache(SUPERMAN_CACHE_KEY, 'folders')
     ]);
   }catch(e){
     // Cada readHomeCache já engole os próprios erros e devolve null, mas
@@ -2158,7 +2162,7 @@ async function runInitialLoad(){
     logErr('[PlanetaHQ] Falha ao checar cache local no boot', e);
   }
   if(finished) return; // o hardStop já disparou enquanto esperávamos o cache — nada mais a fazer
-  const hasAnyHomeCache = !!(cAranha || cXMen || cManga || cComics || cBatman || cSalvat || cHulk || cLanterna);
+  const hasAnyHomeCache = !!(cAranha || cXMen || cManga || cComics || cBatman || cSalvat || cHulk || cLanterna || cIronman || cSuperman);
   if(hasAnyHomeCache){
     finished = true;
     clearTimeout(hardStop);
@@ -4155,7 +4159,7 @@ async function crawlLibrarySections(token, isStale, errorState){
     await runLimited(toVisit, 6, sub=>walk(sub.id, [...path, sub.name]));
   }
   await walk(CONFIG.rootFolderId, []);
-  if(isStale(token)) return {comics: [], folders: [], aranhaFolders: [], xmenFolders: [], mangaFolders: [], batmanFolders: [], salvatFolders: [], hulkFolders: [], lanternaFolders: [], hadError:false, errorMessage:null};
+  if(isStale(token)) return {comics: [], folders: [], aranhaFolders: [], xmenFolders: [], mangaFolders: [], batmanFolders: [], salvatFolders: [], hulkFolders: [], lanternaFolders: [], ironmanFolders: [], supermanFolders: [], hadError:false, errorMessage:null};
 
   // Antes: a seção "Coleção Homem-Aranha" juntava, de QUALQUER lugar da
   // biblioteca, toda pasta cujo nome contivesse "aranha" ou "spider" (com
@@ -4213,8 +4217,13 @@ async function crawlLibrarySections(token, isStale, errorState){
   // (desambiguação via parentNames, caso exista mais de uma pasta com
   // esse nome em lugares diferentes da biblioteca).
   const lanternaFolders = await childrenOfNamedFolder(['lanterna verde'], {parentNames:['dc']});
+  // Pasta "Coleção - Homem de Ferro" — mesma lógica do Hulk.
+  const ironmanFolders = await childrenOfNamedFolder(['colecao homem de ferro']);
+  // Pasta "Superman", especificamente a que está dentro de "DC" (mesma
+  // lógica de desambiguação do Lanterna Verde).
+  const supermanFolders = await childrenOfNamedFolder(['superman'], {parentNames:['dc']});
 
-  return {comics, folders: allFolders, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders,
+  return {comics, folders: allFolders, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders,
     hadError: !!(errorState && errorState.hadError),
     errorMessage: errorState && errorState.lastError ? errorState.lastError.message : null};
 }
@@ -4372,6 +4381,8 @@ const BATMAN_CACHE_KEY = 'planetahq_batman_cache_v1';
 const SALVAT_CACHE_KEY = 'planetahq_salvat_cache_v1';
 const HULK_CACHE_KEY = 'planetahq_hulk_cache_v1';
 const LANTERNA_CACHE_KEY = 'planetahq_lanterna_cache_v1';
+const IRONMAN_CACHE_KEY = 'planetahq_ironman_cache_v1';
+const SUPERMAN_CACHE_KEY = 'planetahq_superman_cache_v1';
 const HOME_CACHE_MAX_AGE = 6*3600*1000;
 
 async function readHomeCache(key, arrProp){
@@ -4442,7 +4453,7 @@ async function getLibrarySections(forceRefresh){
 
   if(!forceRefresh){
     const now = Date.now();
-    const [cAranha, cXMen, cManga, cComics, cAllFolders, cBatman, cSalvat, cHulk, cLanterna] = await Promise.all([
+    const [cAranha, cXMen, cManga, cComics, cAllFolders, cBatman, cSalvat, cHulk, cLanterna, cIronman, cSuperman] = await Promise.all([
       readHomeCache(ARANHA_CACHE_KEY, 'folders'),
       readHomeCache(XMEN_CACHE_KEY, 'folders'),
       readHomeCache(MANGA_CACHE_KEY, 'folders'),
@@ -4451,10 +4462,12 @@ async function getLibrarySections(forceRefresh){
       readHomeCache(BATMAN_CACHE_KEY, 'folders'),
       readHomeCache(SALVAT_CACHE_KEY, 'folders'),
       readHomeCache(HULK_CACHE_KEY, 'folders'),
-      readHomeCache(LANTERNA_CACHE_KEY, 'folders')
+      readHomeCache(LANTERNA_CACHE_KEY, 'folders'),
+      readHomeCache(IRONMAN_CACHE_KEY, 'folders'),
+      readHomeCache(SUPERMAN_CACHE_KEY, 'folders')
     ]);
     const fresh = c=>c && (now - c.savedAt < HOME_CACHE_MAX_AGE);
-    if(fresh(cAranha) && fresh(cXMen) && fresh(cManga) && fresh(cComics) && fresh(cAllFolders) && fresh(cBatman) && fresh(cSalvat) && fresh(cHulk) && fresh(cLanterna)){
+    if(fresh(cAranha) && fresh(cXMen) && fresh(cManga) && fresh(cComics) && fresh(cAllFolders) && fresh(cBatman) && fresh(cSalvat) && fresh(cHulk) && fresh(cLanterna) && fresh(cIronman) && fresh(cSuperman)){
       return {
         aranhaFolders: cAranha.folders,
         xmenFolders: cXMen.folders,
@@ -4465,6 +4478,8 @@ async function getLibrarySections(forceRefresh){
         salvatFolders: cSalvat.folders,
         hulkFolders: cHulk.folders,
         lanternaFolders: cLanterna.folders,
+        ironmanFolders: cIronman.folders,
+        supermanFolders: cSuperman.folders,
         hadError: false,
         errorMessage: null
       };
@@ -4491,7 +4506,7 @@ async function getLibrarySections(forceRefresh){
     const wasAborted = token !== librarySectionsToken;
     const skipWrite = errorState.hadError || wasAborted;
     if(!skipWrite) revalidateFolderCovers(); // sem await: não atrasa a resposta, roda em segundo plano
-    const [aranhaFolders, xmenFolders, mangaFolders, comics, allFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders] = await Promise.all([
+    const [aranhaFolders, xmenFolders, mangaFolders, comics, allFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders] = await Promise.all([
       finalizeHomeSectionResult(ARANHA_CACHE_KEY, 'folders', raw.aranhaFolders, skipWrite),
       finalizeHomeSectionResult(XMEN_CACHE_KEY, 'folders', raw.xmenFolders, skipWrite),
       finalizeHomeSectionResult(MANGA_CACHE_KEY, 'folders', raw.mangaFolders, skipWrite),
@@ -4500,9 +4515,11 @@ async function getLibrarySections(forceRefresh){
       finalizeHomeSectionResult(BATMAN_CACHE_KEY, 'folders', raw.batmanFolders, skipWrite),
       finalizeHomeSectionResult(SALVAT_CACHE_KEY, 'folders', raw.salvatFolders, skipWrite),
       finalizeHomeSectionResult(HULK_CACHE_KEY, 'folders', raw.hulkFolders, skipWrite),
-      finalizeHomeSectionResult(LANTERNA_CACHE_KEY, 'folders', raw.lanternaFolders, skipWrite)
+      finalizeHomeSectionResult(LANTERNA_CACHE_KEY, 'folders', raw.lanternaFolders, skipWrite),
+      finalizeHomeSectionResult(IRONMAN_CACHE_KEY, 'folders', raw.ironmanFolders, skipWrite),
+      finalizeHomeSectionResult(SUPERMAN_CACHE_KEY, 'folders', raw.supermanFolders, skipWrite)
     ]);
-    return { aranhaFolders, xmenFolders, mangaFolders, comics, allFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders,
+    return { aranhaFolders, xmenFolders, mangaFolders, comics, allFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders,
       hadError: errorState.hadError,
       errorMessage: errorState.lastError ? errorState.lastError.message : null };
   })();
@@ -4651,7 +4668,9 @@ const HOME_LOGOS = {
   xmen: 'https://i.postimg.cc/cJzP2j41/x-men-seeklogo.png',
   batman: 'https://i.postimg.cc/vBNHsqK1/IMG-20260914-002543.png',
   hulk: 'https://i.postimg.cc/SQTJZ8Lv/kindpng-1834284.png',
-  lanterna: 'https://i.postimg.cc/QNwj9qJK/Green-Lantern-Logo-Light-Green-Text-png.png'
+  lanterna: 'https://i.postimg.cc/QNwj9qJK/Green-Lantern-Logo-Light-Green-Text-png.png',
+  ironman: 'https://i.postimg.cc/8zjYnDTh/pngaaa-com-912238.png',
+  superman: 'https://i.postimg.cc/Qty9mpmS/superman-seeklogo.png'
 };
 
 // Se a imagem falhar por qualquer motivo (sem internet na primeiríssima
@@ -4668,7 +4687,7 @@ function wireHomeLogoFallback(section, id){
   }, {once:true});
 }
 
-function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, allComics, hadError, errorMessage}){
+function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, allComics, hadError, errorMessage}){
   const recommended = buildRecommended(allComics);
   releaseCoverObservers(wrap);
   wrap.innerHTML = '';
@@ -4749,6 +4768,28 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
   );
   if(secBatman){ wrap.appendChild(secBatman); anySection = true; wireHomeLogoFallback(secBatman, 'batman'); }
 
+  // "Coleção [logo do Homem de Ferro]": subpastas de dentro da pasta
+  // "Coleção - Homem de Ferro" — mesma lógica do Hulk.
+  const secIronman = buildHomeSection(
+    `Coleção <span class="section-logo-text hidden" data-logo-text="ironman">Homem de Ferro</span><img class="section-logo" data-logo="ironman" src="${HOME_LOGOS.ironman}" alt="Homem de Ferro" loading="eager" decoding="async">`,
+    ironmanFolders,
+    (it)=>{
+      return buildCarouselCard(it, { isFolder:true });
+    }
+  );
+  if(secIronman){ wrap.appendChild(secIronman); anySection = true; wireHomeLogoFallback(secIronman, 'ironman'); }
+
+  // "Coleção [logo do Superman]": subpastas de dentro da pasta "Superman"
+  // que fica dentro de "DC" — mesma lógica do Lanterna Verde.
+  const secSuperman = buildHomeSection(
+    `Coleção <span class="section-logo-text hidden" data-logo-text="superman">Superman</span><img class="section-logo" data-logo="superman" src="${HOME_LOGOS.superman}" alt="Superman" loading="eager" decoding="async">`,
+    supermanFolders,
+    (it)=>{
+      return buildCarouselCard(it, { isFolder:true });
+    }
+  );
+  if(secSuperman){ wrap.appendChild(secSuperman); anySection = true; wireHomeLogoFallback(secSuperman, 'superman'); }
+
   // "Coleção Graphic Novels Marvel (Salvat)": subpastas de dentro da
   // pasta "Graphic Novels Marvel" (ex.: "001 Homem de Ferro - O Demônio
   // na Garrafa", "004 Eu, Wolverine.") — mesma lógica das seções acima.
@@ -4799,9 +4840,9 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
 // pra comparar "o que já está na tela" com "o que acabou de chegar do
 // Drive" e decidir se vale a pena redesenhar tudo de novo (ver
 // lastPaintedHomeSignature abaixo).
-function homeSectionsSignature({aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, allComics}){
+function homeSectionsSignature({aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, allComics}){
   const ids = arr => (arr||[]).map(x=>x.id).join(',');
-  return [ids(aranhaFolders), ids(xmenFolders), ids(mangaFolders), ids(batmanFolders), ids(salvatFolders), ids(hulkFolders), ids(lanternaFolders), ids(allComics)].join('|');
+  return [ids(aranhaFolders), ids(xmenFolders), ids(mangaFolders), ids(batmanFolders), ids(salvatFolders), ids(hulkFolders), ids(lanternaFolders), ids(ironmanFolders), ids(supermanFolders), ids(allComics)].join('|');
 }
 let lastPaintedHomeSignature = null;
 
@@ -4820,7 +4861,7 @@ async function renderHomeSections(forceRefresh, onProgress){
   // o cache antes de buscar de novo, e por isso todas as seções sumiam da
   // tela até a busca nova terminar). A busca de verdade (item 2 abaixo)
   // troca pelos dados frescos assim que chegar, sem travar nada.
-  const [cachedAranha, cachedXMen, cachedManga, cachedComics, continueItemsFast, cachedBatman, cachedSalvat, cachedHulk, cachedLanterna] = await Promise.all([
+  const [cachedAranha, cachedXMen, cachedManga, cachedComics, continueItemsFast, cachedBatman, cachedSalvat, cachedHulk, cachedLanterna, cachedIronman, cachedSuperman] = await Promise.all([
     readHomeCache(ARANHA_CACHE_KEY, 'folders'),
     readHomeCache(XMEN_CACHE_KEY, 'folders'),
     readHomeCache(MANGA_CACHE_KEY, 'folders'),
@@ -4829,11 +4870,13 @@ async function renderHomeSections(forceRefresh, onProgress){
     readHomeCache(BATMAN_CACHE_KEY, 'folders'),
     readHomeCache(SALVAT_CACHE_KEY, 'folders'),
     readHomeCache(HULK_CACHE_KEY, 'folders'),
-    readHomeCache(LANTERNA_CACHE_KEY, 'folders')
+    readHomeCache(LANTERNA_CACHE_KEY, 'folders'),
+    readHomeCache(IRONMAN_CACHE_KEY, 'folders'),
+    readHomeCache(SUPERMAN_CACHE_KEY, 'folders')
   ]);
   if(isStale(myToken)) return;
 
-  if(cachedAranha || cachedXMen || cachedManga || cachedComics || cachedBatman || cachedSalvat || cachedHulk || cachedLanterna){
+  if(cachedAranha || cachedXMen || cachedManga || cachedComics || cachedBatman || cachedSalvat || cachedHulk || cachedLanterna || cachedIronman || cachedSuperman){
     wrap.classList.remove('hidden');
     const fastData = {
       continueItems: continueItemsFast,
@@ -4844,6 +4887,8 @@ async function renderHomeSections(forceRefresh, onProgress){
       salvatFolders: cachedSalvat ? cachedSalvat.folders : [],
       hulkFolders: cachedHulk ? cachedHulk.folders : [],
       lanternaFolders: cachedLanterna ? cachedLanterna.folders : [],
+      ironmanFolders: cachedIronman ? cachedIronman.folders : [],
+      supermanFolders: cachedSuperman ? cachedSuperman.folders : [],
       allComics: cachedComics ? cachedComics.comics : []
     };
     paintHomeSections(wrap, fastData);
@@ -4870,6 +4915,8 @@ async function renderHomeSections(forceRefresh, onProgress){
         salvatFolders: cachedSalvat ? cachedSalvat.folders : [],
         hulkFolders: cachedHulk ? cachedHulk.folders : [],
         lanternaFolders: cachedLanterna ? cachedLanterna.folders : [],
+        ironmanFolders: cachedIronman ? cachedIronman.folders : [],
+        supermanFolders: cachedSuperman ? cachedSuperman.folders : [],
         comics: cachedComics ? cachedComics.comics : [],
         hadError: true,
         errorMessage: e && e.message
@@ -4896,6 +4943,8 @@ async function renderHomeSections(forceRefresh, onProgress){
     salvatFolders: sections.salvatFolders,
     hulkFolders: sections.hulkFolders,
     lanternaFolders: sections.lanternaFolders,
+    ironmanFolders: sections.ironmanFolders,
+    supermanFolders: sections.supermanFolders,
     allComics: sections.comics,
     hadError: sections.hadError,
     errorMessage: sections.errorMessage
