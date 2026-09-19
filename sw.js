@@ -222,7 +222,7 @@
   pra escondê-lo. Pausa enquanto o painel de configurações do leitor está
   aberto.
 */
-const CACHE_VERSION = 'v36';
+const CACHE_VERSION = 'v38';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
@@ -239,13 +239,21 @@ const APP_SHELL = [
   'https://cdn.jsdelivr.net/npm/node-unrar-js@2.0.2/esm/index.esm.js',
   'https://cdn.jsdelivr.net/npm/node-unrar-js@2.0.2/esm/js/unrar.wasm',
   'https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700;800&display=swap',
-  // Logos das seções da Home — precisam ser EXATAMENTE as mesmas URLs de
-  // HOME_LOGOS no index.html.
-  'https://i.postimg.cc/T2BgjCPP/amazing-spiderman-seeklogo.png',
-  'https://i.postimg.cc/cJzP2j41/x-men-seeklogo.png',
-  'https://i.postimg.cc/vBNHsqK1/IMG-20260914-002543.png',
-  'https://i.postimg.cc/SQTJZ8Lv/kindpng-1834284.png',
-  'https://i.postimg.cc/QNwj9qJK/Green-Lantern-Logo-Light-Green-Text-png.png'
+  // Logos das seções da Home — desde a v37, vêm do proxy/R2 (mesmo cache
+  // compartilhado das capas), não mais direto do postimg.cc: precisam ser
+  // EXATAMENTE as mesmas URLs que logoSrc() monta no index.html (uma por
+  // id de HOME_LOGOS — se adicionar uma logo lá, adicione a URL
+  // equivalente aqui também, e suba a CACHE_VERSION).
+  'https://proxy1.planetahq01.workers.dev/?logo=aranha',
+  'https://proxy1.planetahq01.workers.dev/?logo=xmen',
+  'https://proxy1.planetahq01.workers.dev/?logo=batman',
+  'https://proxy1.planetahq01.workers.dev/?logo=hulk',
+  'https://proxy1.planetahq01.workers.dev/?logo=lanterna',
+  'https://proxy1.planetahq01.workers.dev/?logo=ironman',
+  'https://proxy1.planetahq01.workers.dev/?logo=superman',
+  'https://proxy1.planetahq01.workers.dev/?logo=dc',
+  'https://proxy1.planetahq01.workers.dev/?logo=mulhermaravilha',
+  'https://proxy1.planetahq01.workers.dev/?logo=doomsday'
 ];
 // URLs absolutas resolvidas uma única vez, pra comparar por igualdade exata
 // (nunca mais por sufixo/heurística) na hora de decidir o que é "casca".

@@ -96,6 +96,14 @@
 
   <div class="card">
     <div class="row">
+      <button id="btn-warm-logos" class="secondary">🏷️ Aquecer logos das seções</button>
+    </div>
+    <p class="config-box" style="margin-top:8px;">Salva no R2 as imagens de logo usadas nos títulos das seções da Home (Homem-Aranha, X-Men, Batman, Hulk, Lanterna Verde, Homem de Ferro, Superman, DC, Mulher Maravilha, Avengers DoomsDay) — são só 10 imagens pequenas, então isso é instantâneo. Sem apertar aqui, elas só ficam salvas depois que a <i>primeira</i> pessoa abrir o app e a página pedir cada uma.</p>
+    <div class="status-line" id="logo-status" style="margin-top:6px;"></div>
+  </div>
+
+  <div class="card">
+    <div class="row">
       <button id="btn-cleanup-non-home" class="secondary">🧹 Apagar cache de arquivo completo fora da Home</button>
     </div>
     <p class="config-box" style="margin-top:8px;">Apaga só o <b>arquivo inteiro</b> (<code>drive/...</code>) do R2 dos itens que NÃO estão nas seções da Home — inclusive cache de pastas que você já removeu/moveu da raiz do Drive (esse cache "órfão" não aparece em nenhuma varredura normal, então sem isso ficaria esquecido pra sempre). As capas (<code>cover/...</code>) de todo mundo continuam guardadas, intactas. Nada é apagado no Google Drive.</p>
@@ -236,7 +244,8 @@
   const HOME_CACHE_KEYS = [
     'planetahq_aranha_cache_v3','planetahq_xmen_cache_v1','planetahq_manga_cache_v1',
     'planetahq_batman_cache_v1','planetahq_salvat_cache_v1','planetahq_hulk_cache_v1','planetahq_lanterna_cache_v1',
-    'planetahq_ironman_cache_v1','planetahq_superman_cache_v1'
+    'planetahq_ironman_cache_v1','planetahq_superman_cache_v1',
+    'planetahq_universo_absoluto_cache_v1','planetahq_mulher_maravilha_cache_v1','planetahq_doomsday_cache_v1'
   ];
   async function readHomeCacheFolders(key){
     try{
@@ -889,6 +898,35 @@
   $('#btn-warm-home').onclick = ()=>startOrResume('home');
   $('#btn-warm-library-covers').onclick = ()=>startOrResume('library-covers');
   $('#btn-cleanup-non-home').onclick = ()=>startOrResume('cleanup-non-home');
+  $('#btn-warm-logos').onclick = async ()=>{
+    const btn = $('#btn-warm-logos');
+    const statusEl = $('#logo-status');
+    btn.disabled = true;
+    statusEl.textContent = 'Buscando lista de logos no worker...';
+    try{
+      const listRes = await fetch(`${CONFIG.proxyUrl}?logo_list=1`);
+      if(!listRes.ok) throw new Error('HTTP ' + listRes.status);
+      const {names} = await listRes.json();
+      let ok = 0, err = 0;
+      for(const name of names){
+        statusEl.textContent = `Aquecendo logo "${name}"... (${ok+err}/${names.length})`;
+        try{
+          const res = await fetch(`${CONFIG.proxyUrl}?logo=${encodeURIComponent(name)}`, {cache:'no-store'});
+          if(!res.ok) throw new Error('HTTP ' + res.status);
+          await res.arrayBuffer(); // força ler o corpo — é isso que faz o worker terminar de salvar no R2
+          ok++;
+        }catch(e){
+          err++;
+          logRow('err', `Logo "${name}" — ${e && e.message || e}`);
+        }
+      }
+      statusEl.textContent = `Concluído — ${ok} logo(s) confirmada(s) no R2${err ? `, ${err} erro(s) (ver log abaixo)` : ''}.`;
+    }catch(e){
+      statusEl.textContent = `Falhou ao listar/aquecer as logos: ${e && e.message || e}`;
+    }finally{
+      btn.disabled = false;
+    }
+  };
   $('#btn-stop').onclick = ()=>{
     cancelRequested = true;
     setStatus('Parando (terminando os arquivos em andamento)...');
