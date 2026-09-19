@@ -222,7 +222,7 @@
   pra escondê-lo. Pausa enquanto o painel de configurações do leitor está
   aberto.
 */
-const CACHE_VERSION = 'v35';
+const CACHE_VERSION = 'v36';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [

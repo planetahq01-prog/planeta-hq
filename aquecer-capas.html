@@ -1,0 +1,808 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Planeta HQ — Aquecedor de capas</title>
+<style>
+  :root{
+    --bg:#0b0b12; --panel:#15151f; --panel2:#1c1c29; --border:#2a2a3a;
+    --text:#f2f2f5; --muted:#9a9ab0; --accent:#ff4d5e; --ok:#3ddc84; --err:#ff6b6b; --warn:#ffcf5c;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0; background:var(--bg); color:var(--text);
+    font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Inter,Roboto,sans-serif;
+    padding:16px; padding-bottom:60px;
+  }
+  h1{font-size:19px; margin:0 0 4px;}
+  .sub{color:var(--muted); font-size:13px; margin:0 0 18px;}
+  .card{
+    background:var(--panel); border:1px solid var(--border); border-radius:14px;
+    padding:14px; margin-bottom:14px;
+  }
+  .row{display:flex; gap:10px; flex-wrap:wrap; align-items:center;}
+  button{
+    font:inherit; font-weight:700; border:none; border-radius:10px;
+    padding:11px 16px; cursor:pointer; color:#fff; background:var(--accent);
+  }
+  button.secondary{background:var(--panel2); color:var(--text); border:1px solid var(--border);}
+  button:disabled{opacity:.5; cursor:not-allowed;}
+  button.small{padding:7px 12px; font-size:13px; font-weight:600;}
+  label{font-size:13px; color:var(--muted);}
+  input[type=number]{
+    width:56px; background:var(--panel2); border:1px solid var(--border); color:var(--text);
+    border-radius:8px; padding:6px 8px; font:inherit;
+  }
+  .status-line{font-size:13px; color:var(--muted); margin-top:10px; min-height:18px;}
+  .current-file{font-size:13px; color:var(--text); margin-top:2px; min-height:18px; word-break:break-word;}
+  .progress-outer{height:8px; background:var(--panel2); border-radius:5px; overflow:hidden; margin-top:10px;}
+  .progress-inner{height:100%; width:0%; background:linear-gradient(90deg,var(--accent),#ff8a4d); transition:width .25s ease;}
+  .counters{display:flex; gap:14px; flex-wrap:wrap; font-size:13px; margin-top:10px;}
+  .counters b{font-size:15px;}
+  .banner{
+    background:#241a10; border:1px solid #6b4a1c; color:var(--warn);
+    border-radius:10px; padding:10px 12px; font-size:13px; margin-bottom:14px;
+  }
+  .log{
+    max-height:46vh; overflow-y:auto; background:#0e0e16; border:1px solid var(--border);
+    border-radius:10px; padding:8px; font-family:ui-monospace,Menlo,Consolas,monospace; font-size:12px;
+  }
+  .log-row{padding:3px 4px; border-radius:4px; white-space:pre-wrap; word-break:break-word;}
+  .log-ok{color:var(--ok);}
+  .log-skip{color:#7fb4ff;}
+  .log-err{color:var(--err);}
+  .log-info{color:var(--muted); font-style:italic;}
+  .footer-links{display:flex; gap:14px; margin-top:6px;}
+  .footer-links a, .footer-links button.link{
+    background:none; border:none; color:var(--muted); text-decoration:underline;
+    font-size:12px; padding:0; cursor:pointer;
+  }
+  .config-box{font-size:12px; color:var(--muted); margin-top:8px; line-height:1.5;}
+  .config-box code{color:var(--text); background:var(--panel2); padding:1px 5px; border-radius:5px;}
+  textarea#config-editor{
+    width:100%; min-height:70px; background:var(--panel2); border:1px solid var(--border);
+    color:var(--text); border-radius:8px; padding:8px; font-family:ui-monospace,monospace; font-size:12px; margin-top:8px;
+  }
+</style>
+</head>
+<body>
+
+  <h1>🔥 Planeta HQ — Aquecedor de capas</h1>
+  <p class="sub">Ferramenta separada do app de leitura, feita só pra preencher o cache compartilhado (R2) — não compete com a leitura por memória/CPU, e não fecha o app de ninguém.</p>
+
+  <div id="resume-banner" class="banner" style="display:none;"></div>
+
+  <div class="card">
+    <div class="row">
+      <button id="btn-warm-library">🔥 Aquecer biblioteca inteira</button>
+      <button id="btn-warm-home" class="secondary">🏠 Aquecer só a Home</button>
+    </div>
+    <div class="row" style="margin-top:12px;">
+      <label>Simultâneos: <input type="number" id="concurrency" value="3" min="1" max="8"></label>
+      <button id="btn-stop" class="secondary small" disabled>⏸ Parar</button>
+      <button id="btn-discard" class="secondary small">🗑️ Descartar sessão salva</button>
+      <button id="btn-download-log" class="secondary small">⬇️ Baixar log</button>
+    </div>
+    <div class="status-line" id="status-line">Pronto.</div>
+    <div class="current-file" id="current-file"></div>
+    <div class="progress-outer"><div class="progress-inner" id="progress-bar"></div></div>
+    <div class="counters" id="counters"></div>
+  </div>
+
+  <div class="card">
+    <div id="log" class="log"></div>
+  </div>
+
+  <div class="card">
+    <div class="config-box" id="config-box"></div>
+    <button id="btn-edit-config" class="secondary small" style="margin-top:8px;">⚙️ Usar outra configuração aqui</button>
+    <textarea id="config-editor" style="display:none;" placeholder='{"apiKey":"...","rootFolderId":"...","proxyUrl":"https://..."}'></textarea>
+    <div class="row" id="config-editor-actions" style="display:none; margin-top:8px;">
+      <button id="btn-save-config" class="small">Salvar</button>
+      <button id="btn-cancel-config" class="secondary small">Cancelar</button>
+    </div>
+  </div>
+
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+  <script>
+  /* =====================================================================
+     Este arquivo existe pra resolver 3 problemas do botão "Aquecer" que
+     vivia dentro do index.html principal:
+     1) Rodar durante minutos a fio DENTRO do app de leitura (competindo
+        por memória/CPU com toda a UI, carrosséis, observers etc.) fazia o
+        app fechar sozinho ou ficar "estupidamente lento" depois de um
+        tempo — sintoma clássico de pressão de memória em celular. Aqui é
+        uma página isolada, sem nada além do necessário pra esse trabalho.
+     2) O progresso só existia como texto de um botão — se a pessoa saísse
+        da tela, trocasse de app ou o app fechasse sozinho, o progresso
+        E a confirmação do que realmente deu certo iam junto. Aqui o
+        progresso é salvo (localStorage) a cada arquivo processado, com um
+        log permanente na tela — dá pra fechar e reabrir esta página que
+        ela retoma de onde parou, e o log mostra exatamente o que foi
+        confirmado no R2 e o que falhou (com o motivo).
+     3) Além da capa, agora cada arquivo também aciona o modo "warm=1" do
+        seu worker.js (guardar o ARQUIVO INTEIRO no R2, não só a capa) —
+        isso é praticamente de graça (o próprio Cloudflare Worker busca no
+        Drive e salva sozinho, sem passar bytes pelo celular de ninguém) e
+        faz qualquer geração de capa que precise ler o arquivo (range
+        request ou download completo) vir do R2 em vez de bater direto no
+        Drive — o que também deve aliviar bastante a lentidão/instabilidade
+        que aparecia depois de um tempo (o Drive tem limite de requisições
+        por período; o R2 não).
+     ===================================================================== */
+
+  function $(sel){ return document.querySelector(sel); }
+
+  /* ---------------------------------------------------------------------
+     Configuração — lê o MESMO localStorage que o index.html principal usa
+     (mesma origem = mesmo armazenamento), então normalmente nem precisa
+     configurar nada aqui: já usa a chave de API, a pasta raiz e o proxy
+     que você já configurou no app de leitura. Dá pra sobrescrever só
+     nesta página (botão "Usar outra configuração aqui") sem mexer no app.
+     --------------------------------------------------------------------- */
+  const CONFIG_KEY = 'planetahq_config';
+  const DEFAULT_CONFIG = {
+    apiKey: 'AIzaSyBUmhXMkyiimcQAMV3p9xIGjs-u2Zv8tdc',
+    rootFolderId: '11JGPcNE-t4R4G8NaefyATXW3cWeu2n8Y',
+    proxyUrl: 'https://proxy1.planetahq01.workers.dev/'
+  };
+  const LOCAL_OVERRIDE_KEY = 'planetahq_warmer_config_override_v1';
+  let CONFIG = DEFAULT_CONFIG;
+  (function loadConfig(){
+    try{
+      const override = JSON.parse(localStorage.getItem(LOCAL_OVERRIDE_KEY));
+      if(override && override.apiKey && override.rootFolderId){ CONFIG = override; return; }
+    }catch(e){}
+    try{
+      const saved = JSON.parse(localStorage.getItem(CONFIG_KEY));
+      if(saved && saved.apiKey && saved.rootFolderId) CONFIG = saved;
+    }catch(e){}
+  })();
+  function renderConfigBox(){
+    $('#config-box').innerHTML = `Conectado à pasta <code>${escapeHtml(CONFIG.rootFolderId)}</code>` +
+      (CONFIG.proxyUrl ? ` via proxy <code>${escapeHtml(CONFIG.proxyUrl)}</code>` : ' (sem proxy configurado)') +
+      `<br>${localStorage.getItem(LOCAL_OVERRIDE_KEY) ? 'Usando uma configuração própria desta página.' : 'Usando a mesma configuração do app principal.'}`;
+  }
+  function escapeHtml(s){ return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+  renderConfigBox();
+  $('#btn-edit-config').onclick = ()=>{
+    $('#config-editor').value = JSON.stringify(CONFIG, null, 2);
+    $('#config-editor').style.display = 'block';
+    $('#config-editor-actions').style.display = 'flex';
+  };
+  $('#btn-cancel-config').onclick = ()=>{
+    $('#config-editor').style.display = 'none';
+    $('#config-editor-actions').style.display = 'none';
+  };
+  $('#btn-save-config').onclick = ()=>{
+    try{
+      const parsed = JSON.parse($('#config-editor').value);
+      if(!parsed.apiKey || !parsed.rootFolderId) throw new Error('Faltou apiKey ou rootFolderId.');
+      localStorage.setItem(LOCAL_OVERRIDE_KEY, JSON.stringify(parsed));
+      CONFIG = parsed;
+      renderConfigBox();
+      $('#config-editor').style.display = 'none';
+      $('#config-editor-actions').style.display = 'none';
+    }catch(e){ alert('JSON inválido: ' + e.message); }
+  };
+
+  /* ---------------------------------------------------------------------
+     IndexedDB — só pra LER o cache das seções da Home que o app principal
+     já monta (mesmo banco, mesma origem). Nunca escreve nada aqui.
+     --------------------------------------------------------------------- */
+  const DB_NAME = 'planetahq_db';
+  const DB_VERSION = 6;
+  let dbPromise = null;
+  function openDB(){
+    if(dbPromise) return dbPromise;
+    dbPromise = new Promise((resolve, reject)=>{
+      const req = indexedDB.open(DB_NAME, DB_VERSION);
+      req.onupgradeneeded = ()=>{
+        const db = req.result;
+        if(!db.objectStoreNames.contains('downloads')) db.createObjectStore('downloads', {keyPath:'id'});
+        if(!db.objectStoreNames.contains('covers')) db.createObjectStore('covers', {keyPath:'id'});
+        if(!db.objectStoreNames.contains('folderCovers')) db.createObjectStore('folderCovers', {keyPath:'id'});
+        if(!db.objectStoreNames.contains('progress')) db.createObjectStore('progress', {keyPath:'id'});
+        if(!db.objectStoreNames.contains('favorites')) db.createObjectStore('favorites', {keyPath:'id'});
+        if(!db.objectStoreNames.contains('homeCache')) db.createObjectStore('homeCache', {keyPath:'id'});
+      };
+      req.onsuccess = ()=>resolve(req.result);
+      req.onerror = ()=>reject(req.error);
+      req.onblocked = ()=>{};
+    });
+    return dbPromise;
+  }
+  async function idbGet(store, key){
+    const db = await openDB();
+    return new Promise((resolve,reject)=>{
+      const tx = db.transaction(store,'readonly').objectStore(store).get(key);
+      tx.onsuccess = ()=>resolve(tx.result || null);
+      tx.onerror = ()=>reject(tx.error);
+    });
+  }
+  const HOME_CACHE_KEYS = [
+    'planetahq_aranha_cache_v3','planetahq_xmen_cache_v1','planetahq_manga_cache_v1',
+    'planetahq_batman_cache_v1','planetahq_salvat_cache_v1','planetahq_hulk_cache_v1','planetahq_lanterna_cache_v1'
+  ];
+  async function readHomeCacheFolders(key){
+    try{
+      const rec = await idbGet('homeCache', key);
+      if(rec && Array.isArray(rec.folders)) return rec.folders;
+    }catch(e){}
+    return null;
+  }
+
+  /* ---------------------------------------------------------------------
+     Drive — listagem de pastas, com o mesmo backoff/timeout do app
+     principal (essencial: sem isso, uma única requisição travada consumia
+     uma "vaga" da fila pra sempre — foi uma causa real de capas que nunca
+     terminavam de carregar).
+     --------------------------------------------------------------------- */
+  function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
+  function withStallTimeout(promise, ms, message){
+    let timer;
+    const timeout = new Promise((_, reject)=>{ timer = setTimeout(()=>reject(new Error(message||'Tempo esgotado.')), ms); });
+    return Promise.race([promise, timeout]).finally(()=>clearTimeout(timer));
+  }
+  const DRIVE_MAX_CONCURRENT = 8;
+  let driveActive = 0;
+  const driveWaitQueue = [];
+  function driveAcquireSlot(){
+    if(driveActive < DRIVE_MAX_CONCURRENT){ driveActive++; return Promise.resolve(); }
+    return new Promise(resolve=>driveWaitQueue.push(resolve));
+  }
+  function driveReleaseSlot(){
+    const next = driveWaitQueue.shift();
+    if(next) next(); else driveActive--;
+  }
+  async function driveFetchJson(url){
+    const MAX_ATTEMPTS = 6;
+    for(let attempt=1; attempt<=MAX_ATTEMPTS; attempt++){
+      await driveAcquireSlot();
+      let res, errBody, networkErr;
+      try{
+        res = await withStallTimeout(fetch(url, {cache:'no-store'}), 15000, 'Tempo esgotado ao contatar o Google Drive.');
+        if(res.ok) return await res.json();
+        errBody = await res.text().catch(()=> '');
+      }catch(e){ networkErr = e; }
+      finally{ driveReleaseSlot(); }
+      if(networkErr){
+        if(attempt < MAX_ATTEMPTS){ await sleep(Math.min(8000, 400*(2**(attempt-1))) + Math.random()*300); continue; }
+        throw new Error('Falha de rede ao contatar o Google Drive.');
+      }
+      const isRateLimit = res.status === 429 || (res.status === 403 && /rateLimitExceeded|userRateLimitExceeded|quotaExceeded/i.test(errBody));
+      if(isRateLimit && attempt < MAX_ATTEMPTS){ await sleep(Math.min(8000, 400*(2**(attempt-1))) + Math.random()*300); continue; }
+      throw new Error(`Drive respondeu ${res.status}. ${String(errBody).slice(0,200)}`);
+    }
+  }
+  function resolveShortcuts(rawFiles){
+    return (rawFiles||[]).map(f=>{
+      if(f.mimeType === 'application/vnd.google-apps.shortcut' && f.shortcutDetails){
+        return {id:f.shortcutDetails.targetId, name:f.name, mimeType:f.shortcutDetails.targetMimeType, size:f.size};
+      }
+      return f;
+    });
+  }
+  function guessExt(f){
+    const nameMatch = f.name.trim().match(/\.(pdf|cbz|cbr)$/i);
+    if(nameMatch) return nameMatch[1].toLowerCase();
+    const mt = (f.mimeType||'').toLowerCase();
+    if(mt === 'application/pdf') return 'pdf';
+    if(['application/zip','application/x-cbz','application/vnd.comicbook+zip','application/x-zip-compressed'].includes(mt)) return 'cbz';
+    if(['application/x-rar-compressed','application/vnd.rar','application/x-cbr','application/vnd.comicbook-rar','application/x-rar'].includes(mt)) return 'cbr';
+    return null;
+  }
+  const folderMemCache = {};
+  async function listFolderLite(folderId){
+    if(folderMemCache[folderId]) return folderMemCache[folderId];
+    let files = [], pageToken = null;
+    do{
+      const params = new URLSearchParams({
+        q: `'${folderId}' in parents and trashed = false`,
+        fields: 'nextPageToken, files(id,name,mimeType,size,modifiedTime,shortcutDetails)',
+        pageSize: '1000', supportsAllDrives:'true', includeItemsFromAllDrives:'true', key: CONFIG.apiKey
+      });
+      if(pageToken) params.set('pageToken', pageToken);
+      const data = await driveFetchJson(`https://www.googleapis.com/drive/v3/files?${params.toString()}`);
+      files = files.concat(resolveShortcuts(data.files));
+      pageToken = data.nextPageToken || null;
+    }while(pageToken);
+    const folders = files.filter(f=>f.mimeType === 'application/vnd.google-apps.folder');
+    const comics = files.map(f=>({...f, _ext: guessExt(f)})).filter(f=>f._ext);
+    const result = {folders, files: comics};
+    folderMemCache[folderId] = result;
+    return result;
+  }
+  function runLimited(items, limit, worker){
+    let idx = 0;
+    const n = Math.min(limit, items.length) || 1;
+    return Promise.all(Array.from({length:n}, async ()=>{
+      while(idx < items.length){ await worker(items[idx++]); }
+    }));
+  }
+  async function crawlAllComics(rootId, onProgress){
+    const seen = new Set([rootId]);
+    const comics = [];
+    async function walk(folderId){
+      if(cancelRequested) return;
+      let listing;
+      try{ listing = await listFolderLite(folderId); }catch(e){ return; }
+      comics.push(...listing.files);
+      if(onProgress) onProgress(comics.length);
+      const toVisit = listing.folders.filter(sub=>!seen.has(sub.id));
+      toVisit.forEach(sub=>seen.add(sub.id));
+      await runLimited(toVisit, 6, sub=>walk(sub.id));
+    }
+    await walk(rootId);
+    return comics;
+  }
+  async function collectHomeSectionComics(onInfo){
+    const lists = await Promise.all(HOME_CACHE_KEYS.map(readHomeCacheFolders));
+    let sectionFolders = lists.filter(Boolean).flat();
+    if(sectionFolders.length === 0){
+      onInfo && onInfo('Cache da Home não encontrado neste aparelho (abra o app principal e entre na Home pelo menos uma vez) — varrendo a biblioteca inteira como alternativa.');
+      return await crawlAllComics(CONFIG.rootFolderId);
+    }
+    const seen = new Set();
+    const allFiles = [];
+    for(const folder of sectionFolders){
+      if(cancelRequested) break;
+      let listing;
+      try{ listing = await listFolderLite(folder.id); }catch(e){ continue; }
+      for(const f of listing.files){
+        if(seen.has(f.id)) continue;
+        seen.add(f.id);
+        allFiles.push(f);
+      }
+    }
+    return allFiles;
+  }
+
+  /* ---------------------------------------------------------------------
+     Drive — download completo (só usado como último recurso, quando a
+     extração parcial por range falha).
+     --------------------------------------------------------------------- */
+  function driveMediaUrl(fileId){
+    return CONFIG.proxyUrl
+      ? `${CONFIG.proxyUrl}?id=${encodeURIComponent(fileId)}&key=${encodeURIComponent(CONFIG.apiKey)}`
+      : `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&key=${CONFIG.apiKey}`;
+  }
+  async function driveFetchBlob(fileId){
+    const url = driveMediaUrl(fileId);
+    const res = await withStallTimeout(fetch(url, {cache:'no-store'}), 30000, 'Tempo esgotado ao baixar o arquivo.');
+    if(!res.ok) throw new Error(`Não foi possível baixar o arquivo (${res.status}).`);
+    const reader = res.body.getReader();
+    const chunks = [];
+    while(true){
+      const {done, value} = await withStallTimeout(reader.read(), 20000, 'A conexão travou no meio do download.');
+      if(done) break;
+      chunks.push(value);
+    }
+    return new Blob(chunks);
+  }
+
+  /* ---------------------------------------------------------------------
+     Geração de capa — mesma lógica do app principal (range request
+     primeiro, download completo só se precisar), mas simplificada pra
+     extrair só a 1ª página, já que aqui nunca se lê a HQ inteira.
+     --------------------------------------------------------------------- */
+  function naturalSort(a,b){ return a.localeCompare(b, 'pt-BR', {numeric:true, sensitivity:'base'}); }
+  const PDFJS_WORKER_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+  const PDFJS_CMAPS_URL = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/';
+
+  async function toDataUrl(url, maxWidth=400, quality=0.75){
+    let fetchedBlobUrl = null;
+    try{
+      let srcUrl = url;
+      if(!url.startsWith('data:') && !url.startsWith('blob:')){
+        const res = await fetch(url);
+        const blob = await res.blob();
+        srcUrl = fetchedBlobUrl = URL.createObjectURL(blob);
+      }
+      const img = await new Promise((resolve, reject)=>{
+        const im = new Image();
+        im.onload = ()=>resolve(im);
+        im.onerror = ()=>reject(new Error('Falha ao decodificar imagem.'));
+        im.src = srcUrl;
+      });
+      const nw = img.naturalWidth || maxWidth, nh = img.naturalHeight || maxWidth;
+      const scale = Math.min(1, maxWidth/nw);
+      const w = Math.max(1, Math.round(nw*scale)), h = Math.max(1, Math.round(nh*scale));
+      const canvas = document.createElement('canvas');
+      canvas.width = w; canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      const out = canvas.toDataURL('image/jpeg', quality);
+      canvas.width = 0; canvas.height = 0;
+      return out;
+    } finally {
+      if(fetchedBlobUrl){ try{ URL.revokeObjectURL(fetchedBlobUrl); }catch(e){} }
+    }
+  }
+
+  async function renderPdfCoverThumb(url){
+    pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
+    const pdf = await pdfjsLib.getDocument({
+      url, rangeChunkSize: 1<<18, disableAutoFetch:true, disableStream:false, disableRange:false,
+      cMapUrl: PDFJS_CMAPS_URL, cMapPacked:true
+    }).promise;
+    try{
+      const page = await pdf.getPage(1);
+      const base = page.getViewport({scale:1});
+      const viewport = page.getViewport({scale: 400/base.width});
+      const canvas = document.createElement('canvas');
+      canvas.width = viewport.width; canvas.height = viewport.height;
+      await page.render({canvasContext: canvas.getContext('2d'), viewport}).promise;
+      const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
+      canvas.width = 0; canvas.height = 0;
+      return dataUrl;
+    } finally { pdf.destroy(); }
+  }
+
+  async function fetchRange(url, start, end){
+    const headers = { Range: start < 0 ? `bytes=${start}` : `bytes=${start}-${end}` };
+    const res = await fetch(url, {headers, cache:'no-store'});
+    if(!res.ok && res.status !== 206) throw new Error('range fetch falhou: ' + res.status);
+    return new Uint8Array(await res.arrayBuffer());
+  }
+  function findEOCD(buf){
+    for(let i=buf.length-22; i>=0; i--){
+      if(buf[i]===0x50 && buf[i+1]===0x4b && buf[i+2]===0x05 && buf[i+3]===0x06) return i;
+    }
+    return -1;
+  }
+  async function extractCbzCoverPartial(f){
+    const url = driveMediaUrl(f.id);
+    const size = Number(f.size) || 0;
+    if(!size) return null;
+    const tailSize = Math.min(size, 65557);
+    const tail = await fetchRange(url, -tailSize);
+    const eocdOffset = findEOCD(tail);
+    if(eocdOffset === -1) return null;
+    const eocd = new DataView(tail.buffer, tail.byteOffset+eocdOffset, 22);
+    const cdSize = eocd.getUint32(12, true), cdOffset = eocd.getUint32(16, true);
+    if(cdOffset === 0xFFFFFFFF || cdSize === 0xFFFFFFFF) return null;
+    const cd = await fetchRange(url, cdOffset, cdOffset+cdSize-1);
+    const cdView = new DataView(cd.buffer, cd.byteOffset, cd.byteLength);
+    const decoder = new TextDecoder();
+    const entries = [];
+    let p = 0;
+    while(p+46 <= cd.length && cdView.getUint32(p, true) === 0x02014b50){
+      const method = cdView.getUint16(p+10, true);
+      const compSize = cdView.getUint32(p+20, true);
+      const nameLen = cdView.getUint16(p+28, true);
+      const extraLen = cdView.getUint16(p+30, true);
+      const commentLen = cdView.getUint16(p+32, true);
+      const localOffset = cdView.getUint32(p+42, true);
+      const name = decoder.decode(cd.subarray(p+46, p+46+nameLen));
+      if(/\.(jpe?g|png|webp|gif)$/i.test(name)) entries.push({name, method, compSize, localOffset});
+      p += 46 + nameLen + extraLen + commentLen;
+    }
+    if(entries.length === 0) return null;
+    entries.sort((a,b)=>naturalSort(a.name,b.name));
+    const first = entries[0];
+    if(first.localOffset === 0xFFFFFFFF) return null;
+    const margin = 512;
+    const chunkEnd = Math.min(size-1, first.localOffset+30+margin+first.compSize);
+    const chunk = await fetchRange(url, first.localOffset, chunkEnd);
+    const lv = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
+    if(lv.getUint32(0, true) !== 0x04034b50) return null;
+    const nameLen2 = lv.getUint16(26, true), extraLen2 = lv.getUint16(28, true);
+    const dataStart = 30+nameLen2+extraLen2;
+    const compData = chunk.subarray(dataStart, dataStart+first.compSize);
+    let imgBytes;
+    if(first.method === 0) imgBytes = compData;
+    else if(first.method === 8){
+      const stream = new Blob([compData]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+      imgBytes = new Uint8Array(await new Response(stream).arrayBuffer());
+    } else return null;
+    const mime = /\.png$/i.test(first.name)?'image/png':/\.webp$/i.test(first.name)?'image/webp':/\.gif$/i.test(first.name)?'image/gif':'image/jpeg';
+    const blobUrl = URL.createObjectURL(new Blob([imgBytes], {type:mime}));
+    try{ return await toDataUrl(blobUrl); } finally { URL.revokeObjectURL(blobUrl); }
+  }
+
+  let unrarAssetsPromise = null;
+  function ensureRarLib(){
+    if(unrarAssetsPromise) return unrarAssetsPromise;
+    const sources = [
+      { mod:'https://cdn.jsdelivr.net/npm/node-unrar-js@2.0.2/esm/index.esm.js', wasm:'https://cdn.jsdelivr.net/npm/node-unrar-js@2.0.2/esm/js/unrar.wasm' },
+      { mod:'https://unpkg.com/node-unrar-js@2.0.2/esm/index.esm.js', wasm:'https://unpkg.com/node-unrar-js@2.0.2/esm/js/unrar.wasm' }
+    ];
+    unrarAssetsPromise = (async()=>{
+      let lastErr;
+      for(const src of sources){
+        try{
+          const [mod, wasmBinary] = await Promise.all([
+            import(/* @vite-ignore */ src.mod),
+            fetch(src.wasm).then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.arrayBuffer(); })
+          ]);
+          const createExtractorFromData = mod.createExtractorFromData || (mod.default && mod.default.createExtractorFromData);
+          if(!createExtractorFromData) throw new Error('módulo carregado sem createExtractorFromData');
+          return { createExtractorFromData, wasmBinary };
+        }catch(e){ lastErr = e; }
+      }
+      throw new Error('Não foi possível carregar o suporte a CBR. ' + (lastErr && lastErr.message || ''));
+    })();
+    return unrarAssetsPromise;
+  }
+
+  async function getCoverFromFullBlob(f, blob, ext){
+    if(ext === 'cbz'){
+      const zip = await JSZip.loadAsync(blob);
+      const names = Object.keys(zip.files).filter(n=>!zip.files[n].dir && /\.(jpe?g|png|webp|gif)$/i.test(n)).sort(naturalSort);
+      if(!names.length) throw new Error('Nenhuma imagem encontrada dentro do CBZ.');
+      const imgBlob = await zip.files[names[0]].async('blob');
+      const url = URL.createObjectURL(imgBlob);
+      try{ return await toDataUrl(url); } finally { URL.revokeObjectURL(url); }
+    }
+    if(ext === 'cbr'){
+      const { createExtractorFromData, wasmBinary } = await ensureRarLib();
+      const data = await blob.arrayBuffer();
+      const extractor = await createExtractorFromData({ data, wasmBinary });
+      const list = extractor.getFileList();
+      const names = [...list.fileHeaders].filter(h=>!h.flags.directory && /\.(jpe?g|png|webp|gif)$/i.test(h.name)).map(h=>h.name).sort(naturalSort);
+      if(!names.length) throw new Error('Nenhuma imagem encontrada dentro do CBR.');
+      const extracted = extractor.extract({files:[names[0]]});
+      const first = [...extracted.files][0];
+      if(!first || !first.extraction) throw new Error('Falha ao extrair página do CBR.');
+      const mime = /\.png$/i.test(names[0])?'image/png':/\.webp$/i.test(names[0])?'image/webp':/\.gif$/i.test(names[0])?'image/gif':'image/jpeg';
+      const url = URL.createObjectURL(new Blob([first.extraction], {type:mime}));
+      try{ return await toDataUrl(url); } finally { URL.revokeObjectURL(url); }
+    }
+    if(ext === 'pdf'){
+      pdfjsLib.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_URL;
+      const pdf = await pdfjsLib.getDocument({data: await blob.arrayBuffer()}).promise;
+      try{
+        const page = await pdf.getPage(1);
+        const base = page.getViewport({scale:1});
+        const viewport = page.getViewport({scale: 400/base.width});
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width; canvas.height = viewport.height;
+        await page.render({canvasContext: canvas.getContext('2d'), viewport}).promise;
+        const dataUrl = canvas.toDataURL('image/jpeg', 0.75);
+        canvas.width = 0; canvas.height = 0;
+        return dataUrl;
+      } finally { pdf.destroy(); }
+    }
+    throw new Error('Formato não suportado: ' + ext);
+  }
+
+  async function generateCoverDataUrl(f){
+    const ext = f._ext || guessExt(f);
+    let dataUrl = null;
+    try{
+      if(ext === 'pdf') dataUrl = await renderPdfCoverThumb(driveMediaUrl(f.id));
+      else if(ext === 'cbz') dataUrl = await extractCbzCoverPartial(f);
+    }catch(e){ /* cai pro download completo abaixo */ }
+    if(!dataUrl){
+      const blob = await driveFetchBlob(f.id);
+      dataUrl = await getCoverFromFullBlob(f, blob, ext);
+    }
+    return dataUrl;
+  }
+
+  /* ---------------------------------------------------------------------
+     R2 (via worker.js) — checar, salvar e CONFIRMAR de verdade.
+     --------------------------------------------------------------------- */
+  async function coverCheck(fileId){
+    if(!CONFIG.proxyUrl) return false;
+    try{
+      const res = await fetch(`${CONFIG.proxyUrl}?cover_check=1&id=${encodeURIComponent(fileId)}`);
+      const data = await res.json();
+      return !!(data && data.cached);
+    }catch(e){ return false; }
+  }
+  async function coverPut(fileId, dataUrl){
+    const blob = await (await fetch(dataUrl)).blob();
+    const res = await fetch(`${CONFIG.proxyUrl}?cover_put=1&id=${encodeURIComponent(fileId)}&key=${encodeURIComponent(CONFIG.apiKey)}`, {
+      method:'PUT', headers:{'Content-Type': blob.type||'image/jpeg'}, body: blob
+    });
+    if(!res.ok) throw new Error('Upload pro R2 falhou (HTTP ' + res.status + ').');
+  }
+  // Aciona o "warm=1" do worker: guarda o ARQUIVO INTEIRO no R2, do lado
+  // do servidor (o Cloudflare Worker busca no Drive sozinho — nenhum byte
+  // passa pelo aparelho de quem está rodando este aquecedor). Isso é o
+  // que deve resolver a lentidão/instabilidade que aparecia depois de um
+  // tempo: uma vez que o arquivo está no R2, a extração de capa (range
+  // request ou download completo) passa a vir do R2 em vez de bater
+  // direto no Drive — e o Drive tem um limite de requisições por período
+  // bem mais apertado que o R2.
+  async function warmFullFile(fileId){
+    if(!CONFIG.proxyUrl) return;
+    try{
+      await fetch(`${CONFIG.proxyUrl}?warm=1&id=${encodeURIComponent(fileId)}&key=${encodeURIComponent(CONFIG.apiKey)}`);
+    }catch(e){ /* não é crítico — a extração de capa ainda funciona direto do Drive */ }
+  }
+
+  async function processFile(f){
+    await warmFullFile(f.id);
+    const already = await coverCheck(f.id);
+    if(already) return 'skip';
+    const dataUrl = await generateCoverDataUrl(f);
+    if(!dataUrl) throw new Error('Não foi possível gerar a capa (nenhuma imagem encontrada dentro do arquivo).');
+    await coverPut(f.id, dataUrl);
+    const confirmed = await coverCheck(f.id);
+    if(!confirmed) throw new Error('Upload feito, mas a checagem posterior não confirmou o arquivo no R2.');
+    return 'ok';
+  }
+
+  /* ---------------------------------------------------------------------
+     Estado persistente — sobrevive a fechar a aba/o app/reiniciar o
+     celular. Gravado em lote (não a cada arquivo) pra não pesar.
+     --------------------------------------------------------------------- */
+  const STATE_KEY = 'planetahq_warmer_state_v1';
+  let warmState = null;
+  let stateDirty = false;
+  function loadSavedState(){ try{ return JSON.parse(localStorage.getItem(STATE_KEY)); }catch(e){ return null; } }
+  function markDirty(){ stateDirty = true; }
+  function flushState(){
+    if(!stateDirty || !warmState) return;
+    try{ localStorage.setItem(STATE_KEY, JSON.stringify(warmState)); }catch(e){ /* localStorage cheio — segue sem persistir */ }
+    stateDirty = false;
+  }
+  setInterval(flushState, 1200);
+  window.addEventListener('beforeunload', flushState);
+  document.addEventListener('visibilitychange', ()=>{ if(document.visibilityState === 'hidden') flushState(); });
+
+  /* ---------------------------------------------------------------------
+     UI
+     --------------------------------------------------------------------- */
+  function setStatus(text){ $('#status-line').textContent = text; }
+  function setCurrent(text){ $('#current-file').textContent = text || ''; }
+  function logRow(status, text){
+    const row = document.createElement('div');
+    const icons = {ok:'🔥', skip:'✅', err:'❌', info:'ℹ️'};
+    row.className = 'log-row log-' + status;
+    row.textContent = `${icons[status]||'•'} ${text}`;
+    const logEl = $('#log');
+    logEl.prepend(row);
+    while(logEl.children.length > 500) logEl.removeChild(logEl.lastChild);
+  }
+  function renderCounters(){
+    if(!warmState){ $('#counters').textContent = ''; $('#progress-bar').style.width = '0%'; return; }
+    const total = warmState.files.length;
+    const values = Object.values(warmState.results);
+    const ok = values.filter(v=>v==='ok').length;
+    const skip = values.filter(v=>v==='skip').length;
+    const err = values.filter(v=>v==='err').length;
+    const done = values.length;
+    $('#counters').innerHTML = `<span><b>${done}</b>/${total} processados</span><span>🔥 <b>${ok}</b> geradas</span><span>✅ <b>${skip}</b> já em cache</span><span>❌ <b>${err}</b> erros</span>`;
+    $('#progress-bar').style.width = total ? `${Math.round(done/total*100)}%` : '0%';
+  }
+
+  function checkResumeBanner(){
+    const saved = loadSavedState();
+    const banner = $('#resume-banner');
+    if(saved && saved.files && saved.files.length){
+      const done = Object.keys(saved.results||{}).length;
+      if(done < saved.files.length){
+        banner.style.display = 'block';
+        banner.textContent = `Encontrada uma sessão de "${saved.mode === 'library' ? 'biblioteca inteira' : 'só a Home'}" não concluída (${done}/${saved.files.length}). Clique no mesmo botão de antes pra continuar de onde parou.`;
+        return;
+      }
+    }
+    banner.style.display = 'none';
+  }
+  checkResumeBanner();
+
+  let cancelRequested = false;
+  let running = false;
+  function setControlsRunning(isRunning){
+    $('#btn-warm-library').disabled = isRunning;
+    $('#btn-warm-home').disabled = isRunning;
+    $('#btn-stop').disabled = !isRunning;
+  }
+
+  async function startOrResume(mode){
+    if(running) return;
+    const saved = loadSavedState();
+    let restart = true;
+    if(saved && saved.mode === mode && saved.files && saved.files.length){
+      const done = Object.keys(saved.results||{}).length;
+      if(done < saved.files.length){
+        const cont = confirm(`Encontrei uma sessão anterior deste modo (${done}/${saved.files.length} processados).\n\nOK = continuar de onde parou.\nCancelar = começar do zero (lista tudo de novo).`);
+        if(!cont && !confirm('Tem certeza? Isso vai listar tudo de novo do zero (o que já foi confirmado no R2 continua lá, só não conta mais como "feito" aqui).')) return;
+        restart = !cont;
+      } else {
+        if(!confirm(`A última sessão deste modo já foi concluída (${saved.files.length}/${saved.files.length}). Rodar de novo do zero?`)) return;
+      }
+    } else {
+      const msg = mode === 'library'
+        ? 'Isso vai passar pela biblioteca inteira gerando (quando necessário) e salvando as capas no cache compartilhado (R2), além de aquecer o cache completo de cada arquivo. Pode demorar bastante — mas dá pra fechar esta página e continuar depois de onde parou. Continuar?'
+        : 'Isso vai gerar/checar as capas só das HQs que aparecem nas seções da Home (Aranha, X-Men, Mangás, Batman, Salvat, Hulk, Lanterna Verde). Continuar?';
+      if(!confirm(msg)) return;
+    }
+    await runWarmer(mode, restart);
+  }
+
+  async function runWarmer(mode, restart){
+    running = true;
+    cancelRequested = false;
+    setControlsRunning(true);
+    $('#resume-banner').style.display = 'none';
+
+    if(!restart){
+      warmState = loadSavedState();
+    } else {
+      setStatus('Listando arquivos...');
+      let files;
+      if(mode === 'library'){
+        files = await crawlAllComics(CONFIG.rootFolderId, n=>setStatus(`Listando arquivos... (${n} encontrados até agora)`));
+      } else {
+        files = await collectHomeSectionComics(msg=>logRow('info', msg));
+      }
+      warmState = {mode, files, results:{}, startedAt: Date.now()};
+      markDirty(); flushState();
+      logRow('info', `Encontrados ${files.length} arquivo(s) pra processar (modo: ${mode === 'library' ? 'biblioteca inteira' : 'Home'}).`);
+    }
+
+    renderCounters();
+    const pending = warmState.files.filter(f=>!warmState.results[f.id]);
+    let idx = 0;
+    const concurrency = Math.max(1, Math.min(8, Number($('#concurrency').value) || 3));
+
+    let wakeLock = null;
+    try{ if(navigator.wakeLock) wakeLock = await navigator.wakeLock.request('screen'); }catch(e){}
+
+    async function worker(){
+      while(idx < pending.length){
+        if(cancelRequested) return;
+        const f = pending[idx++];
+        setCurrent(`Processando: ${f.name}`);
+        try{
+          const status = await processFile(f);
+          warmState.results[f.id] = status;
+          logRow(status, f.name);
+        }catch(e){
+          warmState.results[f.id] = 'err';
+          logRow('err', `${f.name} — ${e && e.message || e}`);
+        }
+        markDirty();
+        renderCounters();
+        setStatus(`Rodando... (${concurrency} simultâneo(s))`);
+      }
+    }
+    setStatus(`Rodando... (${concurrency} simultâneo(s))`);
+    await Promise.all(Array.from({length: Math.min(concurrency, pending.length || 1)}, worker));
+
+    flushState();
+    if(wakeLock){ try{ await wakeLock.release(); }catch(e){} }
+    running = false;
+    setControlsRunning(false);
+    setCurrent('');
+    if(cancelRequested){
+      setStatus('⏸ Parado. Clique no mesmo botão pra continuar de onde parou.');
+    } else {
+      setStatus('✅ Concluído!');
+      logRow('info', 'Concluído.');
+    }
+    checkResumeBanner();
+  }
+
+  $('#btn-warm-library').onclick = ()=>startOrResume('library');
+  $('#btn-warm-home').onclick = ()=>startOrResume('home');
+  $('#btn-stop').onclick = ()=>{
+    cancelRequested = true;
+    setStatus('Parando (terminando os arquivos em andamento)...');
+  };
+  $('#btn-discard').onclick = ()=>{
+    if(!confirm('Apagar a sessão salva (progresso de "Aquecer")? Isso não desfaz nada que já foi confirmado no R2, só esquece o ponto onde parou.')) return;
+    localStorage.removeItem(STATE_KEY);
+    warmState = null;
+    renderCounters();
+    checkResumeBanner();
+    setStatus('Sessão salva descartada.');
+  };
+  $('#btn-download-log').onclick = ()=>{
+    const rows = [...$('#log').children].reverse().map(r=>r.textContent);
+    const blob = new Blob([rows.join('\n')], {type:'text/plain'});
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `planetahq-aquecedor-log-${new Date().toISOString().slice(0,19).replace(/[:T]/g,'-')}.txt`;
+    a.click();
+    setTimeout(()=>URL.revokeObjectURL(a.href), 1000);
+  };
+  </script>
+</body>
+</html>
