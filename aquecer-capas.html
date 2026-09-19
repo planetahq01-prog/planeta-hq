@@ -78,6 +78,10 @@
       <button id="btn-warm-library">🔥 Aquecer biblioteca inteira</button>
       <button id="btn-warm-home" class="secondary">🏠 Aquecer só a Home</button>
     </div>
+    <div class="row" style="margin-top:10px;">
+      <button id="btn-warm-library-covers" class="secondary">🖼️ Aquecer só capas (biblioteca inteira)</button>
+    </div>
+    <p class="config-box" style="margin-top:8px;">🖼️ gera/salva só as capas de tudo (leve, poucos MB no total) — <b>sem</b> guardar o arquivo inteiro no R2. Use isso pra ter capa instantânea em toda a biblioteca sem pesar o armazenamento; deixe o "arquivo completo" (mais pesado) restrito à Home, nos botões acima.</p>
     <div class="row" style="margin-top:12px;">
       <label>Simultâneos: <input type="number" id="concurrency" value="3" min="1" max="8"></label>
       <button id="btn-stop" class="secondary small" disabled>⏸ Parar</button>
@@ -88,6 +92,13 @@
     <div class="current-file" id="current-file"></div>
     <div class="progress-outer"><div class="progress-inner" id="progress-bar"></div></div>
     <div class="counters" id="counters"></div>
+  </div>
+
+  <div class="card">
+    <div class="row">
+      <button id="btn-cleanup-non-home" class="secondary">🧹 Apagar cache de arquivo completo fora da Home</button>
+    </div>
+    <p class="config-box" style="margin-top:8px;">Apaga só o <b>arquivo inteiro</b> (<code>drive/...</code>) do R2 dos itens que NÃO estão nas seções da Home — inclusive cache de pastas que você já removeu/moveu da raiz do Drive (esse cache "órfão" não aparece em nenhuma varredura normal, então sem isso ficaria esquecido pra sempre). As capas (<code>cover/...</code>) de todo mundo continuam guardadas, intactas. Nada é apagado no Google Drive.</p>
   </div>
 
   <div class="card">
@@ -615,8 +626,8 @@
     }catch(e){ /* não é crítico — a extração de capa ainda funciona direto do Drive */ }
   }
 
-  async function processFile(f){
-    await warmFullFile(f.id);
+  async function processFile(f, warmFull){
+    if(warmFull) await warmFullFile(f.id);
     const already = await coverCheck(f.id);
     if(already) return 'skip';
     const dataUrl = await generateCoverDataUrl(f);
@@ -625,6 +636,66 @@
     const confirmed = await coverCheck(f.id);
     if(!confirmed) throw new Error('Upload feito, mas a checagem posterior não confirmou o arquivo no R2.');
     return 'ok';
+  }
+
+  // Apaga do R2 só o arquivo completo (drive/<id>) de um item — a capa
+  // (cover/<id>) NUNCA é tocada aqui. Usa o mesmo endpoint "forget=1" que
+  // já existia no worker.js (feito originalmente pra forçar reprocessar
+  // um arquivo específico), só que aqui é usado como faxina permanente.
+  async function forgetFullFile(fileId){
+    const res = await fetch(`${CONFIG.proxyUrl}?forget=1&id=${encodeURIComponent(fileId)}`);
+    if(!res.ok) throw new Error('Falha ao apagar do R2 (HTTP ' + res.status + ').');
+    const data = await res.json().catch(()=>null);
+    if(!data || !data.forgotten) throw new Error('O worker não confirmou a remoção.');
+    return 'ok';
+  }
+  async function processCleanupFile(f){
+    return await forgetFullFile(f.id);
+  }
+
+  // Pagina pelo endpoint "list_cache=1" até ler tudo — devolve os IDs
+  // (sem o prefixo "drive/") de TUDO que já está salvo como arquivo
+  // completo no R2 hoje, independente do Drive ainda ter essa pasta ou
+  // não. Essa é a diferença importante em relação a crawlAllComics: aqui
+  // a fonte da verdade é o R2, não o Drive.
+  async function listAllCachedFullFileIds(onProgress){
+    const ids = [];
+    let cursor = null;
+    do{
+      const params = new URLSearchParams({list_cache:'1', key: CONFIG.apiKey});
+      if(cursor) params.set('cursor', cursor);
+      const res = await fetch(`${CONFIG.proxyUrl}?${params.toString()}`);
+      if(!res.ok) throw new Error('Falha ao listar o cache do R2 (HTTP ' + res.status + ').');
+      const data = await res.json();
+      for(const key of (data.keys||[])){
+        ids.push(key.startsWith('drive/') ? key.slice(6) : key);
+      }
+      if(onProgress) onProgress(ids.length);
+      cursor = data.cursor || null;
+    }while(cursor);
+    return ids;
+  }
+
+  // Alvo da limpeza = tudo que está de fato salvo no R2 (fonte da
+  // verdade: list_cache) MENOS o que está na Home hoje. Isso cobre os
+  // dois casos de uma vez: arquivos que ainda existem na biblioteca mas
+  // não são da Home, E arquivos cujo cache sobrou de uma pasta que já
+  // foi removida/movida pra fora da raiz do Drive (esses last não
+  // apareceriam se a lista viesse de uma varredura do Drive).
+  async function collectNonHomeCacheTargets(onInfo){
+    const homeFiles = await collectHomeSectionComics(onInfo);
+    const homeIds = new Set(homeFiles.map(f=>f.id));
+
+    onInfo && onInfo('Lendo nomes da biblioteca atual (pra identificar os arquivos no log)...');
+    let libraryFiles = [];
+    try{ libraryFiles = await crawlAllComics(CONFIG.rootFolderId); }catch(e){ /* segue sem nomes se falhar */ }
+    const nameById = new Map(libraryFiles.map(f=>[f.id, f.name]));
+
+    const cachedIds = await listAllCachedFullFileIds(n=>onInfo && onInfo(`Lendo o que está salvo no R2... (${n} encontrados até agora)`));
+    const toDelete = cachedIds.filter(id=>!homeIds.has(id));
+    const orphanCount = toDelete.filter(id=>!nameById.has(id)).length;
+    if(orphanCount) onInfo && onInfo(`${orphanCount} desses já não existem mais na biblioteca atual do Drive (pasta removida/movida) — cache órfão, será apagado também.`);
+    return toDelete.map(id=>({id, name: nameById.get(id) || `(fora da biblioteca atual — id ${id})`}));
   }
 
   /* ---------------------------------------------------------------------
@@ -667,9 +738,45 @@
     const skip = values.filter(v=>v==='skip').length;
     const err = values.filter(v=>v==='err').length;
     const done = values.length;
-    $('#counters').innerHTML = `<span><b>${done}</b>/${total} processados</span><span>🔥 <b>${ok}</b> geradas</span><span>✅ <b>${skip}</b> já em cache</span><span>❌ <b>${err}</b> erros</span>`;
+    const okLabel = (MODE_META[warmState.mode] && MODE_META[warmState.mode].okLabel) || 'geradas';
+    $('#counters').innerHTML = `<span><b>${done}</b>/${total} processados</span><span>🔥 <b>${ok}</b> ${okLabel}</span><span>✅ <b>${skip}</b> já em cache</span><span>❌ <b>${err}</b> erros</span>`;
     $('#progress-bar').style.width = total ? `${Math.round(done/total*100)}%` : '0%';
   }
+
+  // Um lugar só reunindo o que muda entre os 4 botões de ação: como listar
+  // os arquivos, o que fazer com cada um, o rótulo do "ok" nos contadores,
+  // e a mensagem de confirmação. Facilita adicionar outro modo no futuro
+  // sem duplicar toda a lógica de sessão/retomada/log.
+  const MODE_META = {
+    'library': {
+      label: 'biblioteca inteira',
+      okLabel: 'geradas',
+      confirmMsg: 'Isso vai passar pela biblioteca inteira gerando (quando necessário) e salvando as capas no cache compartilhado (R2), além de aquecer o cache completo (arquivo inteiro) de cada uma. Pode demorar bastante — e ocupar bem mais espaço no R2 — mas dá pra fechar esta página e continuar depois de onde parou. Continuar?',
+      list: () => crawlAllComics(CONFIG.rootFolderId, n=>setStatus(`Listando arquivos... (${n} encontrados até agora)`)),
+      process: f => processFile(f, true),
+    },
+    'home': {
+      label: 'só a Home',
+      okLabel: 'geradas',
+      confirmMsg: 'Isso vai gerar/checar as capas — e aquecer o cache completo (arquivo inteiro) — só das HQs que aparecem nas seções da Home (Aranha, X-Men, Mangás, Batman, Salvat, Hulk, Lanterna Verde). Continuar?',
+      list: () => collectHomeSectionComics(msg=>logRow('info', msg)),
+      process: f => processFile(f, true),
+    },
+    'library-covers': {
+      label: 'só capas (biblioteca inteira)',
+      okLabel: 'geradas',
+      confirmMsg: 'Isso vai passar pela biblioteca inteira gerando/checando só as CAPAS no cache compartilhado (R2) — sem guardar o arquivo inteiro de ninguém (bem mais leve pro armazenamento). Pode demorar bastante, mas dá pra fechar esta página e continuar depois de onde parou. Continuar?',
+      list: () => crawlAllComics(CONFIG.rootFolderId, n=>setStatus(`Listando arquivos... (${n} encontrados até agora)`)),
+      process: f => processFile(f, false),
+    },
+    'cleanup-non-home': {
+      label: 'limpeza de arquivo completo fora da Home',
+      okLabel: 'removidos',
+      confirmMsg: 'Isso vai comparar tudo que está de fato salvo no R2 (não só o que ainda está na pasta raiz do Drive) contra a Home, e apagar o ARQUIVO INTEIRO (não a capa) de tudo que não é da Home — incluindo cache de pastas que você já removeu/moveu da raiz do Drive e que, por isso, ficariam esquecidas pra sempre sem essa checagem. As capas de todo mundo continuam guardadas normalmente, e nada é apagado no Google Drive. Continuar?',
+      list: () => collectNonHomeCacheTargets(msg=>logRow('info', msg)),
+      process: f => processCleanupFile(f),
+    },
+  };
 
   function checkResumeBanner(){
     const saved = loadSavedState();
@@ -677,8 +784,9 @@
     if(saved && saved.files && saved.files.length){
       const done = Object.keys(saved.results||{}).length;
       if(done < saved.files.length){
+        const label = (MODE_META[saved.mode] && MODE_META[saved.mode].label) || saved.mode;
         banner.style.display = 'block';
-        banner.textContent = `Encontrada uma sessão de "${saved.mode === 'library' ? 'biblioteca inteira' : 'só a Home'}" não concluída (${done}/${saved.files.length}). Clique no mesmo botão de antes pra continuar de onde parou.`;
+        banner.textContent = `Encontrada uma sessão de "${label}" não concluída (${done}/${saved.files.length}). Clique no mesmo botão de antes pra continuar de onde parou.`;
         return;
       }
     }
@@ -691,11 +799,14 @@
   function setControlsRunning(isRunning){
     $('#btn-warm-library').disabled = isRunning;
     $('#btn-warm-home').disabled = isRunning;
+    $('#btn-warm-library-covers').disabled = isRunning;
+    $('#btn-cleanup-non-home').disabled = isRunning;
     $('#btn-stop').disabled = !isRunning;
   }
 
   async function startOrResume(mode){
     if(running) return;
+    const meta = MODE_META[mode];
     const saved = loadSavedState();
     let restart = true;
     if(saved && saved.mode === mode && saved.files && saved.files.length){
@@ -708,15 +819,13 @@
         if(!confirm(`A última sessão deste modo já foi concluída (${saved.files.length}/${saved.files.length}). Rodar de novo do zero?`)) return;
       }
     } else {
-      const msg = mode === 'library'
-        ? 'Isso vai passar pela biblioteca inteira gerando (quando necessário) e salvando as capas no cache compartilhado (R2), além de aquecer o cache completo de cada arquivo. Pode demorar bastante — mas dá pra fechar esta página e continuar depois de onde parou. Continuar?'
-        : 'Isso vai gerar/checar as capas só das HQs que aparecem nas seções da Home (Aranha, X-Men, Mangás, Batman, Salvat, Hulk, Lanterna Verde). Continuar?';
-      if(!confirm(msg)) return;
+      if(!confirm(meta.confirmMsg)) return;
     }
     await runWarmer(mode, restart);
   }
 
   async function runWarmer(mode, restart){
+    const meta = MODE_META[mode];
     running = true;
     cancelRequested = false;
     setControlsRunning(true);
@@ -726,15 +835,10 @@
       warmState = loadSavedState();
     } else {
       setStatus('Listando arquivos...');
-      let files;
-      if(mode === 'library'){
-        files = await crawlAllComics(CONFIG.rootFolderId, n=>setStatus(`Listando arquivos... (${n} encontrados até agora)`));
-      } else {
-        files = await collectHomeSectionComics(msg=>logRow('info', msg));
-      }
+      const files = await meta.list();
       warmState = {mode, files, results:{}, startedAt: Date.now()};
       markDirty(); flushState();
-      logRow('info', `Encontrados ${files.length} arquivo(s) pra processar (modo: ${mode === 'library' ? 'biblioteca inteira' : 'Home'}).`);
+      logRow('info', `Encontrados ${files.length} arquivo(s) pra processar (modo: ${meta.label}).`);
     }
 
     renderCounters();
@@ -751,7 +855,7 @@
         const f = pending[idx++];
         setCurrent(`Processando: ${f.name}`);
         try{
-          const status = await processFile(f);
+          const status = await meta.process(f);
           warmState.results[f.id] = status;
           logRow(status, f.name);
         }catch(e){
@@ -782,6 +886,8 @@
 
   $('#btn-warm-library').onclick = ()=>startOrResume('library');
   $('#btn-warm-home').onclick = ()=>startOrResume('home');
+  $('#btn-warm-library-covers').onclick = ()=>startOrResume('library-covers');
+  $('#btn-cleanup-non-home').onclick = ()=>startOrResume('cleanup-non-home');
   $('#btn-stop').onclick = ()=>{
     cancelRequested = true;
     setStatus('Parando (terminando os arquivos em andamento)...');
