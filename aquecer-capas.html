@@ -100,6 +100,11 @@
     </div>
     <p class="config-box" style="margin-top:8px;">Salva no R2 as imagens de logo usadas nos títulos das seções da Home (Homem-Aranha, X-Men, Batman, Hulk, Lanterna Verde, Homem de Ferro, Superman, DC, Mulher Maravilha, Avengers DoomsDay) — são só 10 imagens pequenas, então isso é instantâneo. Sem apertar aqui, elas só ficam salvas depois que a <i>primeira</i> pessoa abrir o app e a página pedir cada uma.</p>
     <div class="status-line" id="logo-status" style="margin-top:6px;"></div>
+    <div class="row" style="margin-top:10px;">
+      <button id="btn-purge-logos" class="secondary">🗑️ Apagar cache de logos</button>
+    </div>
+    <p class="config-box" style="margin-top:8px;">Apaga só as logos salvas no R2 (não mexe nos arquivos das HQs nem no postimg.cc). Use se alguma logo ficou salva errada/corrompida — depois de apagar, clique em "Aquecer logos das seções" de novo pra buscar uma cópia nova e correta.</p>
+    <div class="status-line" id="purge-logo-status" style="margin-top:6px;"></div>
   </div>
 
   <div class="card">
@@ -923,6 +928,22 @@
       statusEl.textContent = `Concluído — ${ok} logo(s) confirmada(s) no R2${err ? `, ${err} erro(s) (ver log abaixo)` : ''}.`;
     }catch(e){
       statusEl.textContent = `Falhou ao listar/aquecer as logos: ${e && e.message || e}`;
+    }finally{
+      btn.disabled = false;
+    }
+  };
+  $('#btn-purge-logos').onclick = async ()=>{
+    const btn = $('#btn-purge-logos');
+    const statusEl = $('#purge-logo-status');
+    btn.disabled = true;
+    statusEl.textContent = 'Apagando cache de logos no R2...';
+    try{
+      const res = await fetch(`${CONFIG.proxyUrl}?purge_logos=1&key=${encodeURIComponent(CONFIG.apiKey)}`);
+      if(!res.ok) throw new Error('HTTP ' + res.status);
+      const {purged} = await res.json();
+      statusEl.textContent = `Concluído — ${purged} logo(s) apagada(s) do R2. Clique em "Aquecer logos das seções" pra buscar cópias novas.`;
+    }catch(e){
+      statusEl.textContent = `Falhou ao apagar o cache de logos: ${e && e.message || e}`;
     }finally{
       btn.disabled = false;
     }
