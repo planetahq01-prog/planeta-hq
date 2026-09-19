@@ -4326,74 +4326,15 @@ function buildHomeSection(titleHtml, items, builder){
   const section = el('div','home-section');
   section.appendChild(elHtml('div','home-section-title', titleHtml));
   const carousel = el('div','carousel');
-  // Carrossel "infinito": com itens suficientes, repete o conjunto 3 vezes
-  // (uma cópia "antes", uma "principal" e uma "depois") — assim sempre
-  // sobra conteúdo pra continuar arrastando pra qualquer lado. Quando a
-  // pessoa se aproxima demais de uma ponta, a rolagem é "teleportada" de
-  // volta pro meio sem nenhuma transição visível (ver setupInfiniteCarousel)
-  // — como o conteúdo das cópias é idêntico, o salto não aparece.
-  // Com poucos itens (1 ou 2), a cópia vizinha ficaria visível ao mesmo
-  // tempo que a principal, entregando o truque — por isso não repete
-  // nesse caso, e o carrossel funciona do jeito normal (sem loop).
-  const shouldLoop = items.length > 2;
-  const copiesCount = shouldLoop ? 3 : 1;
-  let firstCard = null, secondCopyFirstCard = null;
-  for(let c=0; c<copiesCount; c++){
-    items.forEach(it=>{
-      const card = builder(it);
-      if(!card) return;
-      carousel.appendChild(card);
-      if(c===0 && !firstCard) firstCard = card;
-      if(c===1 && !secondCopyFirstCard) secondCopyFirstCard = card;
-    });
-  }
+  items.forEach(it=>{
+    const card = builder(it);
+    if(!card) return;
+    carousel.appendChild(card);
+  });
   carousel.appendChild(el('div','carousel-end'));
   attachCarouselDrag(carousel);
   section.appendChild(carousel);
-  if(shouldLoop && firstCard && secondCopyFirstCard){
-    setupInfiniteCarousel(carousel, firstCard, secondCopyFirstCard);
-  }
   return section;
-}
-
-// Mede a distância entre o início da 1ª cópia e o início da 2ª (a
-// "largura de um conjunto completo"), posiciona a rolagem já na cópia do
-// meio pra ter margem nos dois sentidos desde o começo, e fica de olho na
-// rolagem pra teleportar de volta pro meio sempre que a pessoa se
-// aproximar demais de uma das pontas.
-function setupInfiniteCarousel(carousel, firstCard, secondCopyFirstCard){
-  let setWidth = 0;
-  function measure(){
-    setWidth = secondCopyFirstCard.offsetLeft - firstCard.offsetLeft;
-  }
-  measure();
-  if(setWidth > 0) carousel.scrollLeft = firstCard.offsetLeft + setWidth;
-
-  let resizeTimer;
-  window.addEventListener('resize', ()=>{
-    clearTimeout(resizeTimer);
-    resizeTimer = setTimeout(()=>{
-      const oldWidth = setWidth;
-      const ratio = oldWidth ? carousel.scrollLeft / oldWidth : 1;
-      measure();
-      if(setWidth > 0) carousel.scrollLeft = ratio * setWidth;
-    }, 150);
-  });
-
-  carousel.addEventListener('scroll', ()=>{
-    if(!setWidth) return;
-    let delta = 0;
-    if(carousel.scrollLeft < setWidth) delta = setWidth;
-    else if(carousel.scrollLeft >= setWidth*2) delta = -setWidth;
-    if(!delta) return;
-    carousel.scrollLeft += delta;
-    // Se a pessoa estiver arrastando com o mouse bem na hora do
-    // teleporte, ajusta a "origem" do arrasto em andamento também —
-    // senão o próximo movimento do mouse desfaria o salto sem querer.
-    if(carouselDragState && carouselDragState.carousel === carousel){
-      carouselDragState.startScroll += delta;
-    }
-  }, {passive:true});
 }
 
 // Estado de arrasto compartilhado por todos os carrosséis — evita ter um
