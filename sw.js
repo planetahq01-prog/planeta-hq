@@ -261,11 +261,14 @@
   repintada do zero, sempre no topo.
 */
 /*
-  v43: index.html mudou — "estantes" na Home (Todas / Marvel / DC). Cada
-  estante mostra só as suas seções, na ordem pedida, e troca o tema de cores
-  do app (Marvel: vermelho; DC: azul). A escolha fica salva no aparelho.
+  v44: index.html voltou ao estado anterior às "estantes" (Todas / Marvel /
+  DC), que foram removidas por completo: a Home é a de sempre, com todas as
+  seções na ordem definida em HOME_SECTION_ORDER e o tema de cores único.
+  Mantém a restauração da posição da Home (v42). A versão sobe (em vez de
+  voltar para v42) pra todo aparelho que já recebeu a v43 buscar este
+  index.html de novo.
 */
-const CACHE_VERSION = 'v43';
+const CACHE_VERSION = 'v44';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [

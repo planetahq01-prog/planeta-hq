@@ -4,16 +4,6 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#0d0c12">
-<script>
-/* Estante escolhida (Marvel/DC) vira tema já no primeiro frame, antes do CSS pintar. */
-try{
-  var __shelf = localStorage.getItem('planetahq_shelf');
-  if(__shelf === 'marvel' || __shelf === 'dc'){
-    document.documentElement.setAttribute('data-shelf', __shelf);
-    document.querySelector('meta[name="theme-color"]').setAttribute('content', __shelf === 'marvel' ? '#120a0c' : '#070b17');
-  }
-}catch(e){}
-</script>
 <link rel="manifest" href="./manifest.json">
 <title>Planeta HQ</title>
 
@@ -39,8 +29,6 @@ try{
   --text-muted:#8a84a0;
   --accent:#ff4d5e;
   --accent-dark:#c22e3f;
-  --accent-rgb:255,77,94;   /* mesma cor do --accent, em RGB, pra sombras/brilhos */
-  --bg-glow:#241f38;        /* brilho do fundo, no alto da tela */
   --gold:#ffb703;
   --teal:#14b8a6;
   --teal-dark:#0d8f7d;
@@ -51,27 +39,10 @@ try{
   --font-display:'Anton', sans-serif;
   --font-body:'Inter', sans-serif;
 }
-/* ============ TEMAS DE ESTANTE ============
-   Cada estante (Marvel / DC) só troca as cores dos tokens acima. As capas e
-   os cards continuam sobre o mesmo papel creme (--paper) de sempre, então
-   as HQs e pastas seguem com o mesmo destaque em qualquer tema: o tema
-   colore o "palco" (fundo, barras, botões, destaques), nunca as capas. */
-html[data-shelf="marvel"]{
-  --ink:#120a0c;--ink-soft:#1c1214;--ink-elevated:#291a1d;--ink-border:#402529;
-  --paper-dim:#c9b6b9;--text-muted:#a08d90;
-  --accent:#f0343c;--accent-dark:#b3141b;--accent-rgb:240,52,60;
-  --bg-glow:#3d141a;--gold:#ffc233;
-}
-html[data-shelf="dc"]{
-  --ink:#070b17;--ink-soft:#0e1527;--ink-elevated:#162139;--ink-border:#25355c;
-  --paper-dim:#b0bcda;--text-muted:#8b99ba;
-  --accent:#2f86ff;--accent-dark:#1b5fc9;--accent-rgb:47,134,255;
-  --bg-glow:#10295c;--gold:#ffd23f;
-}
 *{box-sizing:border-box;}
 html,body{
   margin:0;padding:0;height:100%;color:var(--paper);font-family:var(--font-body);
-  background:radial-gradient(ellipse 900px 500px at 50% -10%, var(--bg-glow) 0%, var(--ink) 55%) var(--ink);
+  background:radial-gradient(ellipse 900px 500px at 50% -10%, #241f38 0%, var(--ink) 55%) var(--ink);
   /* Bloqueia o pinch-zoom e o duplo-toque-pra-zoom nativos do navegador
      em todo o app (home, navegação, leitura). "pan-x pan-y" mantém a
      rolagem normal (vertical e os carrosséis horizontais) funcionando,
@@ -118,7 +89,7 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
   font-size:22px;letter-spacing:.5px;color:var(--paper);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
-.wordmark span{color:var(--accent);text-shadow:0 0 18px rgba(var(--accent-rgb),.45);}
+.wordmark span{color:var(--accent);text-shadow:0 0 18px rgba(255,77,94,.45);}
 .search-box{
   width:100%;display:flex;align-items:center;background:var(--ink-soft);
   border:1px solid var(--ink-border);border-radius:999px;
@@ -154,26 +125,6 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
   content:'';position:absolute;left:12px;right:12px;bottom:-1px;height:3px;border-radius:3px 3px 0 0;
   background:linear-gradient(90deg,var(--accent),var(--gold));
 }
-
-/* ---- Barra de estantes (Todas / Marvel / DC), fixa no topo da Home ---- */
-.shelf-bar{
-  position:sticky;top:0;z-index:6;display:flex;gap:8px;padding:10px 12px 12px;
-  background:linear-gradient(var(--ink) 70%, transparent);
-}
-.shelf-pill{
-  flex:1;display:flex;align-items:center;justify-content:center;gap:8px;
-  padding:10px 8px;border-radius:999px;background:var(--ink-soft);
-  border:1px solid var(--ink-border);color:var(--paper-dim);
-  font-size:13px;font-weight:700;letter-spacing:.3px;
-  transition:background .2s ease,border-color .2s ease,color .2s ease,box-shadow .2s ease;
-}
-.shelf-pill i{width:8px;height:8px;border-radius:50%;background:var(--dot);flex-shrink:0;}
-.shelf-pill:active{transform:scale(.97);}
-.shelf-pill.active{
-  background:var(--accent-dark);border-color:var(--accent);color:#fff;
-  box-shadow:0 8px 18px -10px rgba(var(--accent-rgb),.95);
-}
-.shelf-pill.active i{background:#fff;}
 
 /* ---- Breadcrumb ---- */
 .breadcrumb-row{
@@ -365,7 +316,7 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 .field input:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
 .btn-primary{
   background:linear-gradient(135deg,var(--accent),var(--accent-dark));color:#fff;border:none;padding:14px 20px;
-  font-weight:700;font-size:14px;border-radius:999px;width:100%;box-shadow:0 10px 22px -10px rgba(var(--accent-rgb),.6);
+  font-weight:700;font-size:14px;border-radius:999px;width:100%;box-shadow:0 10px 22px -10px rgba(255,77,94,.6);
 }
 .btn-primary:active{filter:brightness(.9);}
 .btn-secondary{
@@ -444,7 +395,7 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 .reader-status{
   position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
   gap:14px;color:var(--paper);font-size:15px;font-weight:600;text-align:center;padding:24px;
-  background:radial-gradient(ellipse 700px 400px at 50% 40%, var(--bg-glow) 0%, var(--ink) 60%) var(--ink);
+  background:radial-gradient(ellipse 700px 400px at 50% 40%, #241f38 0%, var(--ink) 60%) var(--ink);
   z-index:10;
 }
 .reader-status #reader-status-pct{color:var(--gold);font-variant-numeric:tabular-nums;}
@@ -585,14 +536,14 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 #view-loading{
   position:fixed;inset:0;z-index:1000;
   display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;
-  background:radial-gradient(ellipse 900px 500px at 50% -10%, var(--bg-glow) 0%, var(--ink) 55%) var(--ink);
+  background:radial-gradient(ellipse 900px 500px at 50% -10%, #241f38 0%, var(--ink) 55%) var(--ink);
   padding:24px;text-align:center;
 }
 #view-loading.hidden{display:none;}
 #view-loading .loading-word{
   font-family:var(--font-display);font-size:30px;letter-spacing:.5px;color:var(--paper);
 }
-#view-loading .loading-word span{color:var(--accent);text-shadow:0 0 18px rgba(var(--accent-rgb),.45);}
+#view-loading .loading-word span{color:var(--accent);text-shadow:0 0 18px rgba(255,77,94,.45);}
 #view-loading .loading-track{
   width:min(280px,80vw);height:8px;border-radius:999px;
   background:var(--ink-soft);border:1px solid var(--ink-border);overflow:hidden;
@@ -623,7 +574,7 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 .welcome-card{
   position:relative;width:100%;max-width:360px;
   background:var(--ink-soft);
-  background-image:radial-gradient(ellipse 260px 160px at 50% 0%, rgba(var(--accent-rgb),.16) 0%, transparent 70%);
+  background-image:radial-gradient(ellipse 260px 160px at 50% 0%, rgba(255,77,94,.16) 0%, transparent 70%);
   border:1px solid var(--ink-border);border-radius:var(--radius-lg);
   box-shadow:0 24px 60px -20px rgba(0,0,0,.75);
   padding:28px 24px 24px;text-align:center;
@@ -633,7 +584,7 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
   width:56px;height:56px;margin:0 auto 16px;border-radius:50%;
   display:flex;align-items:center;justify-content:center;
   background:linear-gradient(135deg,var(--accent),var(--accent-dark));
-  box-shadow:0 10px 22px -8px rgba(var(--accent-rgb),.7);
+  box-shadow:0 10px 22px -8px rgba(255,77,94,.7);
   font-size:26px;
 }
 .welcome-card .wordmark{
@@ -5229,109 +5180,17 @@ const HOME_SECTION_ORDER = [
   'universoAbsoluto'   // DC Universo Absoluto
 ];
 
-/* ---------------------------------------------------------------------
-   Estantes (Todas / Marvel / DC)
-
-   Cada estante é só uma LISTA DE SEÇÕES (chaves de `built`, ver
-   paintHomeSections) numa ordem própria + um tema de cores (CSS
-   html[data-shelf=...]). "Todas" é a Home completa de sempre. Pra mudar as
-   seções/ordem de uma estante, edite `keys` aqui. `members` (nomes de
-   pasta, sem acento/pontuação) e `words` servem só pra "Recomendados"
-   sugerir HQs daquele universo: uma HQ conta se alguma pasta do caminho
-   dela bate com um nome de `members` ou tem uma palavra de `words`.
-   --------------------------------------------------------------------- */
-const HOME_SHELVES = [
-  {id:'all', name:'Todas', dot:'#ffb703', keys: HOME_SECTION_ORDER},
-  {id:'marvel', name:'Marvel', dot:'#ff3b43', themeColor:'#120a0c',
-    keys:['continuar','aranha','ironman','hulk','doomsday','recomendados','classicoAvengers','xmen','thanos','salvat'],
-    members:['colecao homem aranha','colecao homem de ferro','colecao hulk','x men','xmen','graphic novels marvel','doomsday','colecao thanos','vingadores classico'],
-    words:['marvel']},
-  {id:'dc', name:'DC', dot:'#3a8dff', themeColor:'#070b17',
-    keys:['continuar','superman','batman','lanterna','mulhermaravilha','recomendados','classicoLiga','darkseid'],
-    members:['dc','batman','superman','lanterna verde','mulher maravilha','wonder woman','universo absoluto','colecao darkseid','liga da justica da america'],
-    words:[]}
-];
-const SHELF_KEY = 'planetahq_shelf';
-let lastHomeData = null; // últimos dados pintados na Home (pra trocar de estante sem refazer a busca)
-let currentShelfId = (function(){
-  try{ const v = localStorage.getItem(SHELF_KEY); if(HOME_SHELVES.some(x=>x.id===v)) return v; }catch(e){}
-  return 'all';
-})();
-function currentShelfDef(){ return HOME_SHELVES.find(x=>x.id===currentShelfId) || HOME_SHELVES[0]; }
-
-function applyShelfTheme(){
-  const root = document.documentElement;
-  if(currentShelfId === 'all') root.removeAttribute('data-shelf');
-  else root.setAttribute('data-shelf', currentShelfId);
-  const m = document.querySelector('meta[name="theme-color"]');
-  if(m) m.setAttribute('content', currentShelfDef().themeColor || '#0d0c12');
-}
-
-// HQs do universo da estante atual (pra "Recomendados"). Se a estante não
-// tem critério, ou quase nada casou (ex.: nomes de pasta diferentes), usa a
-// biblioteca inteira em vez de deixar Recomendados vazio.
-function shelfComicPool(allComics){
-  const sh = currentShelfDef();
-  if(!sh.members && !sh.words) return allComics;
-  const names = new Set(sh.members || []);
-  const words = sh.words || [];
-  const pool = allComics.filter(f=>(f._path || []).some(seg=>{
-    const n = normalizeForFolderMatch(seg);
-    return names.has(n) || words.some(w=>n.split(' ').includes(w));
-  }));
-  return pool.length >= 5 ? pool : allComics;
-}
-
-function buildShelfBar(){
-  const bar = el('div','shelf-bar');
-  bar.setAttribute('role','tablist');
-  bar.setAttribute('aria-label','Estantes');
-  HOME_SHELVES.forEach(sh=>{
-    const active = sh.id === currentShelfId;
-    const b = el('button','shelf-pill' + (active ? ' active' : ''));
-    b.type = 'button';
-    b.setAttribute('role','tab');
-    b.setAttribute('aria-selected', active ? 'true' : 'false');
-    const dot = el('i');
-    dot.style.setProperty('--dot', sh.dot);
-    b.appendChild(dot);
-    b.appendChild(document.createTextNode(sh.name));
-    b.onclick = ()=>setShelf(sh.id);
-    bar.appendChild(b);
-  });
-  return bar;
-}
-
-function setShelf(id){
-  if(id === currentShelfId || !HOME_SHELVES.some(x=>x.id===id)) return;
-  currentShelfId = id;
-  try{ localStorage.setItem(SHELF_KEY, id); }catch(e){}
-  applyShelfTheme();
-  // A posição guardada era da estante anterior: não vale mais.
-  homeScrollSnapshot = null; homeRestoreWindow = null;
-  const wrap = $('#home-sections');
-  if(wrap && lastHomeData) paintHomeSections(wrap, lastHomeData);
-  $('#view-library').scrollTop = 0;
-}
-
-function paintHomeSections(wrap, homeData){
-  lastHomeData = homeData;
-  const {continueItems, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, allComics, hadError, errorMessage} = homeData;
-  // Só monta as seções da estante atual (as outras nem chegam a ser criadas).
-  const shelf = currentShelfDef();
-  const wantKeys = new Set(shelf.keys);
-  const want = k => wantKeys.has(k);
-  const recommended = want('recomendados') ? buildRecommended(shelfComicPool(allComics)) : [];
+function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, allComics, hadError, errorMessage}){
+  const recommended = buildRecommended(allComics);
   releaseCoverObservers(wrap);
   wrap.innerHTML = '';
-  wrap.appendChild(buildShelfBar());
   let anySection = false;
   // As seções são montadas aqui, por chave, e só no final são colocadas na
   // tela na ordem de HOME_SECTION_ORDER — assim a ordem da Home se muda em
   // UM lugar só, sem mexer no código de cada seção.
   const built = {};
 
-  const secContinue = !want('continuar') ? null : buildHomeSection('Continuar lendo', continueItems, (it)=>{
+  const secContinue = buildHomeSection('Continuar lendo', continueItems, (it)=>{
     return buildCarouselCard(it, { isFolder:false, progressPct: it.pct, sub: `${it.pct}% · pág. ${it.pageIndex+1}/${it.pageCount}` });
   });
   if(secContinue){ built['continuar'] = secContinue; }
@@ -5344,7 +5203,7 @@ function paintHomeSections(wrap, homeData){
   // JavaScript espera a imagem carregar pra pintar a seção: o navegador
   // (ou o service worker, depois da primeira vez — ver sw.js) resolve a
   // <img> por conta própria, em paralelo, sem travar nada.
-  const secAranha = !want('aranha') ? null : buildHomeSection(
+  const secAranha = buildHomeSection(
     `Coleção <span class="section-logo-text hidden" data-logo-text="aranha">Homem-Aranha</span><img class="section-logo" data-logo="aranha" src="${logoSrc('aranha')}" alt="Homem-Aranha" loading="eager" decoding="async">`,
     aranhaFolders,
     (it)=>{
@@ -5357,7 +5216,7 @@ function paintHomeSections(wrap, homeData){
   // "Coleção [logo do Hulk]": subpastas de dentro da pasta "Coleção - Hulk"
   // — mesma lógica das demais seções baseadas em pasta, ver
   // childrenOfNamedFolder.
-  const secHulk = !want('hulk') ? null : buildHomeSection(
+  const secHulk = buildHomeSection(
     `Coleção <span class="section-logo-text hidden" data-logo-text="hulk">Incrível Hulk</span><img class="section-logo" data-logo="hulk" src="${logoSrc('hulk')}" alt="Incrível Hulk" loading="eager" decoding="async">`,
     hulkFolders,
     (it)=>{
@@ -5367,7 +5226,7 @@ function paintHomeSections(wrap, homeData){
   );
   if(secHulk){ built['hulk'] = secHulk; wireHomeLogoFallback(secHulk, 'hulk'); }
 
-  const secXMen = !want('xmen') ? null : buildHomeSection(
+  const secXMen = buildHomeSection(
     `Coleção <span class="section-logo-text hidden" data-logo-text="xmen">X-Men</span><img class="section-logo" data-logo="xmen" src="${logoSrc('xmen')}" alt="X-Men" loading="eager" decoding="async">`,
     xmenFolders,
     (it)=>{
@@ -5379,7 +5238,7 @@ function paintHomeSections(wrap, homeData){
 
   // "Coleção [logo do Lanterna Verde]": subpastas de dentro da pasta
   // "Lanterna Verde" que fica dentro de "DC" — mesma lógica das demais.
-  const secLanterna = !want('lanterna') ? null : buildHomeSection(
+  const secLanterna = buildHomeSection(
     `Coleção <span class="section-logo-text hidden" data-logo-text="lanterna">Lanterna Verde</span><img class="section-logo" data-logo="lanterna" src="${logoSrc('lanterna')}" alt="Lanterna Verde" loading="eager" decoding="async">`,
     lanternaFolders,
     (it)=>{
@@ -5389,7 +5248,7 @@ function paintHomeSections(wrap, homeData){
   );
   if(secLanterna){ built['lanterna'] = secLanterna; wireHomeLogoFallback(secLanterna, 'lanterna'); }
 
-  const secManga = !want('manga') ? null : buildHomeSection(
+  const secManga = buildHomeSection(
     '🎌 Coleção Mangás',
     mangaFolders,
     (it)=>{
@@ -5402,7 +5261,7 @@ function paintHomeSections(wrap, homeData){
   // "Coleção [logo do Batman]": subpastas de dentro da pasta "Batman" (ex.:
   // "DC > Batman > 1 - Batman: Ano Um" e as demais) — mesma lógica das
   // seções Homem-Aranha/X-Men acima, ver childrenOfNamedFolder.
-  const secBatman = !want('batman') ? null : buildHomeSection(
+  const secBatman = buildHomeSection(
     `Coleção <span class="section-logo-text hidden" data-logo-text="batman">Batman</span><img class="section-logo" data-logo="batman" src="${logoSrc('batman')}" alt="Batman" loading="eager" decoding="async">`,
     batmanFolders,
     (it)=>{
@@ -5414,7 +5273,7 @@ function paintHomeSections(wrap, homeData){
 
   // "Coleção [logo do Homem de Ferro]": subpastas de dentro da pasta
   // "Coleção - Homem de Ferro" — mesma lógica do Hulk.
-  const secIronman = !want('ironman') ? null : buildHomeSection(
+  const secIronman = buildHomeSection(
     `Coleção <span class="section-logo-text hidden" data-logo-text="ironman">Homem de Ferro</span><img class="section-logo" data-logo="ironman" src="${logoSrc('ironman')}" alt="Homem de Ferro" loading="eager" decoding="async">`,
     ironmanFolders,
     (it)=>{
@@ -5426,7 +5285,7 @@ function paintHomeSections(wrap, homeData){
 
   // "Coleção [logo do Superman]": subpastas de dentro da pasta "Superman"
   // que fica dentro de "DC" — mesma lógica do Lanterna Verde.
-  const secSuperman = !want('superman') ? null : buildHomeSection(
+  const secSuperman = buildHomeSection(
     `Coleção <span class="section-logo-text hidden" data-logo-text="superman">Superman</span><img class="section-logo" data-logo="superman" src="${logoSrc('superman')}" alt="Superman" loading="eager" decoding="async">`,
     supermanFolders,
     (it)=>{
@@ -5440,7 +5299,7 @@ function paintHomeSections(wrap, homeData){
   // Absoluto" que fica dentro de "DC" — aqui só a palavra "DC" vira logo
   // (não "Coleção [logo]" como as seções acima); o resto do título
   // ("Universo Absoluto") fica em texto normal.
-  const secUniversoAbsoluto = !want('universoAbsoluto') ? null : buildHomeSection(
+  const secUniversoAbsoluto = buildHomeSection(
     `<span class="section-logo-text hidden" data-logo-text="dc">DC</span><img class="section-logo" data-logo="dc" src="${logoSrc('dc')}" alt="DC" loading="eager" decoding="async"> Universo Absoluto`,
     universoAbsolutoFolders,
     (it)=>{
@@ -5453,7 +5312,7 @@ function paintHomeSections(wrap, homeData){
   // "Coleção [logo Mulher Maravilha]": subpastas de dentro da pasta
   // "Mulher Maravilha" que fica dentro de "DC" — mesmo template de título
   // das seções de personagem acima (Batman, Superman etc.).
-  const secMulherMaravilha = !want('mulhermaravilha') ? null : buildHomeSection(
+  const secMulherMaravilha = buildHomeSection(
     `Coleção <span class="section-logo-text hidden" data-logo-text="mulhermaravilha">Mulher Maravilha</span><img class="section-logo" data-logo="mulhermaravilha" src="${logoSrc('mulhermaravilha')}" alt="Mulher Maravilha" loading="eager" decoding="async">`,
     mulherMaravilhaFolders,
     (it)=>{
@@ -5468,7 +5327,7 @@ function paintHomeSections(wrap, homeData){
   // pasta "Vingadores (Clássico)" (todas as subpastas dela, em ordem —
   // Capítulo 30 em diante), cada uma com o botão de baixar no canto da
   // capa. Sai da lista de HQs já varrida (ver comicsInsideNamedFolder).
-  const secClassicoAvengers = !want('classicoAvengers') ? null : buildEdicoesConjuntasSection(
+  const secClassicoAvengers = buildEdicoesConjuntasSection(
     `Clássico <span class="section-logo-text hidden" data-logo-text="avengers">Avengers</span><img class="section-logo" data-logo="avengers" src="${logoSrc('avengers')}" alt="Avengers" loading="eager" decoding="async">`,
     comicsInsideNamedFolder(allComics, ['vingadores classico'])
   );
@@ -5477,7 +5336,7 @@ function paintHomeSections(wrap, homeData){
   // "Se prepare para [logo Avengers Doomsday]": subpastas de dentro da
   // pasta "Doomsday" — aqui a frase inteira "Avengers DoomsDay" vira logo,
   // com "Se prepare para" como texto normal antes dela.
-  const secDoomsday = !want('doomsday') ? null : buildHomeSection(
+  const secDoomsday = buildHomeSection(
     `Se prepare para <span class="section-logo-text hidden" data-logo-text="doomsday">Avengers DoomsDay</span><img class="section-logo" data-logo="doomsday" src="${logoSrc('doomsday')}" alt="Avengers DoomsDay" loading="eager" decoding="async">`,
     doomsdayFolders,
     (it)=>{
@@ -5492,7 +5351,7 @@ function paintHomeSections(wrap, homeData){
   // na Garrafa", "004 Eu, Wolverine.") — mesma lógica das seções acima.
   // Sem logo própria (nenhuma foi pedida) — título em texto simples,
   // igual à seção Mangás abaixo.
-  const secSalvat = !want('salvat') ? null : buildHomeSection(
+  const secSalvat = buildHomeSection(
     'Coleção Graphic Novels Marvel (Salvat)',
     salvatFolders,
     (it)=>{
@@ -5507,7 +5366,7 @@ function paintHomeSections(wrap, homeData){
   // dentro da pasta "Liga da Justiça da América", com o botão de baixar no
   // canto da capa. A logo DC substitui as palavras "Liga da Justiça" (que
   // só aparecem em texto se a imagem falhar ao carregar).
-  const secClassicoLiga = !want('classicoLiga') ? null : buildEdicoesConjuntasSection(
+  const secClassicoLiga = buildEdicoesConjuntasSection(
     `Clássico <span class="section-logo-text hidden" data-logo-text="liga">Liga da Justiça</span><img class="section-logo" data-logo="liga" src="${logoSrc('liga')}" alt="Liga da Justiça" loading="eager" decoding="async">`,
     comicsInsideNamedFolder(allComics, ['liga da justica da america'])
   );
@@ -5516,7 +5375,7 @@ function paintHomeSections(wrap, homeData){
   // "Coleção Thanos" e "Coleção Darkseid": seções de SUBPASTAS, formadas
   // pelas subpastas de dentro das pastas de mesmo nome. Título em texto
   // simples (sem logo), igual à seção Graphic Novels Marvel.
-  const secThanos = !want('thanos') ? null : buildHomeSection(
+  const secThanos = buildHomeSection(
     'Coleção Thanos',
     thanosFolders,
     (it)=>{
@@ -5526,7 +5385,7 @@ function paintHomeSections(wrap, homeData){
   );
   if(secThanos){ built['thanos'] = secThanos; }
 
-  const secDarkseid = !want('darkseid') ? null : buildHomeSection(
+  const secDarkseid = buildHomeSection(
     'Coleção Darkseid',
     darkseidFolders,
     (it)=>{
@@ -5536,7 +5395,7 @@ function paintHomeSections(wrap, homeData){
   );
   if(secDarkseid){ built['darkseid'] = secDarkseid; }
 
-  const secRec = !want('recomendados') ? null : buildHomeSection('Recomendados', recommended, (it)=>{
+  const secRec = buildHomeSection('Recomendados', recommended, (it)=>{
     return buildCarouselCard(it, { isFolder:false, size: it.size });
   });
   if(secRec){ built['recomendados'] = secRec; }
@@ -5544,9 +5403,7 @@ function paintHomeSections(wrap, homeData){
   // Coloca as seções na tela, na ordem definida em HOME_SECTION_ORDER.
   // Qualquer seção que exista mas não esteja na lista vai pro final (rede
   // de segurança: uma seção nova nunca some só por ter sido esquecida lá).
-  const orderedKeys = shelf.id === 'all'
-    ? HOME_SECTION_ORDER.concat(Object.keys(built).filter(k=>!HOME_SECTION_ORDER.includes(k)))
-    : shelf.keys;
+  const orderedKeys = HOME_SECTION_ORDER.concat(Object.keys(built).filter(k=>!HOME_SECTION_ORDER.includes(k)));
   orderedKeys.forEach(k=>{
     if(built[k]){
       built[k].dataset.homeKey = k; // âncora estável pra restaurar a posição da Home (ver captureHomeScroll)
@@ -5568,16 +5425,14 @@ function paintHomeSections(wrap, homeData){
     // em cima.
     wrap.classList.remove('hidden');
     if(hadError){
-      wrap.insertAdjacentHTML('beforeend', `<div class="empty-state">${ICONS.warning}<h3>Não foi possível carregar a biblioteca</h3>
+      wrap.innerHTML = `<div class="empty-state">${ICONS.warning}<h3>Não foi possível carregar a biblioteca</h3>
         Houve uma falha ao buscar os dados do Google Drive${errorMessage ? ': ' + escapeHtml(errorMessage) : '.'}
         <button id="btn-home-retry" class="btn-primary" style="margin-top:14px">Tentar novamente</button>
-      </div>`);
+      </div>`;
       const retryBtn = $('#btn-home-retry');
       if(retryBtn) retryBtn.onclick = ()=>renderHomeSections(true);
     } else {
-      wrap.insertAdjacentHTML('beforeend', shelf.id === 'all'
-        ? `<div class="empty-state">${ICONS.folder}<h3>Nenhuma HQ encontrada</h3>A biblioteca configurada está vazia.</div>`
-        : `<div class="empty-state">${ICONS.folder}<h3>Nada nesta estante ainda</h3>Não encontrei as pastas desta estante. Confira os nomes das pastas ou toque em Atualizar.</div>`);
+      wrap.innerHTML = `<div class="empty-state">${ICONS.folder}<h3>Nenhuma HQ encontrada</h3>A biblioteca configurada está vazia.</div>`;
     }
     return;
   }
