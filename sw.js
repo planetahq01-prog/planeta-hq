@@ -232,7 +232,20 @@
   carregamento das capas dessa seção na tela de carregamento inicial (são
   muitas HQs; elas carregam conforme a pessoa rola o carrossel).
 */
-const CACHE_VERSION = 'v39';
+/*
+  v40: index.html mudou — correção da lentidão progressiva (HQs abrindo e
+  baixando devagar até fechar o app e abrir de novo). A geração de capas
+  pesadas em segundo plano (PDF/CBZ sem miniatura) desistia depois de 20s
+  mas não cancelava o trabalho: download/pdf.js seguiam rodando escondidos
+  (às vezes centenas de MB) e se acumulavam, disputando banda, conexões e
+  memória com a HQ que a pessoa abria. Agora essas tarefas são canceladas
+  de verdade no timeout, pausam enquanto o leitor está aberto (e ficam
+  limitadas a 1 durante um download), não se repetem a cada redesenho da
+  pasta, e o leitor libera o PDF/worker de HQs abandonadas no meio do
+  carregamento. Este arquivo não mudou de comportamento — só a versão sobe
+  pra os aparelhos buscarem o index.html novo.
+*/
+const CACHE_VERSION = 'v40';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [

@@ -1221,6 +1221,7 @@ async function driveFetchJson(url){
   for(let attempt=1; attempt<=MAX_ATTEMPTS; attempt++){
     await driveAcquireSlot();
     let res, errBody, networkErr;
+    const reqCtrl = new AbortController();
     try{
       // cache:'no-store' é essencial aqui: sem isso, o navegador pode
       // reaproveitar pra sempre uma resposta antiga (inclusive uma lista
@@ -1228,11 +1229,14 @@ async function driveFetchJson(url){
       // essa mesma URL de consulta, em vez de perguntar de novo pro Google
       // Drive — mesmo clicando em "Atualizar". Foi essa a causa da
       // biblioteca "sumir" e não voltar sem reinstalar o app.
-      res = await withStallTimeout(fetch(url, {cache:'no-store'}), 15000, 'Tempo esgotado ao contatar o Google Drive.');
+      res = await withStallTimeout(fetch(url, {cache:'no-store', signal: reqCtrl.signal}), 15000, 'Tempo esgotado ao contatar o Google Drive.');
       if(res.ok){ driveRequestsDone++; return await res.json(); }
       errBody = await res.text().catch(()=> '');
     } catch(e){
       networkErr = e;
+      // Antes, o pedido que estourou o tempo continuava rodando escondido
+      // enquanto a tentativa seguinte já começava — agora ele é encerrado.
+      reqCtrl.abort();
     } finally {
       driveReleaseSlot();
     }
@@ -1356,48 +1360,65 @@ function driveMediaUrl(fileId){
 
 async function driveFetchBlob(fileId, onProgress, knownSize, signal){
   const url = driveMediaUrl(fileId);
-  let res;
+  // Controller interno: além de repassar o cancelamento de quem chamou
+  // (signal), ele permite que os NOSSOS timeouts (15s sem resposta / 20s
+  // sem chegar nenhum pedaço) encerrem a conexão de verdade. Antes, o
+  // timeout só fazia a função desistir — a conexão e o download seguiam
+  // rodando escondidos, ocupando banda e memória até terminar sozinhos.
+  const ctrl = new AbortController();
+  const onExternalAbort = ()=> ctrl.abort();
+  if(signal){
+    if(signal.aborted) ctrl.abort();
+    else signal.addEventListener('abort', onExternalAbort, {once:true});
+  }
   try{
-    // cache:'no-store' — nunca deixar o navegador guardar em disco os bytes
-    // de uma HQ só porque ela foi aberta/baixada; quem decide o que fica
-    // salvo é exclusivamente o idbSet('downloads', ...) feito por quem chama
-    // esta função, não o cache HTTP do navegador.
-    res = await withStallTimeout(fetch(url, {cache:'no-store', signal}), 15000, 'Tempo esgotado ao contatar o Google Drive.');
-  }catch(networkErr){
-    // Cancelamento de propósito (signal.abort() chamado por quem pediu o
-    // download) — repassa como está, sem trocar pela mensagem de erro de
-    // rede/proxy abaixo, que é só pra falhas de verdade.
-    if(signal && signal.aborted) throw networkErr;
-    if(CONFIG.proxyUrl){
-      throw new Error('Não foi possível contatar o proxy configurado. Verifique a URL nas configurações.');
+    let res;
+    try{
+      // cache:'no-store' — nunca deixar o navegador guardar em disco os bytes
+      // de uma HQ só porque ela foi aberta/baixada; quem decide o que fica
+      // salvo é exclusivamente o idbSet('downloads', ...) feito por quem chama
+      // esta função, não o cache HTTP do navegador.
+      res = await withStallTimeout(fetch(url, {cache:'no-store', signal: ctrl.signal}), 15000, 'Tempo esgotado ao contatar o Google Drive.');
+    }catch(networkErr){
+      // Cancelamento de propósito (signal.abort() chamado por quem pediu o
+      // download) — repassa como está, sem trocar pela mensagem de erro de
+      // rede/proxy abaixo, que é só pra falhas de verdade.
+      if(signal && signal.aborted) throw networkErr;
+      if(CONFIG.proxyUrl){
+        throw new Error('Não foi possível contatar o proxy configurado. Verifique a URL nas configurações.');
+      }
+      throw new Error('Falha de rede/CORS ao baixar o arquivo. Configure uma URL de proxy nas configurações.');
     }
-    throw new Error('Falha de rede/CORS ao baixar o arquivo. Configure uma URL de proxy nas configurações.');
+    if(!res.ok) throw new Error(`Não foi possível baixar o arquivo (${res.status}).`);
+    // Alguns proxies/CDNs não expõem o header Content-Length via CORS, então usamos
+    // o tamanho já conhecido pela listagem do Drive (f.size) como alternativa, para
+    // que a porcentagem sempre consiga avançar de forma real.
+    const total = Number(res.headers.get('Content-Length')) || Number(knownSize) || 0;
+    const reader = res.body.getReader();
+    const chunks = [];
+    let received = 0;
+    let lastPct = -1;
+    while(true){
+      if(signal && signal.aborted){
+        throw new DOMException('Download cancelado.', 'AbortError');
+      }
+      const {done, value} = await withStallTimeout(reader.read(), 20000, 'A conexão travou no meio do download.');
+      if(done) break;
+      chunks.push(value);
+      received += value.length;
+      if(onProgress && total){
+        const pct = Math.min(99, Math.max(1, Math.round((received/total)*100)));
+        if(pct !== lastPct){ lastPct = pct; onProgress(pct/100); }
+      }
+    }
+    if(onProgress) onProgress(1);
+    return new Blob(chunks);
+  }catch(err){
+    ctrl.abort(); // qualquer falha/cancelamento encerra a conexão na hora
+    throw err;
+  }finally{
+    if(signal) signal.removeEventListener('abort', onExternalAbort);
   }
-  if(!res.ok) throw new Error(`Não foi possível baixar o arquivo (${res.status}).`);
-  // Alguns proxies/CDNs não expõem o header Content-Length via CORS, então usamos
-  // o tamanho já conhecido pela listagem do Drive (f.size) como alternativa, para
-  // que a porcentagem sempre consiga avançar de forma real.
-  const total = Number(res.headers.get('Content-Length')) || Number(knownSize) || 0;
-  const reader = res.body.getReader();
-  const chunks = [];
-  let received = 0;
-  let lastPct = -1;
-  while(true){
-    if(signal && signal.aborted){
-      reader.cancel().catch(()=>{});
-      throw new DOMException('Download cancelado.', 'AbortError');
-    }
-    const {done, value} = await withStallTimeout(reader.read(), 20000, 'A conexão travou no meio do download.');
-    if(done) break;
-    chunks.push(value);
-    received += value.length;
-    if(onProgress && total){
-      const pct = Math.min(99, Math.max(1, Math.round((received/total)*100)));
-      if(pct !== lastPct){ lastPct = pct; onProgress(pct/100); }
-    }
-  }
-  if(onProgress) onProgress(1);
-  return new Blob(chunks);
 }
 
 /* ---------------------------------------------------------------------
@@ -1463,6 +1484,9 @@ function startBackgroundDownload(fileMeta, pathStr){
       entry.error = err;
       notifyDownload(fileMeta.id);
     }finally{
+      // Download terminou (ou falhou): a geração de capas em segundo plano,
+      // que fica limitada enquanto há download rodando, pode voltar ao normal.
+      pumpNetworkCoverQueue();
       // Mantém o resultado (concluído/erro) visível por alguns segundos
       // pra quem estiver olhando agora, depois libera da lista — a
       // partir daí, o botão volta a checar só o IndexedDB normalmente.
@@ -1609,7 +1633,7 @@ async function openComicCBR(blob){
 // desiste desse caminho e baixa o arquivo inteiro de uma vez (que já
 // sabemos ser rápido, mesmo em arquivos grandes) pra abrir a partir dele.
 const PDF_STREAM_TIMEOUT_MS = 12000;
-async function loadPdfWithFallback(source, onProgress, knownSize, fileId){
+async function loadPdfWithFallback(source, onProgress, knownSize, fileId, signal){
   if(typeof source !== 'string'){
     const loadingTask = pdfjsLib.getDocument({data: await source.arrayBuffer()});
     return await loadingTask.promise;
@@ -1629,33 +1653,51 @@ async function loadPdfWithFallback(source, onProgress, knownSize, fileId){
       if(total && p && typeof p.loaded === 'number') onProgress(Math.min(1, p.loaded/total));
     };
   }
-  if(!fileId) return await loadingTask.promise;
+  // Se a pessoa sair desta HQ (abrir outra / fechar o leitor) enquanto o PDF
+  // ainda está carregando, encerra o pdf.js e os pedidos de rede dele de
+  // verdade — antes eles continuavam rodando escondidos até terminar.
+  const onAbort = ()=>{ loadingTask.destroy().catch(()=>{}); };
+  if(signal){
+    if(signal.aborted) onAbort();
+    else signal.addEventListener('abort', onAbort, {once:true});
+  }
+  const abortErr = ()=> new DOMException('Carregamento cancelado.', 'AbortError');
+  let streamTimer;
   try{
-    return await Promise.race([
-      loadingTask.promise,
-      new Promise((_,reject)=>setTimeout(()=>reject(new Error('stream-timeout')), PDF_STREAM_TIMEOUT_MS))
-    ]);
-  }catch(e){
-    if(e && e.message !== 'stream-timeout') throw e;
-    loadingTask.destroy().catch(()=>{});
-    logWarn('PDF demorando demais por streaming, baixando arquivo inteiro como alternativa:', fileId);
-    // Usa o download nativo do navegador (fetch + .blob()) em vez do nosso
-    // loop manual de leitura por pedaços — pra arquivos grandes, deixar o
-    // próprio navegador cuidar da montagem do arquivo é bem mais leve pra
-    // memória do celular do que acumular tudo manualmente em JavaScript.
-    if(onProgress) onProgress(0);
-    const res = await fetch(driveMediaUrl(fileId), {cache:'no-store'});
-    if(!res.ok) throw new Error(`Não foi possível baixar o arquivo (${res.status}).`);
-    const blob = await res.blob();
-    if(onProgress) onProgress(1);
-    const fallbackTask = pdfjsLib.getDocument({data: await blob.arrayBuffer()});
-    return await fallbackTask.promise;
+    if(!fileId) return await loadingTask.promise;
+    try{
+      return await Promise.race([
+        loadingTask.promise,
+        new Promise((_,reject)=>{ streamTimer = setTimeout(()=>reject(new Error('stream-timeout')), PDF_STREAM_TIMEOUT_MS); })
+      ]);
+    }catch(e){
+      if(signal && signal.aborted) throw abortErr();
+      if(e && e.message !== 'stream-timeout') throw e;
+      loadingTask.destroy().catch(()=>{});
+      logWarn('PDF demorando demais por streaming, baixando arquivo inteiro como alternativa:', fileId);
+      // Usa o download nativo do navegador (fetch + .blob()) em vez do nosso
+      // loop manual de leitura por pedaços — pra arquivos grandes, deixar o
+      // próprio navegador cuidar da montagem do arquivo é bem mais leve pra
+      // memória do celular do que acumular tudo manualmente em JavaScript.
+      if(onProgress) onProgress(0);
+      const res = await fetch(driveMediaUrl(fileId), {cache:'no-store', signal});
+      if(!res.ok) throw new Error(`Não foi possível baixar o arquivo (${res.status}).`);
+      const blob = await res.blob();
+      if(onProgress) onProgress(1);
+      const fallbackTask = pdfjsLib.getDocument({data: await blob.arrayBuffer()});
+      const fallbackDoc = await fallbackTask.promise;
+      if(signal && signal.aborted){ fallbackTask.destroy().catch(()=>{}); throw abortErr(); }
+      return fallbackDoc;
+    }
+  } finally {
+    clearTimeout(streamTimer);
+    if(signal) signal.removeEventListener('abort', onAbort);
   }
 }
 
-async function openComicPDF(source, onProgress, knownSize, fileId){
+async function openComicPDF(source, onProgress, knownSize, fileId, signal){
   pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-  const pdf = await loadPdfWithFallback(source, onProgress, knownSize, fileId);
+  const pdf = await loadPdfWithFallback(source, onProgress, knownSize, fileId, signal);
   // 14 em vez de 24: as páginas agora saem em resolução bem maior (ver
   // getPage abaixo), então cada uma pesa bem mais em memória — reduzir
   // quantas ficam guardadas ao mesmo tempo evita que o app fique pesado
@@ -1828,16 +1870,60 @@ function scheduleCoverTask(task){ coverQueue.push(task); pumpCoverQueue(); }
 // CBZ) — isso sobe worker do pdf.js e gasta CPU/memória de verdade, então
 // rodar 6 ao mesmo tempo (teto da fila de visibilidade acima) deixava o
 // app pesado/travando ao rolar a biblioteca. Aqui o teto é bem menor.
+//
+// CORREÇÃO (lentidão que só sumia fechando o app): antes, quando uma dessas
+// tarefas passava de 20s, a fila só "desistia" dela (liberava a vaga) mas
+// NÃO cancelava o trabalho — o download/pdf.js seguia rodando escondido
+// (às vezes centenas de MB) e o resultado era jogado fora. Como a vaga era
+// liberada, a próxima tarefa começava por cima, e assim se acumulavam
+// trabalhos fantasmas disputando banda, conexões e memória com a HQ que a
+// pessoa estava abrindo/baixando. Agora:
+//  1) cada tarefa recebe um AbortSignal e é cancelada DE VERDADE no timeout;
+//  2) enquanto o leitor está aberto, nenhuma capa pesada roda (as em
+//     andamento são pausadas e voltam pra fila) e, enquanto há download
+//     em andamento, roda no máximo 1 por vez — HQ tem prioridade.
 const NETWORK_COVER_MAX_CONCURRENT = 3;
 let networkCoverActiveCount = 0;
 const networkCoverQueueTasks = [];
+const networkCoverRunning = new Set();
+
+function networkCoverLimit(){
+  const readerEl = document.getElementById('view-reader');
+  if(readerEl && !readerEl.classList.contains('hidden')) return 0; // abrindo/lendo uma HQ
+  for(const e of activeDownloads.values()){
+    if(e.status === 'downloading') return 1; // download em andamento: deixa a banda pra ele
+  }
+  return NETWORK_COVER_MAX_CONCURRENT;
+}
+
 function pumpNetworkCoverQueue(){
-  while(networkCoverActiveCount < NETWORK_COVER_MAX_CONCURRENT && networkCoverQueueTasks.length){
-    const {task, resolve, reject} = networkCoverQueueTasks.shift();
+  while(networkCoverActiveCount < networkCoverLimit() && networkCoverQueueTasks.length){
+    const entry = networkCoverQueueTasks.shift();
+    entry.ctrl = new AbortController();
+    entry.requeue = false;
+    entry.timedOut = false;
     networkCoverActiveCount++;
-    withCoverTimeout(Promise.resolve().then(task)).then(resolve, reject).finally(()=>{
-      networkCoverActiveCount--; pumpNetworkCoverQueue();
+    networkCoverRunning.add(entry);
+    const aborted = new Promise((_, rej)=>{
+      entry.ctrl.signal.addEventListener('abort', ()=>{
+        rej(entry.timedOut ? new Error('tempo esgotado gerando capa') : new DOMException('Tarefa de capa cancelada.', 'AbortError'));
+      }, {once:true});
     });
+    const timer = setTimeout(()=>{ entry.timedOut = true; entry.ctrl.abort(); }, COVER_TASK_TIMEOUT_MS);
+    Promise.race([Promise.resolve().then(()=>entry.task(entry.ctrl.signal)), aborted])
+      .then(entry.resolve, (err)=>{
+        if(entry.requeue && err && err.name === 'AbortError'){
+          networkCoverQueueTasks.unshift(entry); // pausada por uma HQ abrindo — recomeça depois
+        } else {
+          entry.reject(err);
+        }
+      })
+      .finally(()=>{
+        clearTimeout(timer);
+        networkCoverRunning.delete(entry);
+        networkCoverActiveCount--;
+        pumpNetworkCoverQueue();
+      });
   }
 }
 function networkCoverQueue(task){
@@ -1845,6 +1931,12 @@ function networkCoverQueue(task){
     networkCoverQueueTasks.push({task, resolve, reject});
     pumpNetworkCoverQueue();
   });
+}
+// Chamada quando uma HQ vai abrir: para na hora tudo que a fila de capas
+// pesadas estiver fazendo (elas voltam pra fila e recomeçam quando o
+// leitor fechar), liberando banda/CPU/memória pra HQ.
+function preemptNetworkCovers(){
+  networkCoverRunning.forEach(entry=>{ entry.requeue = true; entry.ctrl.abort(); });
 }
 
 // Cache em memória (dura a sessão/aba atual) do resultado já resolvido de
@@ -1861,6 +1953,11 @@ function networkCoverQueue(task){
 // (a imagem persistida no IndexedDB continua lá, então a capa só
 // recarrega — instantaneamente do disco — se for vista de novo).
 const COVER_MEMORY_CACHE_MAX = 300;
+// Capas pesadas que já falharam: não repetir a tentativa (que pode baixar
+// centenas de MB pela rede) toda vez que a pasta é redesenhada. "Atualizar"
+// zera isto pra permitir nova tentativa.
+const COVER_FAIL_COOLDOWN_MS = 10 * 60 * 1000;
+const coverFailUntil = new Map();
 const coverMemoryCache = new Map();
 const _coverMemoryCacheSet = coverMemoryCache.set.bind(coverMemoryCache);
 coverMemoryCache.set = function(key, value){
@@ -2656,7 +2753,18 @@ async function resolveCoverSrc(f, opts){
 // issuetracker.google.com/issues/229184403 e /issues/188567656). Como o
 // único fallback antes exigia um download local já existente, HQs em
 // PDF/CBZ que a pessoa nunca tinha aberto ficavam sem capa alguma.
-async function resolveCoverFallback(f){
+// Várias chamadas para a mesma HQ (ex.: a pasta foi redesenhada enquanto a
+// primeira tentativa ainda rodava) compartilham UMA tentativa só, em vez de
+// empilhar trabalho pesado duplicado.
+const coverFallbackInFlight = new Map();
+function resolveCoverFallback(f){
+  const running = coverFallbackInFlight.get(f.id);
+  if(running) return running;
+  const p = resolveCoverFallbackImpl(f).finally(()=>{ coverFallbackInFlight.delete(f.id); });
+  coverFallbackInFlight.set(f.id, p);
+  return p;
+}
+async function resolveCoverFallbackImpl(f){
   const localDl = await idbGet('downloads', f.id);
   if(localDl){
     try{
@@ -2688,13 +2796,18 @@ async function resolveCoverFallback(f){
   const ext = f._ext || guessExt(f);
   let dataUrl = null;
 
+  // Já tentamos há pouco e não deu (arquivo grande demais, rede que não
+  // aceita range, etc.) — não repete o trabalho pesado agora.
+  const failUntil = coverFailUntil.get(f.id);
+  if(failUntil && Date.now() < failUntil) return null;
+
   // 1ª tentativa: rápida e econômica, sem baixar o arquivo inteiro (range
   // requests). Numa fila própria e bem mais restrita (ver
   // NETWORK_COVER_MAX_CONCURRENT) pra não subir vários workers do pdf.js
   // ao mesmo tempo e pesar o app.
   try{
-    if(ext === 'pdf') dataUrl = await networkCoverQueue(()=>renderPdfCoverThumb(driveMediaUrl(f.id)));
-    else if(ext === 'cbz') dataUrl = await networkCoverQueue(()=>extractCbzCoverPartial(f));
+    if(ext === 'pdf') dataUrl = await networkCoverQueue((signal)=>renderPdfCoverThumb(driveMediaUrl(f.id), signal));
+    else if(ext === 'cbz') dataUrl = await networkCoverQueue((signal)=>extractCbzCoverPartial(f, signal));
   }catch(err){
     logErr('[PlanetaHQ] capa: tentativa rápida (range) falhou —', f.name, err);
   }
@@ -2707,18 +2820,30 @@ async function resolveCoverFallback(f){
   // realmente aparece, que é o que importa.
   if(!dataUrl && (ext === 'pdf' || ext === 'cbz' || ext === 'cbr')){
     try{
-      dataUrl = await networkCoverQueue(async ()=>{
-        const blob = await driveFetchBlob(f.id, null, Number(f.size)||0);
+      dataUrl = await networkCoverQueue(async (signal)=>{
+        // Se, pelo ritmo do download, ele não vai terminar dentro do prazo
+        // da tarefa, desiste logo em vez de gastar banda por 20s à toa.
+        const t0 = Date.now();
+        const blob = await driveFetchBlob(f.id, (p)=>{
+          const elapsed = Date.now() - t0;
+          if(elapsed > 4000 && p > 0 && p < 1 && (elapsed / p) > COVER_TASK_TIMEOUT_MS * 0.9){
+            throw new Error('arquivo grande demais pra gerar a capa a tempo');
+          }
+        }, Number(f.size)||0, signal);
+        if(signal.aborted) throw new DOMException('Tarefa de capa cancelada.', 'AbortError');
         const doc = await openComicFromBlob(f, blob);
-        const pageUrl = await toDataUrl(await doc.getPage(0));
-        if(doc.dispose) doc.dispose();
-        return pageUrl;
+        try{
+          return await toDataUrl(await doc.getPage(0));
+        } finally {
+          if(doc.dispose) doc.dispose();
+        }
       });
     }catch(err){
       logErr('[PlanetaHQ] capa: download completo também falhou —', f.name, err);
     }
   }
 
+  if(!dataUrl) coverFailUntil.set(f.id, Date.now() + COVER_FAIL_COOLDOWN_MS);
   cacheResolvedCover(f.id, dataUrl);
   // Acabamos de gerar essa capa do zero — sobe pro R2 em segundo plano
   // (sem esperar, sem afetar a pessoa atual) pra que a PRÓXIMA pessoa
@@ -2835,9 +2960,9 @@ function schedulePersistCoverOffline(fileId, url){
 // resolução de miniatura (não a qualidade de leitura), e descarta o
 // documento/worker do pdf.js assim que termina — ao contrário do leitor
 // (openComicPDF), que mantém tudo vivo pra navegar entre páginas.
-async function renderPdfCoverThumb(url){
+async function renderPdfCoverThumb(url, signal){
   pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-  const pdf = await pdfjsLib.getDocument({
+  const loadingTask = pdfjsLib.getDocument({
     url,
     rangeChunkSize: 1 << 18,
     disableAutoFetch: true,
@@ -2845,8 +2970,19 @@ async function renderPdfCoverThumb(url){
     disableRange: false,
     cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
     cMapPacked: true
-  }).promise;
+  });
+  // Guardamos a loadingTask pra conseguir destruí-la em QUALQUER desfecho
+  // (sucesso, erro ou cancelamento/timeout da fila). Antes só destruía se o
+  // documento chegasse a abrir — se travasse ou falhasse antes disso, o
+  // worker do pdf.js e os pedidos de rede dele ficavam vazados.
+  const onAbort = ()=>{ loadingTask.destroy().catch(()=>{}); };
+  if(signal){
+    if(signal.aborted) onAbort();
+    else signal.addEventListener('abort', onAbort, {once:true});
+  }
   try{
+    const pdf = await loadingTask.promise;
+    if(signal && signal.aborted) throw new DOMException('Tarefa de capa cancelada.', 'AbortError');
     const page = await pdf.getPage(1);
     const base = page.getViewport({scale: 1});
     const targetWidth = 400; // mesma resolução usada nas miniaturas do Drive (=s400)
@@ -2859,7 +2995,8 @@ async function renderPdfCoverThumb(url){
     page.cleanup && page.cleanup();
     return dataUrl;
   } finally {
-    pdf.destroy();
+    if(signal) signal.removeEventListener('abort', onAbort);
+    loadingTask.destroy().catch(()=>{});
   }
 }
 
@@ -2868,9 +3005,9 @@ async function renderPdfCoverThumb(url){
 // central (EOCD), 2) o diretório central em si (pra achar a 1ª imagem
 // em ordem natural), 3) só os bytes daquela imagem. Não cobre ZIP64
 // (raríssimo em CBZ) — nesses casos desiste silenciosamente.
-async function fetchRange(url, start, end){
+async function fetchRange(url, start, end, signal){
   const headers = { Range: start < 0 ? `bytes=${start}` : `bytes=${start}-${end}` };
-  const res = await fetch(url, {headers, cache:'no-store'});
+  const res = await fetch(url, {headers, cache:'no-store', signal});
   if(!res.ok && res.status !== 206) throw new Error('range fetch falhou: ' + res.status);
   return new Uint8Array(await res.arrayBuffer());
 }
@@ -2880,13 +3017,13 @@ function findEOCD(buf){
   }
   return -1;
 }
-async function extractCbzCoverPartial(f){
+async function extractCbzCoverPartial(f, signal){
   const url = driveMediaUrl(f.id);
   const size = Number(f.size) || 0;
   if(!size) return null;
 
   const tailSize = Math.min(size, 65557); // tamanho máximo teórico do EOCD + comentário
-  const tail = await fetchRange(url, -tailSize);
+  const tail = await fetchRange(url, -tailSize, undefined, signal);
   const eocdOffset = findEOCD(tail);
   if(eocdOffset === -1) return null;
   const eocd = new DataView(tail.buffer, tail.byteOffset + eocdOffset, 22);
@@ -2894,7 +3031,7 @@ async function extractCbzCoverPartial(f){
   const cdOffset = eocd.getUint32(16, true);
   if(cdOffset === 0xFFFFFFFF || cdSize === 0xFFFFFFFF) return null; // zip64, não suportado
 
-  const cd = await fetchRange(url, cdOffset, cdOffset + cdSize - 1);
+  const cd = await fetchRange(url, cdOffset, cdOffset + cdSize - 1, signal);
   const cdView = new DataView(cd.buffer, cd.byteOffset, cd.byteLength);
   const decoder = new TextDecoder();
   const entries = [];
@@ -2917,7 +3054,7 @@ async function extractCbzCoverPartial(f){
 
   const margin = 512; // folga pra nome+campo extra do cabeçalho local
   const chunkEnd = Math.min(size-1, first.localOffset + 30 + margin + first.compSize);
-  const chunk = await fetchRange(url, first.localOffset, chunkEnd);
+  const chunk = await fetchRange(url, first.localOffset, chunkEnd, signal);
   const lv = new DataView(chunk.buffer, chunk.byteOffset, chunk.byteLength);
   if(lv.getUint32(0, true) !== 0x04034b50) return null;
   const nameLen2 = lv.getUint16(26, true);
@@ -3621,6 +3758,9 @@ async function openReader(fileMeta, forceLocal, parentId){
   const myToken = ++readerLoadToken;
   const myAbort = new AbortController();
   readerAbortController = myAbort;
+  // HQ tem prioridade: pausa a geração de capas pesadas em andamento
+  // (ver networkCoverQueue) pra ela não disputar banda/CPU com a abertura.
+  preemptNetworkCovers();
 
   const wasHidden = $('#view-reader').classList.contains('hidden');
   $('#view-reader').classList.remove('hidden');
@@ -3670,7 +3810,7 @@ async function openReader(fileMeta, forceLocal, parentId){
         // a tela não mostra mais porcentagem (evita trabalho extra na UI
         // enquanto o PDF carrega).
         status.innerHTML = '<div class="spinner"></div><div>Carregando PDF...</div>';
-        doc = await openComicPDF(driveMediaUrl(fileMeta.id), null, Number(fileMeta.size)||0, fileMeta.id);
+        doc = await openComicPDF(driveMediaUrl(fileMeta.id), null, Number(fileMeta.size)||0, fileMeta.id, myAbort.signal);
       } else {
         status.innerHTML = '<div class="spinner"></div><div>Baixando... <span id="reader-status-pct">0%</span></div>';
         const blob = await driveFetchBlob(fileMeta.id, p=>{ setPct(Math.round(p*100)); }, Number(fileMeta.size)||0, myAbort.signal);
@@ -3682,7 +3822,13 @@ async function openReader(fileMeta, forceLocal, parentId){
     // mais mexer no leitor (que já pertence à HQ nova). Sai em silêncio,
     // sem mostrar erro nenhum: não é uma falha, só uma corrida que esta
     // chamada perdeu de propósito.
-    if(myToken !== readerLoadToken) return;
+    if(myToken !== readerLoadToken){
+      // Este documento chegou tarde demais (a pessoa já foi pra outra HQ) e
+      // ninguém mais vai usá-lo: libera agora. Antes ele ficava vivo pra
+      // sempre — no caso de PDF, com um worker do pdf.js inteiro preso.
+      if(doc && doc.dispose) doc.dispose();
+      return;
+    }
     state.reader.doc = doc;
     state.reader.fileMeta = fileMeta;
     state.reader.pageIndex = 0;
@@ -4054,6 +4200,8 @@ function closeReader(){
   if(state.currentTab === 'library' && state.path[state.path.length-1] && state.path[state.path.length-1].id === CONFIG.rootFolderId){
     renderHomeSections();
   }
+  // Leitor fechado: as capas pesadas que ficaram esperando podem continuar.
+  pumpNetworkCoverQueue();
 }
 
 async function updateDownloadButtonReader(){
@@ -5281,6 +5429,7 @@ $('#sort-select').addEventListener('change', e=>{
 
 $('#btn-refresh').onclick = async ()=>{
   coverMemoryCache.clear();
+  coverFailUntil.clear();
   // IMPORTANTE: não apagamos mais o cache do localStorage (ARANHA/XMEN/
   // MANGA/ALLCOMICS/ALLFOLDERS_CACHE_KEY) aqui. renderHomeSections já foi
   // feita pra pintar os dados antigos na hora e só trocar pelos novos
