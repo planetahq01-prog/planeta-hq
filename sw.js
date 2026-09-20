@@ -268,7 +268,18 @@
   voltar para v42) pra todo aparelho que já recebeu a v43 buscar este
   index.html de novo.
 */
-const CACHE_VERSION = 'v44';
+/*
+  v45: index.html mudou — três seções novas na Home: "Edições especiais
+  [Homem-Aranha]" e "A Saga da [Liga da Justiça]" (edição única, HQs das
+  pastas de mesmo nome) e "Coleção [Quarteto Fantástico]" (seção mista:
+  subpastas + HQs soltas na raiz da pasta), com as três logos novas na
+  casca do app.
+*/
+/*
+  v46: index.html mudou — títulos das seções da Home: "Coleção" virou
+  "Coleção:" e "Clássico" virou "Clássicos:".
+*/
+const CACHE_VERSION = 'v46';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
@@ -305,7 +316,12 @@ const APP_SHELL = [
   'https://i.postimg.cc/4dMsT0k3/Avengers(1963-1996)-1-png.webp',
   // Logo "Clássico Liga da Justiça" (v41) — também direto do postimg.cc,
   // precisa bater EXATAMENTE com HOME_LOGOS.liga no index.html.
-  'https://i.postimg.cc/50M063xv/Nice-Png-dc-comics-logo-png-832571-(1).png'
+  'https://i.postimg.cc/50M063xv/Nice-Png-dc-comics-logo-png-832571-(1).png',
+  // Logos das seções novas (v45) — precisam bater EXATAMENTE com HOME_LOGOS
+  // no index.html (aranhaespecial, ligasaga, quarteto).
+  'https://i.postimg.cc/G2MpJDRx/who-was-the-most-nostalgic-spiderman-artwork-used-for-v0-vse6zzup5ih91.png',
+  'https://i.postimg.cc/pL2X7kdz/logo-liga-da-justica-novo.png',
+  'https://i.postimg.cc/cLHGwzCJ/fantastic-four-1985-1992-seeklogo.png'
 ];
 // URLs absolutas resolvidas uma única vez, pra comparar por igualdade exata
 // (nunca mais por sufixo/heurística) na hora de decidir o que é "casca".
