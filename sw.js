@@ -253,7 +253,19 @@
   no index.html). A logo nova entra na casca do app abaixo, pela URL
   original, do mesmo jeito da logo do Clássico Avengers.
 */
-const CACHE_VERSION = 'v41';
+/*
+  v42: index.html mudou — ao entrar numa seção de subpasta (ou em qualquer
+  pasta) a partir da Home e voltar, a Home agora volta exatamente para onde
+  a pessoa estava: mesma posição vertical (ancorada na seção que estava no
+  topo da tela) e mesma posição horizontal de cada carrossel. Antes ela era
+  repintada do zero, sempre no topo.
+*/
+/*
+  v43: index.html mudou — "estantes" na Home (Todas / Marvel / DC). Cada
+  estante mostra só as suas seções, na ordem pedida, e troca o tema de cores
+  do app (Marvel: vermelho; DC: azul). A escolha fica salva no aparelho.
+*/
+const CACHE_VERSION = 'v43';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [

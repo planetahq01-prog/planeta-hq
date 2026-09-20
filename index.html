@@ -4,6 +4,16 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#0d0c12">
+<script>
+/* Estante escolhida (Marvel/DC) vira tema já no primeiro frame, antes do CSS pintar. */
+try{
+  var __shelf = localStorage.getItem('planetahq_shelf');
+  if(__shelf === 'marvel' || __shelf === 'dc'){
+    document.documentElement.setAttribute('data-shelf', __shelf);
+    document.querySelector('meta[name="theme-color"]').setAttribute('content', __shelf === 'marvel' ? '#120a0c' : '#070b17');
+  }
+}catch(e){}
+</script>
 <link rel="manifest" href="./manifest.json">
 <title>Planeta HQ</title>
 
@@ -29,6 +39,8 @@
   --text-muted:#8a84a0;
   --accent:#ff4d5e;
   --accent-dark:#c22e3f;
+  --accent-rgb:255,77,94;   /* mesma cor do --accent, em RGB, pra sombras/brilhos */
+  --bg-glow:#241f38;        /* brilho do fundo, no alto da tela */
   --gold:#ffb703;
   --teal:#14b8a6;
   --teal-dark:#0d8f7d;
@@ -39,10 +51,27 @@
   --font-display:'Anton', sans-serif;
   --font-body:'Inter', sans-serif;
 }
+/* ============ TEMAS DE ESTANTE ============
+   Cada estante (Marvel / DC) só troca as cores dos tokens acima. As capas e
+   os cards continuam sobre o mesmo papel creme (--paper) de sempre, então
+   as HQs e pastas seguem com o mesmo destaque em qualquer tema: o tema
+   colore o "palco" (fundo, barras, botões, destaques), nunca as capas. */
+html[data-shelf="marvel"]{
+  --ink:#120a0c;--ink-soft:#1c1214;--ink-elevated:#291a1d;--ink-border:#402529;
+  --paper-dim:#c9b6b9;--text-muted:#a08d90;
+  --accent:#f0343c;--accent-dark:#b3141b;--accent-rgb:240,52,60;
+  --bg-glow:#3d141a;--gold:#ffc233;
+}
+html[data-shelf="dc"]{
+  --ink:#070b17;--ink-soft:#0e1527;--ink-elevated:#162139;--ink-border:#25355c;
+  --paper-dim:#b0bcda;--text-muted:#8b99ba;
+  --accent:#2f86ff;--accent-dark:#1b5fc9;--accent-rgb:47,134,255;
+  --bg-glow:#10295c;--gold:#ffd23f;
+}
 *{box-sizing:border-box;}
 html,body{
   margin:0;padding:0;height:100%;color:var(--paper);font-family:var(--font-body);
-  background:radial-gradient(ellipse 900px 500px at 50% -10%, #241f38 0%, var(--ink) 55%) var(--ink);
+  background:radial-gradient(ellipse 900px 500px at 50% -10%, var(--bg-glow) 0%, var(--ink) 55%) var(--ink);
   /* Bloqueia o pinch-zoom e o duplo-toque-pra-zoom nativos do navegador
      em todo o app (home, navegação, leitura). "pan-x pan-y" mantém a
      rolagem normal (vertical e os carrosséis horizontais) funcionando,
@@ -89,7 +118,7 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
   font-size:22px;letter-spacing:.5px;color:var(--paper);
   white-space:nowrap;overflow:hidden;text-overflow:ellipsis;
 }
-.wordmark span{color:var(--accent);text-shadow:0 0 18px rgba(255,77,94,.45);}
+.wordmark span{color:var(--accent);text-shadow:0 0 18px rgba(var(--accent-rgb),.45);}
 .search-box{
   width:100%;display:flex;align-items:center;background:var(--ink-soft);
   border:1px solid var(--ink-border);border-radius:999px;
@@ -125,6 +154,26 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
   content:'';position:absolute;left:12px;right:12px;bottom:-1px;height:3px;border-radius:3px 3px 0 0;
   background:linear-gradient(90deg,var(--accent),var(--gold));
 }
+
+/* ---- Barra de estantes (Todas / Marvel / DC), fixa no topo da Home ---- */
+.shelf-bar{
+  position:sticky;top:0;z-index:6;display:flex;gap:8px;padding:10px 12px 12px;
+  background:linear-gradient(var(--ink) 70%, transparent);
+}
+.shelf-pill{
+  flex:1;display:flex;align-items:center;justify-content:center;gap:8px;
+  padding:10px 8px;border-radius:999px;background:var(--ink-soft);
+  border:1px solid var(--ink-border);color:var(--paper-dim);
+  font-size:13px;font-weight:700;letter-spacing:.3px;
+  transition:background .2s ease,border-color .2s ease,color .2s ease,box-shadow .2s ease;
+}
+.shelf-pill i{width:8px;height:8px;border-radius:50%;background:var(--dot);flex-shrink:0;}
+.shelf-pill:active{transform:scale(.97);}
+.shelf-pill.active{
+  background:var(--accent-dark);border-color:var(--accent);color:#fff;
+  box-shadow:0 8px 18px -10px rgba(var(--accent-rgb),.95);
+}
+.shelf-pill.active i{background:#fff;}
 
 /* ---- Breadcrumb ---- */
 .breadcrumb-row{
@@ -316,7 +365,7 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 .field input:focus-visible{outline:2px solid var(--accent);outline-offset:1px;}
 .btn-primary{
   background:linear-gradient(135deg,var(--accent),var(--accent-dark));color:#fff;border:none;padding:14px 20px;
-  font-weight:700;font-size:14px;border-radius:999px;width:100%;box-shadow:0 10px 22px -10px rgba(255,77,94,.6);
+  font-weight:700;font-size:14px;border-radius:999px;width:100%;box-shadow:0 10px 22px -10px rgba(var(--accent-rgb),.6);
 }
 .btn-primary:active{filter:brightness(.9);}
 .btn-secondary{
@@ -395,7 +444,7 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 .reader-status{
   position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;
   gap:14px;color:var(--paper);font-size:15px;font-weight:600;text-align:center;padding:24px;
-  background:radial-gradient(ellipse 700px 400px at 50% 40%, #241f38 0%, var(--ink) 60%) var(--ink);
+  background:radial-gradient(ellipse 700px 400px at 50% 40%, var(--bg-glow) 0%, var(--ink) 60%) var(--ink);
   z-index:10;
 }
 .reader-status #reader-status-pct{color:var(--gold);font-variant-numeric:tabular-nums;}
@@ -536,14 +585,14 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 #view-loading{
   position:fixed;inset:0;z-index:1000;
   display:flex;flex-direction:column;align-items:center;justify-content:center;gap:18px;
-  background:radial-gradient(ellipse 900px 500px at 50% -10%, #241f38 0%, var(--ink) 55%) var(--ink);
+  background:radial-gradient(ellipse 900px 500px at 50% -10%, var(--bg-glow) 0%, var(--ink) 55%) var(--ink);
   padding:24px;text-align:center;
 }
 #view-loading.hidden{display:none;}
 #view-loading .loading-word{
   font-family:var(--font-display);font-size:30px;letter-spacing:.5px;color:var(--paper);
 }
-#view-loading .loading-word span{color:var(--accent);text-shadow:0 0 18px rgba(255,77,94,.45);}
+#view-loading .loading-word span{color:var(--accent);text-shadow:0 0 18px rgba(var(--accent-rgb),.45);}
 #view-loading .loading-track{
   width:min(280px,80vw);height:8px;border-radius:999px;
   background:var(--ink-soft);border:1px solid var(--ink-border);overflow:hidden;
@@ -574,7 +623,7 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 .welcome-card{
   position:relative;width:100%;max-width:360px;
   background:var(--ink-soft);
-  background-image:radial-gradient(ellipse 260px 160px at 50% 0%, rgba(255,77,94,.16) 0%, transparent 70%);
+  background-image:radial-gradient(ellipse 260px 160px at 50% 0%, rgba(var(--accent-rgb),.16) 0%, transparent 70%);
   border:1px solid var(--ink-border);border-radius:var(--radius-lg);
   box-shadow:0 24px 60px -20px rgba(0,0,0,.75);
   padding:28px 24px 24px;text-align:center;
@@ -584,7 +633,7 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
   width:56px;height:56px;margin:0 auto 16px;border-radius:50%;
   display:flex;align-items:center;justify-content:center;
   background:linear-gradient(135deg,var(--accent),var(--accent-dark));
-  box-shadow:0 10px 22px -8px rgba(255,77,94,.7);
+  box-shadow:0 10px 22px -8px rgba(var(--accent-rgb),.7);
   font-size:26px;
 }
 .welcome-card .wordmark{
@@ -2477,7 +2526,107 @@ function saveConfig(apiKey, folderId, proxyUrl){
   localStorage.setItem(CONFIG_KEY, JSON.stringify(CONFIG));
 }
 
+/* ---------------------------------------------------------------------
+   Posição da Home ao entrar numa subpasta e voltar
+
+   Antes, entrar numa subpasta escondia a Home e, ao voltar, ela era
+   repintada do zero — sempre lá do topo, e com todos os carrosséis no
+   começo. (Nas seções de "edição única" isso já funcionava porque o
+   leitor abre POR CIMA da Home, sem tirá-la do lugar.)
+
+   Agora, ao sair da Home para uma subpasta, guardamos exatamente onde a
+   pessoa estava:
+     - a seção que estava no topo da tela e quantos pixels dela já tinham
+       passado (âncora por seção: continua certo mesmo que a altura de
+       alguma seção acima mude, ex.: "Continuar lendo" aparecer/sumir);
+     - o scrollTop bruto (plano B, se a seção-âncora não existir mais);
+     - a posição horizontal de cada carrossel.
+   Ao voltar, a Home reaparece já nessa posição (sem passar pelo topo) e a
+   posição é reaplicada a cada repintura da Home durante alguns segundos
+   (a busca em segundo plano pode repintar), até a pessoa tocar/rolar.
+   --------------------------------------------------------------------- */
+let homeScrollSnapshot = null;   // {top, anchorKey, anchorOffset, carousels}
+let homeRestoreWindow = null;    // {snap, until} enquanto a restauração está valendo
+const HOME_RESTORE_WINDOW_MS = 8000;
+const HOME_SECTION_SEL = ':scope > .home-section[data-home-key]';
+
+function captureHomeScroll(){
+  const wrap = $('#home-sections'), view = $('#view-library');
+  if(!wrap || !view) return;
+  const secs = wrap.classList.contains('hidden') || view.classList.contains('hidden')
+    ? [] : Array.from(wrap.querySelectorAll(HOME_SECTION_SEL));
+  if(!secs.length){
+    // A Home não está visível agora. Se estamos na raiz (ex.: veio de uma
+    // busca), não há posição válida pra guardar — e a antiga já não vale.
+    // Em níveis mais fundos (subpasta -> subpasta) não mexe: a guardada ao
+    // sair da Home continua valendo.
+    if(state.path.length <= 1) homeScrollSnapshot = null;
+    return;
+  }
+  const viewTop = view.getBoundingClientRect().top;
+  const snap = {top: view.scrollTop, anchorKey: null, anchorOffset: 0, carousels: {}};
+  // Âncora: a primeira seção cuja parte de baixo ainda aparece na tela.
+  for(const sec of secs){
+    const r = sec.getBoundingClientRect();
+    if(r.bottom > viewTop + 1){
+      snap.anchorKey = sec.dataset.homeKey;
+      snap.anchorOffset = viewTop - r.top; // quanto da seção já rolou pra cima (negativo = ainda tem espaço acima dela)
+      break;
+    }
+  }
+  secs.forEach(sec=>{
+    const c = sec.querySelector('.carousel');
+    if(c && c.scrollLeft > 0) snap.carousels[sec.dataset.homeKey] = c.scrollLeft;
+  });
+  homeScrollSnapshot = snap;
+}
+
+function applyHomeRestore(snap){
+  const wrap = $('#home-sections'), view = $('#view-library');
+  if(!snap || !wrap || !view || wrap.classList.contains('hidden') || view.classList.contains('hidden')) return false;
+  const secs = Array.from(wrap.querySelectorAll(HOME_SECTION_SEL));
+  if(!secs.length) return false;
+  const byKey = {};
+  secs.forEach(sec=>{ byKey[sec.dataset.homeKey] = sec; });
+  // Carrosséis (horizontal)
+  Object.keys(snap.carousels).forEach(k=>{
+    const c = byKey[k] && byKey[k].querySelector('.carousel');
+    if(c) c.scrollLeft = snap.carousels[k];
+  });
+  // Vertical: pela seção-âncora; se ela não existir mais, pelo scrollTop bruto.
+  let top = snap.top;
+  const anchor = snap.anchorKey && byKey[snap.anchorKey];
+  if(anchor){
+    const viewTop = view.getBoundingClientRect().top;
+    top = view.scrollTop + (anchor.getBoundingClientRect().top - viewTop) + snap.anchorOffset;
+  }
+  view.scrollTop = Math.max(0, top);
+  return true;
+}
+
+function restoreHomeScrollOnReturn(){
+  const snap = homeScrollSnapshot;
+  homeScrollSnapshot = null;
+  if(!snap) return;
+  homeRestoreWindow = {snap, until: Date.now() + HOME_RESTORE_WINDOW_MS};
+  const wrap = $('#home-sections');
+  // A Home antiga ainda está no DOM (só ficou escondida): mostra na hora,
+  // já na posição certa, em vez de deixar passar um instante no topo.
+  if(wrap && wrap.querySelector(HOME_SECTION_SEL)) wrap.classList.remove('hidden');
+  applyHomeRestore(snap);
+  // Reaplica algumas vezes enquanto o layout assenta (repintura, capas...).
+  [50, 150, 350, 800, 1600].forEach(ms=>setTimeout(()=>{
+    if(homeRestoreWindow && homeRestoreWindow.snap === snap && Date.now() < homeRestoreWindow.until) applyHomeRestore(snap);
+  }, ms));
+}
+// Se a pessoa tocar/rolar a tela, ela assume o controle: para de restaurar.
+['touchstart','pointerdown','wheel','keydown'].forEach(ev=>{
+  $('#view-library').addEventListener(ev, ()=>{ homeRestoreWindow = null; }, {passive:true});
+});
+
 async function enterFolder(id, name, {reset=false, skipHome=false}={}){
+  // Saindo da Home pra uma subpasta: guarda a posição exata pra voltar nela.
+  if(!reset) captureHomeScroll();
   if(reset) state.path = [];
   state.path.push({id, name});
   $('#search-input').value = '';
@@ -2498,6 +2647,7 @@ function goToBreadcrumbIndex(idx){
   renderLibrary(state.path[state.path.length-1].id, false);
   if(state.path[state.path.length-1].id === CONFIG.rootFolderId){
     renderHomeSections();
+    restoreHomeScrollOnReturn();
   }
 }
 function goBack(){
@@ -5079,17 +5229,109 @@ const HOME_SECTION_ORDER = [
   'universoAbsoluto'   // DC Universo Absoluto
 ];
 
-function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, allComics, hadError, errorMessage}){
-  const recommended = buildRecommended(allComics);
+/* ---------------------------------------------------------------------
+   Estantes (Todas / Marvel / DC)
+
+   Cada estante é só uma LISTA DE SEÇÕES (chaves de `built`, ver
+   paintHomeSections) numa ordem própria + um tema de cores (CSS
+   html[data-shelf=...]). "Todas" é a Home completa de sempre. Pra mudar as
+   seções/ordem de uma estante, edite `keys` aqui. `members` (nomes de
+   pasta, sem acento/pontuação) e `words` servem só pra "Recomendados"
+   sugerir HQs daquele universo: uma HQ conta se alguma pasta do caminho
+   dela bate com um nome de `members` ou tem uma palavra de `words`.
+   --------------------------------------------------------------------- */
+const HOME_SHELVES = [
+  {id:'all', name:'Todas', dot:'#ffb703', keys: HOME_SECTION_ORDER},
+  {id:'marvel', name:'Marvel', dot:'#ff3b43', themeColor:'#120a0c',
+    keys:['continuar','aranha','ironman','hulk','doomsday','recomendados','classicoAvengers','xmen','thanos','salvat'],
+    members:['colecao homem aranha','colecao homem de ferro','colecao hulk','x men','xmen','graphic novels marvel','doomsday','colecao thanos','vingadores classico'],
+    words:['marvel']},
+  {id:'dc', name:'DC', dot:'#3a8dff', themeColor:'#070b17',
+    keys:['continuar','superman','batman','lanterna','mulhermaravilha','recomendados','classicoLiga','darkseid'],
+    members:['dc','batman','superman','lanterna verde','mulher maravilha','wonder woman','universo absoluto','colecao darkseid','liga da justica da america'],
+    words:[]}
+];
+const SHELF_KEY = 'planetahq_shelf';
+let lastHomeData = null; // últimos dados pintados na Home (pra trocar de estante sem refazer a busca)
+let currentShelfId = (function(){
+  try{ const v = localStorage.getItem(SHELF_KEY); if(HOME_SHELVES.some(x=>x.id===v)) return v; }catch(e){}
+  return 'all';
+})();
+function currentShelfDef(){ return HOME_SHELVES.find(x=>x.id===currentShelfId) || HOME_SHELVES[0]; }
+
+function applyShelfTheme(){
+  const root = document.documentElement;
+  if(currentShelfId === 'all') root.removeAttribute('data-shelf');
+  else root.setAttribute('data-shelf', currentShelfId);
+  const m = document.querySelector('meta[name="theme-color"]');
+  if(m) m.setAttribute('content', currentShelfDef().themeColor || '#0d0c12');
+}
+
+// HQs do universo da estante atual (pra "Recomendados"). Se a estante não
+// tem critério, ou quase nada casou (ex.: nomes de pasta diferentes), usa a
+// biblioteca inteira em vez de deixar Recomendados vazio.
+function shelfComicPool(allComics){
+  const sh = currentShelfDef();
+  if(!sh.members && !sh.words) return allComics;
+  const names = new Set(sh.members || []);
+  const words = sh.words || [];
+  const pool = allComics.filter(f=>(f._path || []).some(seg=>{
+    const n = normalizeForFolderMatch(seg);
+    return names.has(n) || words.some(w=>n.split(' ').includes(w));
+  }));
+  return pool.length >= 5 ? pool : allComics;
+}
+
+function buildShelfBar(){
+  const bar = el('div','shelf-bar');
+  bar.setAttribute('role','tablist');
+  bar.setAttribute('aria-label','Estantes');
+  HOME_SHELVES.forEach(sh=>{
+    const active = sh.id === currentShelfId;
+    const b = el('button','shelf-pill' + (active ? ' active' : ''));
+    b.type = 'button';
+    b.setAttribute('role','tab');
+    b.setAttribute('aria-selected', active ? 'true' : 'false');
+    const dot = el('i');
+    dot.style.setProperty('--dot', sh.dot);
+    b.appendChild(dot);
+    b.appendChild(document.createTextNode(sh.name));
+    b.onclick = ()=>setShelf(sh.id);
+    bar.appendChild(b);
+  });
+  return bar;
+}
+
+function setShelf(id){
+  if(id === currentShelfId || !HOME_SHELVES.some(x=>x.id===id)) return;
+  currentShelfId = id;
+  try{ localStorage.setItem(SHELF_KEY, id); }catch(e){}
+  applyShelfTheme();
+  // A posição guardada era da estante anterior: não vale mais.
+  homeScrollSnapshot = null; homeRestoreWindow = null;
+  const wrap = $('#home-sections');
+  if(wrap && lastHomeData) paintHomeSections(wrap, lastHomeData);
+  $('#view-library').scrollTop = 0;
+}
+
+function paintHomeSections(wrap, homeData){
+  lastHomeData = homeData;
+  const {continueItems, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, allComics, hadError, errorMessage} = homeData;
+  // Só monta as seções da estante atual (as outras nem chegam a ser criadas).
+  const shelf = currentShelfDef();
+  const wantKeys = new Set(shelf.keys);
+  const want = k => wantKeys.has(k);
+  const recommended = want('recomendados') ? buildRecommended(shelfComicPool(allComics)) : [];
   releaseCoverObservers(wrap);
   wrap.innerHTML = '';
+  wrap.appendChild(buildShelfBar());
   let anySection = false;
   // As seções são montadas aqui, por chave, e só no final são colocadas na
   // tela na ordem de HOME_SECTION_ORDER — assim a ordem da Home se muda em
   // UM lugar só, sem mexer no código de cada seção.
   const built = {};
 
-  const secContinue = buildHomeSection('Continuar lendo', continueItems, (it)=>{
+  const secContinue = !want('continuar') ? null : buildHomeSection('Continuar lendo', continueItems, (it)=>{
     return buildCarouselCard(it, { isFolder:false, progressPct: it.pct, sub: `${it.pct}% · pág. ${it.pageIndex+1}/${it.pageCount}` });
   });
   if(secContinue){ built['continuar'] = secContinue; }
@@ -5102,7 +5344,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
   // JavaScript espera a imagem carregar pra pintar a seção: o navegador
   // (ou o service worker, depois da primeira vez — ver sw.js) resolve a
   // <img> por conta própria, em paralelo, sem travar nada.
-  const secAranha = buildHomeSection(
+  const secAranha = !want('aranha') ? null : buildHomeSection(
     `Coleção <span class="section-logo-text hidden" data-logo-text="aranha">Homem-Aranha</span><img class="section-logo" data-logo="aranha" src="${logoSrc('aranha')}" alt="Homem-Aranha" loading="eager" decoding="async">`,
     aranhaFolders,
     (it)=>{
@@ -5115,7 +5357,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
   // "Coleção [logo do Hulk]": subpastas de dentro da pasta "Coleção - Hulk"
   // — mesma lógica das demais seções baseadas em pasta, ver
   // childrenOfNamedFolder.
-  const secHulk = buildHomeSection(
+  const secHulk = !want('hulk') ? null : buildHomeSection(
     `Coleção <span class="section-logo-text hidden" data-logo-text="hulk">Incrível Hulk</span><img class="section-logo" data-logo="hulk" src="${logoSrc('hulk')}" alt="Incrível Hulk" loading="eager" decoding="async">`,
     hulkFolders,
     (it)=>{
@@ -5125,7 +5367,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
   );
   if(secHulk){ built['hulk'] = secHulk; wireHomeLogoFallback(secHulk, 'hulk'); }
 
-  const secXMen = buildHomeSection(
+  const secXMen = !want('xmen') ? null : buildHomeSection(
     `Coleção <span class="section-logo-text hidden" data-logo-text="xmen">X-Men</span><img class="section-logo" data-logo="xmen" src="${logoSrc('xmen')}" alt="X-Men" loading="eager" decoding="async">`,
     xmenFolders,
     (it)=>{
@@ -5137,7 +5379,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
 
   // "Coleção [logo do Lanterna Verde]": subpastas de dentro da pasta
   // "Lanterna Verde" que fica dentro de "DC" — mesma lógica das demais.
-  const secLanterna = buildHomeSection(
+  const secLanterna = !want('lanterna') ? null : buildHomeSection(
     `Coleção <span class="section-logo-text hidden" data-logo-text="lanterna">Lanterna Verde</span><img class="section-logo" data-logo="lanterna" src="${logoSrc('lanterna')}" alt="Lanterna Verde" loading="eager" decoding="async">`,
     lanternaFolders,
     (it)=>{
@@ -5147,7 +5389,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
   );
   if(secLanterna){ built['lanterna'] = secLanterna; wireHomeLogoFallback(secLanterna, 'lanterna'); }
 
-  const secManga = buildHomeSection(
+  const secManga = !want('manga') ? null : buildHomeSection(
     '🎌 Coleção Mangás',
     mangaFolders,
     (it)=>{
@@ -5160,7 +5402,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
   // "Coleção [logo do Batman]": subpastas de dentro da pasta "Batman" (ex.:
   // "DC > Batman > 1 - Batman: Ano Um" e as demais) — mesma lógica das
   // seções Homem-Aranha/X-Men acima, ver childrenOfNamedFolder.
-  const secBatman = buildHomeSection(
+  const secBatman = !want('batman') ? null : buildHomeSection(
     `Coleção <span class="section-logo-text hidden" data-logo-text="batman">Batman</span><img class="section-logo" data-logo="batman" src="${logoSrc('batman')}" alt="Batman" loading="eager" decoding="async">`,
     batmanFolders,
     (it)=>{
@@ -5172,7 +5414,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
 
   // "Coleção [logo do Homem de Ferro]": subpastas de dentro da pasta
   // "Coleção - Homem de Ferro" — mesma lógica do Hulk.
-  const secIronman = buildHomeSection(
+  const secIronman = !want('ironman') ? null : buildHomeSection(
     `Coleção <span class="section-logo-text hidden" data-logo-text="ironman">Homem de Ferro</span><img class="section-logo" data-logo="ironman" src="${logoSrc('ironman')}" alt="Homem de Ferro" loading="eager" decoding="async">`,
     ironmanFolders,
     (it)=>{
@@ -5184,7 +5426,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
 
   // "Coleção [logo do Superman]": subpastas de dentro da pasta "Superman"
   // que fica dentro de "DC" — mesma lógica do Lanterna Verde.
-  const secSuperman = buildHomeSection(
+  const secSuperman = !want('superman') ? null : buildHomeSection(
     `Coleção <span class="section-logo-text hidden" data-logo-text="superman">Superman</span><img class="section-logo" data-logo="superman" src="${logoSrc('superman')}" alt="Superman" loading="eager" decoding="async">`,
     supermanFolders,
     (it)=>{
@@ -5198,7 +5440,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
   // Absoluto" que fica dentro de "DC" — aqui só a palavra "DC" vira logo
   // (não "Coleção [logo]" como as seções acima); o resto do título
   // ("Universo Absoluto") fica em texto normal.
-  const secUniversoAbsoluto = buildHomeSection(
+  const secUniversoAbsoluto = !want('universoAbsoluto') ? null : buildHomeSection(
     `<span class="section-logo-text hidden" data-logo-text="dc">DC</span><img class="section-logo" data-logo="dc" src="${logoSrc('dc')}" alt="DC" loading="eager" decoding="async"> Universo Absoluto`,
     universoAbsolutoFolders,
     (it)=>{
@@ -5211,7 +5453,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
   // "Coleção [logo Mulher Maravilha]": subpastas de dentro da pasta
   // "Mulher Maravilha" que fica dentro de "DC" — mesmo template de título
   // das seções de personagem acima (Batman, Superman etc.).
-  const secMulherMaravilha = buildHomeSection(
+  const secMulherMaravilha = !want('mulhermaravilha') ? null : buildHomeSection(
     `Coleção <span class="section-logo-text hidden" data-logo-text="mulhermaravilha">Mulher Maravilha</span><img class="section-logo" data-logo="mulhermaravilha" src="${logoSrc('mulhermaravilha')}" alt="Mulher Maravilha" loading="eager" decoding="async">`,
     mulherMaravilhaFolders,
     (it)=>{
@@ -5226,7 +5468,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
   // pasta "Vingadores (Clássico)" (todas as subpastas dela, em ordem —
   // Capítulo 30 em diante), cada uma com o botão de baixar no canto da
   // capa. Sai da lista de HQs já varrida (ver comicsInsideNamedFolder).
-  const secClassicoAvengers = buildEdicoesConjuntasSection(
+  const secClassicoAvengers = !want('classicoAvengers') ? null : buildEdicoesConjuntasSection(
     `Clássico <span class="section-logo-text hidden" data-logo-text="avengers">Avengers</span><img class="section-logo" data-logo="avengers" src="${logoSrc('avengers')}" alt="Avengers" loading="eager" decoding="async">`,
     comicsInsideNamedFolder(allComics, ['vingadores classico'])
   );
@@ -5235,7 +5477,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
   // "Se prepare para [logo Avengers Doomsday]": subpastas de dentro da
   // pasta "Doomsday" — aqui a frase inteira "Avengers DoomsDay" vira logo,
   // com "Se prepare para" como texto normal antes dela.
-  const secDoomsday = buildHomeSection(
+  const secDoomsday = !want('doomsday') ? null : buildHomeSection(
     `Se prepare para <span class="section-logo-text hidden" data-logo-text="doomsday">Avengers DoomsDay</span><img class="section-logo" data-logo="doomsday" src="${logoSrc('doomsday')}" alt="Avengers DoomsDay" loading="eager" decoding="async">`,
     doomsdayFolders,
     (it)=>{
@@ -5250,7 +5492,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
   // na Garrafa", "004 Eu, Wolverine.") — mesma lógica das seções acima.
   // Sem logo própria (nenhuma foi pedida) — título em texto simples,
   // igual à seção Mangás abaixo.
-  const secSalvat = buildHomeSection(
+  const secSalvat = !want('salvat') ? null : buildHomeSection(
     'Coleção Graphic Novels Marvel (Salvat)',
     salvatFolders,
     (it)=>{
@@ -5265,7 +5507,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
   // dentro da pasta "Liga da Justiça da América", com o botão de baixar no
   // canto da capa. A logo DC substitui as palavras "Liga da Justiça" (que
   // só aparecem em texto se a imagem falhar ao carregar).
-  const secClassicoLiga = buildEdicoesConjuntasSection(
+  const secClassicoLiga = !want('classicoLiga') ? null : buildEdicoesConjuntasSection(
     `Clássico <span class="section-logo-text hidden" data-logo-text="liga">Liga da Justiça</span><img class="section-logo" data-logo="liga" src="${logoSrc('liga')}" alt="Liga da Justiça" loading="eager" decoding="async">`,
     comicsInsideNamedFolder(allComics, ['liga da justica da america'])
   );
@@ -5274,7 +5516,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
   // "Coleção Thanos" e "Coleção Darkseid": seções de SUBPASTAS, formadas
   // pelas subpastas de dentro das pastas de mesmo nome. Título em texto
   // simples (sem logo), igual à seção Graphic Novels Marvel.
-  const secThanos = buildHomeSection(
+  const secThanos = !want('thanos') ? null : buildHomeSection(
     'Coleção Thanos',
     thanosFolders,
     (it)=>{
@@ -5284,7 +5526,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
   );
   if(secThanos){ built['thanos'] = secThanos; }
 
-  const secDarkseid = buildHomeSection(
+  const secDarkseid = !want('darkseid') ? null : buildHomeSection(
     'Coleção Darkseid',
     darkseidFolders,
     (it)=>{
@@ -5294,7 +5536,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
   );
   if(secDarkseid){ built['darkseid'] = secDarkseid; }
 
-  const secRec = buildHomeSection('Recomendados', recommended, (it)=>{
+  const secRec = !want('recomendados') ? null : buildHomeSection('Recomendados', recommended, (it)=>{
     return buildCarouselCard(it, { isFolder:false, size: it.size });
   });
   if(secRec){ built['recomendados'] = secRec; }
@@ -5302,9 +5544,15 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
   // Coloca as seções na tela, na ordem definida em HOME_SECTION_ORDER.
   // Qualquer seção que exista mas não esteja na lista vai pro final (rede
   // de segurança: uma seção nova nunca some só por ter sido esquecida lá).
-  const orderedKeys = HOME_SECTION_ORDER.concat(Object.keys(built).filter(k=>!HOME_SECTION_ORDER.includes(k)));
+  const orderedKeys = shelf.id === 'all'
+    ? HOME_SECTION_ORDER.concat(Object.keys(built).filter(k=>!HOME_SECTION_ORDER.includes(k)))
+    : shelf.keys;
   orderedKeys.forEach(k=>{
-    if(built[k]){ wrap.appendChild(built[k]); anySection = true; }
+    if(built[k]){
+      built[k].dataset.homeKey = k; // âncora estável pra restaurar a posição da Home (ver captureHomeScroll)
+      wrap.appendChild(built[k]);
+      anySection = true;
+    }
   });
 
   if(!anySection){
@@ -5320,18 +5568,23 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
     // em cima.
     wrap.classList.remove('hidden');
     if(hadError){
-      wrap.innerHTML = `<div class="empty-state">${ICONS.warning}<h3>Não foi possível carregar a biblioteca</h3>
+      wrap.insertAdjacentHTML('beforeend', `<div class="empty-state">${ICONS.warning}<h3>Não foi possível carregar a biblioteca</h3>
         Houve uma falha ao buscar os dados do Google Drive${errorMessage ? ': ' + escapeHtml(errorMessage) : '.'}
         <button id="btn-home-retry" class="btn-primary" style="margin-top:14px">Tentar novamente</button>
-      </div>`;
+      </div>`);
       const retryBtn = $('#btn-home-retry');
       if(retryBtn) retryBtn.onclick = ()=>renderHomeSections(true);
     } else {
-      wrap.innerHTML = `<div class="empty-state">${ICONS.folder}<h3>Nenhuma HQ encontrada</h3>A biblioteca configurada está vazia.</div>`;
+      wrap.insertAdjacentHTML('beforeend', shelf.id === 'all'
+        ? `<div class="empty-state">${ICONS.folder}<h3>Nenhuma HQ encontrada</h3>A biblioteca configurada está vazia.</div>`
+        : `<div class="empty-state">${ICONS.folder}<h3>Nada nesta estante ainda</h3>Não encontrei as pastas desta estante. Confira os nomes das pastas ou toque em Atualizar.</div>`);
     }
     return;
   }
   wrap.classList.remove('hidden');
+  // Voltando de uma subpasta: toda vez que a Home é repintada durante a
+  // janela de restauração, recoloca a posição de onde a pessoa estava.
+  if(homeRestoreWindow && Date.now() < homeRestoreWindow.until) applyHomeRestore(homeRestoreWindow.snap);
 }
 
 // Assinatura simples (lista de IDs) de um conjunto de seções — usada só
