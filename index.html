@@ -403,11 +403,14 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 
 /* ---- Toast ---- */
 #toast{
-  position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(100px);
-  background:var(--paper);color:var(--ink);padding:11px 18px;border-radius:999px;
-  font-size:13px;font-weight:600;z-index:100;transition:transform .25s ease;box-shadow:0 10px 26px rgba(0,0,0,.45);
+  position:fixed;left:50%;bottom:24px;transform:translateX(-50%) translateY(16px);
+  background:var(--paper);color:var(--ink);padding:11px 18px;border-radius:16px;
+  font-size:13px;font-weight:600;z-index:100;transition:transform .25s ease, opacity .25s ease;
+  box-shadow:0 10px 26px rgba(0,0,0,.45);
+  max-width:86vw;text-align:center;
+  opacity:0;pointer-events:none;
 }
-#toast.show{transform:translateX(-50%) translateY(0);}
+#toast.show{transform:translateX(-50%) translateY(0);opacity:1;}
 
 /* ============ SEÇÕES EM CARROSSEL (estilo Tomato) ============ */
 #home-sections{padding:8px 0 4px;}
