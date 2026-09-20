@@ -245,7 +245,15 @@
   carregamento. Este arquivo não mudou de comportamento — só a versão sobe
   pra os aparelhos buscarem o index.html novo.
 */
-const CACHE_VERSION = 'v40';
+/*
+  v41: index.html mudou — três seções novas na Home: "Coleção Thanos" e
+  "Coleção Darkseid" (subpastas das pastas de mesmo nome) e "Clássico
+  [logo DC]" (edições conjuntas, HQs da pasta "Liga da Justiça da
+  América"), além de uma nova ordem das seções (lista HOME_SECTION_ORDER
+  no index.html). A logo nova entra na casca do app abaixo, pela URL
+  original, do mesmo jeito da logo do Clássico Avengers.
+*/
+const CACHE_VERSION = 'v41';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
@@ -279,7 +287,10 @@ const APP_SHELL = [
   'https://proxy1.planetahq01.workers.dev/?logo=doomsday',
   // Logo "Clássico Avengers" (v39) — direto do postimg.cc, ver HOME_LOGOS
   // e LOGO_IDS_DIRECT no index.html.
-  'https://i.postimg.cc/4dMsT0k3/Avengers(1963-1996)-1-png.webp'
+  'https://i.postimg.cc/4dMsT0k3/Avengers(1963-1996)-1-png.webp',
+  // Logo "Clássico Liga da Justiça" (v41) — também direto do postimg.cc,
+  // precisa bater EXATAMENTE com HOME_LOGOS.liga no index.html.
+  'https://i.postimg.cc/50M063xv/Nice-Png-dc-comics-logo-png-832571-(1).png'
 ];
 // URLs absolutas resolvidas uma única vez, pra comparar por igualdade exata
 // (nunca mais por sufixo/heurística) na hora de decidir o que é "casca".

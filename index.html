@@ -466,6 +466,8 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 .home-section-title .section-logo[data-logo="doomsday"]{height:50px;}
 /* Logo "Avengers" do título "Clássico [logo]" (seção de edições conjuntas). */
 .home-section-title .section-logo[data-logo="avengers"]{height:50px;}
+/* Logo DC do título "Clássico [logo]" da Liga da Justiça (edições conjuntas). */
+.home-section-title .section-logo[data-logo="liga"]{height:50px;}
 .home-section-title .section-logo.hidden{display:none;}
 .home-section-title .section-logo-text.hidden{display:none;}
 .carousel{
@@ -4418,7 +4420,7 @@ async function crawlLibrarySections(token, isStale, errorState){
     await runLimited(toVisit, 6, sub=>walk(sub.id, [...path, sub.name]));
   }
   await walk(CONFIG.rootFolderId, []);
-  if(isStale(token)) return {comics: [], folders: [], aranhaFolders: [], xmenFolders: [], mangaFolders: [], batmanFolders: [], salvatFolders: [], hulkFolders: [], lanternaFolders: [], ironmanFolders: [], supermanFolders: [], universoAbsolutoFolders: [], mulherMaravilhaFolders: [], doomsdayFolders: [], hadError:false, errorMessage:null};
+  if(isStale(token)) return {comics: [], folders: [], aranhaFolders: [], xmenFolders: [], mangaFolders: [], batmanFolders: [], salvatFolders: [], hulkFolders: [], lanternaFolders: [], ironmanFolders: [], supermanFolders: [], universoAbsolutoFolders: [], mulherMaravilhaFolders: [], doomsdayFolders: [], thanosFolders: [], darkseidFolders: [], hadError:false, errorMessage:null};
 
   // Antes: a seção "Coleção Homem-Aranha" juntava, de QUALQUER lugar da
   // biblioteca, toda pasta cujo nome contivesse "aranha" ou "spider" (com
@@ -4489,8 +4491,13 @@ async function crawlLibrarySections(token, isStale, errorState){
   // Pasta "Doomsday" — achada pelo nome em qualquer nível, sem
   // desambiguação por pasta-mãe (igual Batman/Hulk/Homem de Ferro).
   const doomsdayFolders = await childrenOfNamedFolder(['doomsday']);
+  // Pastas "Coleção Thanos" e "Coleção Darkseid" — mesma lógica das demais
+  // (achadas pelo nome em qualquer nível; acento, caixa e hífen são
+  // ignorados, então "Coleção - Thanos" também casa).
+  const thanosFolders = await childrenOfNamedFolder(['colecao thanos']);
+  const darkseidFolders = await childrenOfNamedFolder(['colecao darkseid']);
 
-  return {comics, folders: allFolders, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders,
+  return {comics, folders: allFolders, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders,
     hadError: !!(errorState && errorState.hadError),
     errorMessage: errorState && errorState.lastError ? errorState.lastError.message : null};
 }
@@ -4694,6 +4701,8 @@ const SUPERMAN_CACHE_KEY = 'planetahq_superman_cache_v1';
 const UNIVERSO_ABSOLUTO_CACHE_KEY = 'planetahq_universo_absoluto_cache_v1';
 const MULHER_MARAVILHA_CACHE_KEY = 'planetahq_mulher_maravilha_cache_v1';
 const DOOMSDAY_CACHE_KEY = 'planetahq_doomsday_cache_v1';
+const THANOS_CACHE_KEY = 'planetahq_thanos_cache_v1';
+const DARKSEID_CACHE_KEY = 'planetahq_darkseid_cache_v1';
 const HOME_CACHE_MAX_AGE = 6*3600*1000;
 
 async function readHomeCache(key, arrProp){
@@ -4764,7 +4773,7 @@ async function getLibrarySections(forceRefresh){
 
   if(!forceRefresh){
     const now = Date.now();
-    const [cAranha, cXMen, cManga, cComics, cAllFolders, cBatman, cSalvat, cHulk, cLanterna, cIronman, cSuperman, cUniversoAbsoluto, cMulherMaravilha, cDoomsday] = await Promise.all([
+    const [cAranha, cXMen, cManga, cComics, cAllFolders, cBatman, cSalvat, cHulk, cLanterna, cIronman, cSuperman, cUniversoAbsoluto, cMulherMaravilha, cDoomsday, cThanos, cDarkseid] = await Promise.all([
       readHomeCache(ARANHA_CACHE_KEY, 'folders'),
       readHomeCache(XMEN_CACHE_KEY, 'folders'),
       readHomeCache(MANGA_CACHE_KEY, 'folders'),
@@ -4778,10 +4787,12 @@ async function getLibrarySections(forceRefresh){
       readHomeCache(SUPERMAN_CACHE_KEY, 'folders'),
       readHomeCache(UNIVERSO_ABSOLUTO_CACHE_KEY, 'folders'),
       readHomeCache(MULHER_MARAVILHA_CACHE_KEY, 'folders'),
-      readHomeCache(DOOMSDAY_CACHE_KEY, 'folders')
+      readHomeCache(DOOMSDAY_CACHE_KEY, 'folders'),
+      readHomeCache(THANOS_CACHE_KEY, 'folders'),
+      readHomeCache(DARKSEID_CACHE_KEY, 'folders')
     ]);
     const fresh = c=>c && (now - c.savedAt < HOME_CACHE_MAX_AGE);
-    if(fresh(cAranha) && fresh(cXMen) && fresh(cManga) && fresh(cComics) && fresh(cAllFolders) && fresh(cBatman) && fresh(cSalvat) && fresh(cHulk) && fresh(cLanterna) && fresh(cIronman) && fresh(cSuperman) && fresh(cUniversoAbsoluto) && fresh(cMulherMaravilha) && fresh(cDoomsday)){
+    if(fresh(cAranha) && fresh(cXMen) && fresh(cManga) && fresh(cComics) && fresh(cAllFolders) && fresh(cBatman) && fresh(cSalvat) && fresh(cHulk) && fresh(cLanterna) && fresh(cIronman) && fresh(cSuperman) && fresh(cUniversoAbsoluto) && fresh(cMulherMaravilha) && fresh(cDoomsday) && fresh(cThanos) && fresh(cDarkseid)){
       return {
         aranhaFolders: cAranha.folders,
         xmenFolders: cXMen.folders,
@@ -4797,6 +4808,8 @@ async function getLibrarySections(forceRefresh){
         universoAbsolutoFolders: cUniversoAbsoluto.folders,
         mulherMaravilhaFolders: cMulherMaravilha.folders,
         doomsdayFolders: cDoomsday.folders,
+        thanosFolders: cThanos.folders,
+        darkseidFolders: cDarkseid.folders,
         hadError: false,
         errorMessage: null
       };
@@ -4823,7 +4836,7 @@ async function getLibrarySections(forceRefresh){
     const wasAborted = token !== librarySectionsToken;
     const skipWrite = errorState.hadError || wasAborted;
     if(!skipWrite) revalidateFolderCovers(); // sem await: não atrasa a resposta, roda em segundo plano
-    const [aranhaFolders, xmenFolders, mangaFolders, comics, allFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders] = await Promise.all([
+    const [aranhaFolders, xmenFolders, mangaFolders, comics, allFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders] = await Promise.all([
       finalizeHomeSectionResult(ARANHA_CACHE_KEY, 'folders', raw.aranhaFolders, skipWrite),
       finalizeHomeSectionResult(XMEN_CACHE_KEY, 'folders', raw.xmenFolders, skipWrite),
       finalizeHomeSectionResult(MANGA_CACHE_KEY, 'folders', raw.mangaFolders, skipWrite),
@@ -4837,9 +4850,11 @@ async function getLibrarySections(forceRefresh){
       finalizeHomeSectionResult(SUPERMAN_CACHE_KEY, 'folders', raw.supermanFolders, skipWrite),
       finalizeHomeSectionResult(UNIVERSO_ABSOLUTO_CACHE_KEY, 'folders', raw.universoAbsolutoFolders, skipWrite),
       finalizeHomeSectionResult(MULHER_MARAVILHA_CACHE_KEY, 'folders', raw.mulherMaravilhaFolders, skipWrite),
-      finalizeHomeSectionResult(DOOMSDAY_CACHE_KEY, 'folders', raw.doomsdayFolders, skipWrite)
+      finalizeHomeSectionResult(DOOMSDAY_CACHE_KEY, 'folders', raw.doomsdayFolders, skipWrite),
+      finalizeHomeSectionResult(THANOS_CACHE_KEY, 'folders', raw.thanosFolders, skipWrite),
+      finalizeHomeSectionResult(DARKSEID_CACHE_KEY, 'folders', raw.darkseidFolders, skipWrite)
     ]);
-    return { aranhaFolders, xmenFolders, mangaFolders, comics, allFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders,
+    return { aranhaFolders, xmenFolders, mangaFolders, comics, allFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders,
       hadError: errorState.hadError,
       errorMessage: errorState.lastError ? errorState.lastError.message : null };
   })();
@@ -4994,14 +5009,15 @@ const HOME_LOGOS = {
   dc: 'https://i.postimg.cc/Dygkx1bZ/DC-Comics-2024-svg.png',
   mulhermaravilha: 'https://i.postimg.cc/dVLHGCRP/584297fea6515b1e0ad75ad9.png',
   doomsday: 'https://i.postimg.cc/jdGNkJVp/ncg-Hq-Zl-YPOb-Q0y6f-Moh1ib-Qnqgt.png',
-  avengers: 'https://i.postimg.cc/4dMsT0k3/Avengers(1963-1996)-1-png.webp'
+  avengers: 'https://i.postimg.cc/4dMsT0k3/Avengers(1963-1996)-1-png.webp',
+  liga: 'https://i.postimg.cc/50M063xv/Nice-Png-dc-comics-logo-png-832571-(1).png'
 };
 
 // Logos que NÃO passam pelo proxy/R2 (o worker.js só conhece as ids antigas
 // acima): vão direto pela URL do postimg.cc, sem gastar uma requisição
 // ao proxy que só ia falhar antes de cair no link direto. Se um dia você
 // adicionar 'avengers' ao mapa de logos do worker.js, é só tirar daqui.
-const LOGO_IDS_DIRECT = new Set(['avengers']);
+const LOGO_IDS_DIRECT = new Set(['avengers', 'liga']);
 
 // Com proxy configurado, a logo vem do cache compartilhado (R2) via
 // worker.js — instantânea pra qualquer pessoa, mesmo na primeira visita
@@ -5037,16 +5053,46 @@ function wireHomeLogoFallback(section, id){
   });
 }
 
-function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, allComics, hadError, errorMessage}){
+// Ordem das seções na Home, de cima pra baixo. Pra mudar a ordem, é só
+// reorganizar esta lista (as chaves são as usadas em `built[...]` dentro de
+// paintHomeSections). "Continuar lendo" só aparece quando há algo em
+// andamento; "universoAbsoluto" não estava na lista de ordem pedida e ficou
+// por último.
+const HOME_SECTION_ORDER = [
+  'continuar',
+  'aranha',            // Homem-Aranha
+  'batman',
+  'superman',
+  'hulk',
+  'doomsday',          // Se prepare para Avengers Doomsday
+  'classicoAvengers',  // Clássico Avengers
+  'classicoLiga',      // Clássico Liga da Justiça (da América)
+  'recomendados',
+  'ironman',           // Homem de Ferro
+  'lanterna',          // Lanterna Verde
+  'mulhermaravilha',   // Mulher Maravilha
+  'xmen',
+  'thanos',            // Coleção Thanos
+  'darkseid',          // Coleção Darkseid
+  'salvat',            // Graphic Novels Marvel (Salvat)
+  'manga',             // Coleção Mangás
+  'universoAbsoluto'   // DC Universo Absoluto
+];
+
+function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, allComics, hadError, errorMessage}){
   const recommended = buildRecommended(allComics);
   releaseCoverObservers(wrap);
   wrap.innerHTML = '';
   let anySection = false;
+  // As seções são montadas aqui, por chave, e só no final são colocadas na
+  // tela na ordem de HOME_SECTION_ORDER — assim a ordem da Home se muda em
+  // UM lugar só, sem mexer no código de cada seção.
+  const built = {};
 
   const secContinue = buildHomeSection('Continuar lendo', continueItems, (it)=>{
     return buildCarouselCard(it, { isFolder:false, progressPct: it.pct, sub: `${it.pct}% · pág. ${it.pageIndex+1}/${it.pageCount}` });
   });
-  if(secContinue){ wrap.appendChild(secContinue); anySection = true; }
+  if(secContinue){ built['continuar'] = secContinue; }
 
   // Título "Coleção [logo]": some texto (nome do personagem) some na hora,
   // sem depender de nenhuma rede externa pra pintar a seção — a logo em si
@@ -5064,7 +5110,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
     },
     { kind: SECTION_KINDS.SUBPASTAS }
   );
-  if(secAranha){ wrap.appendChild(secAranha); anySection = true; wireHomeLogoFallback(secAranha, 'aranha'); }
+  if(secAranha){ built['aranha'] = secAranha; wireHomeLogoFallback(secAranha, 'aranha'); }
 
   // "Coleção [logo do Hulk]": subpastas de dentro da pasta "Coleção - Hulk"
   // — mesma lógica das demais seções baseadas em pasta, ver
@@ -5077,7 +5123,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
     },
     { kind: SECTION_KINDS.SUBPASTAS }
   );
-  if(secHulk){ wrap.appendChild(secHulk); anySection = true; wireHomeLogoFallback(secHulk, 'hulk'); }
+  if(secHulk){ built['hulk'] = secHulk; wireHomeLogoFallback(secHulk, 'hulk'); }
 
   const secXMen = buildHomeSection(
     `Coleção <span class="section-logo-text hidden" data-logo-text="xmen">X-Men</span><img class="section-logo" data-logo="xmen" src="${logoSrc('xmen')}" alt="X-Men" loading="eager" decoding="async">`,
@@ -5087,7 +5133,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
     },
     { kind: SECTION_KINDS.SUBPASTAS }
   );
-  if(secXMen){ wrap.appendChild(secXMen); anySection = true; wireHomeLogoFallback(secXMen, 'xmen'); }
+  if(secXMen){ built['xmen'] = secXMen; wireHomeLogoFallback(secXMen, 'xmen'); }
 
   // "Coleção [logo do Lanterna Verde]": subpastas de dentro da pasta
   // "Lanterna Verde" que fica dentro de "DC" — mesma lógica das demais.
@@ -5099,7 +5145,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
     },
     { kind: SECTION_KINDS.SUBPASTAS }
   );
-  if(secLanterna){ wrap.appendChild(secLanterna); anySection = true; wireHomeLogoFallback(secLanterna, 'lanterna'); }
+  if(secLanterna){ built['lanterna'] = secLanterna; wireHomeLogoFallback(secLanterna, 'lanterna'); }
 
   const secManga = buildHomeSection(
     '🎌 Coleção Mangás',
@@ -5109,7 +5155,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
     },
     { kind: SECTION_KINDS.SUBPASTAS }
   );
-  if(secManga){ wrap.appendChild(secManga); anySection = true; }
+  if(secManga){ built['manga'] = secManga; }
 
   // "Coleção [logo do Batman]": subpastas de dentro da pasta "Batman" (ex.:
   // "DC > Batman > 1 - Batman: Ano Um" e as demais) — mesma lógica das
@@ -5122,7 +5168,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
     },
     { kind: SECTION_KINDS.SUBPASTAS }
   );
-  if(secBatman){ wrap.appendChild(secBatman); anySection = true; wireHomeLogoFallback(secBatman, 'batman'); }
+  if(secBatman){ built['batman'] = secBatman; wireHomeLogoFallback(secBatman, 'batman'); }
 
   // "Coleção [logo do Homem de Ferro]": subpastas de dentro da pasta
   // "Coleção - Homem de Ferro" — mesma lógica do Hulk.
@@ -5134,7 +5180,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
     },
     { kind: SECTION_KINDS.SUBPASTAS }
   );
-  if(secIronman){ wrap.appendChild(secIronman); anySection = true; wireHomeLogoFallback(secIronman, 'ironman'); }
+  if(secIronman){ built['ironman'] = secIronman; wireHomeLogoFallback(secIronman, 'ironman'); }
 
   // "Coleção [logo do Superman]": subpastas de dentro da pasta "Superman"
   // que fica dentro de "DC" — mesma lógica do Lanterna Verde.
@@ -5146,7 +5192,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
     },
     { kind: SECTION_KINDS.SUBPASTAS }
   );
-  if(secSuperman){ wrap.appendChild(secSuperman); anySection = true; wireHomeLogoFallback(secSuperman, 'superman'); }
+  if(secSuperman){ built['superman'] = secSuperman; wireHomeLogoFallback(secSuperman, 'superman'); }
 
   // "DC [logo Universo Absoluto]": subpastas de dentro da pasta "Universo
   // Absoluto" que fica dentro de "DC" — aqui só a palavra "DC" vira logo
@@ -5160,7 +5206,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
     },
     { kind: SECTION_KINDS.SUBPASTAS }
   );
-  if(secUniversoAbsoluto){ wrap.appendChild(secUniversoAbsoluto); anySection = true; wireHomeLogoFallback(secUniversoAbsoluto, 'dc'); }
+  if(secUniversoAbsoluto){ built['universoAbsoluto'] = secUniversoAbsoluto; wireHomeLogoFallback(secUniversoAbsoluto, 'dc'); }
 
   // "Coleção [logo Mulher Maravilha]": subpastas de dentro da pasta
   // "Mulher Maravilha" que fica dentro de "DC" — mesmo template de título
@@ -5173,7 +5219,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
     },
     { kind: SECTION_KINDS.SUBPASTAS }
   );
-  if(secMulherMaravilha){ wrap.appendChild(secMulherMaravilha); anySection = true; wireHomeLogoFallback(secMulherMaravilha, 'mulhermaravilha'); }
+  if(secMulherMaravilha){ built['mulhermaravilha'] = secMulherMaravilha; wireHomeLogoFallback(secMulherMaravilha, 'mulhermaravilha'); }
 
   // "Clássico [logo Avengers]" — seção do tipo EDIÇÕES CONJUNTAS: em vez de
   // subpastas, o carrossel é feito das próprias HQs que estão dentro da
@@ -5184,7 +5230,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
     `Clássico <span class="section-logo-text hidden" data-logo-text="avengers">Avengers</span><img class="section-logo" data-logo="avengers" src="${logoSrc('avengers')}" alt="Avengers" loading="eager" decoding="async">`,
     comicsInsideNamedFolder(allComics, ['vingadores classico'])
   );
-  if(secClassicoAvengers){ wrap.appendChild(secClassicoAvengers); anySection = true; wireHomeLogoFallback(secClassicoAvengers, 'avengers'); }
+  if(secClassicoAvengers){ built['classicoAvengers'] = secClassicoAvengers; wireHomeLogoFallback(secClassicoAvengers, 'avengers'); }
 
   // "Se prepare para [logo Avengers Doomsday]": subpastas de dentro da
   // pasta "Doomsday" — aqui a frase inteira "Avengers DoomsDay" vira logo,
@@ -5197,7 +5243,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
     },
     { kind: SECTION_KINDS.SUBPASTAS }
   );
-  if(secDoomsday){ wrap.appendChild(secDoomsday); anySection = true; wireHomeLogoFallback(secDoomsday, 'doomsday'); }
+  if(secDoomsday){ built['doomsday'] = secDoomsday; wireHomeLogoFallback(secDoomsday, 'doomsday'); }
 
   // "Coleção Graphic Novels Marvel (Salvat)": subpastas de dentro da
   // pasta "Graphic Novels Marvel" (ex.: "001 Homem de Ferro - O Demônio
@@ -5212,12 +5258,54 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
     },
     { kind: SECTION_KINDS.SUBPASTAS }
   );
-  if(secSalvat){ wrap.appendChild(secSalvat); anySection = true; }
+  if(secSalvat){ built['salvat'] = secSalvat; }
+
+  // "Clássico [logo DC]" — seção do tipo EDIÇÕES CONJUNTAS (igual ao
+  // Clássico Avengers): o carrossel é feito das próprias HQs que estão
+  // dentro da pasta "Liga da Justiça da América", com o botão de baixar no
+  // canto da capa. A logo DC substitui as palavras "Liga da Justiça" (que
+  // só aparecem em texto se a imagem falhar ao carregar).
+  const secClassicoLiga = buildEdicoesConjuntasSection(
+    `Clássico <span class="section-logo-text hidden" data-logo-text="liga">Liga da Justiça</span><img class="section-logo" data-logo="liga" src="${logoSrc('liga')}" alt="Liga da Justiça" loading="eager" decoding="async">`,
+    comicsInsideNamedFolder(allComics, ['liga da justica da america'])
+  );
+  if(secClassicoLiga){ built['classicoLiga'] = secClassicoLiga; wireHomeLogoFallback(secClassicoLiga, 'liga'); }
+
+  // "Coleção Thanos" e "Coleção Darkseid": seções de SUBPASTAS, formadas
+  // pelas subpastas de dentro das pastas de mesmo nome. Título em texto
+  // simples (sem logo), igual à seção Graphic Novels Marvel.
+  const secThanos = buildHomeSection(
+    'Coleção Thanos',
+    thanosFolders,
+    (it)=>{
+      return buildCarouselCard(it, { isFolder:true });
+    },
+    { kind: SECTION_KINDS.SUBPASTAS }
+  );
+  if(secThanos){ built['thanos'] = secThanos; }
+
+  const secDarkseid = buildHomeSection(
+    'Coleção Darkseid',
+    darkseidFolders,
+    (it)=>{
+      return buildCarouselCard(it, { isFolder:true });
+    },
+    { kind: SECTION_KINDS.SUBPASTAS }
+  );
+  if(secDarkseid){ built['darkseid'] = secDarkseid; }
 
   const secRec = buildHomeSection('Recomendados', recommended, (it)=>{
     return buildCarouselCard(it, { isFolder:false, size: it.size });
   });
-  if(secRec){ wrap.appendChild(secRec); anySection = true; }
+  if(secRec){ built['recomendados'] = secRec; }
+
+  // Coloca as seções na tela, na ordem definida em HOME_SECTION_ORDER.
+  // Qualquer seção que exista mas não esteja na lista vai pro final (rede
+  // de segurança: uma seção nova nunca some só por ter sido esquecida lá).
+  const orderedKeys = HOME_SECTION_ORDER.concat(Object.keys(built).filter(k=>!HOME_SECTION_ORDER.includes(k)));
+  orderedKeys.forEach(k=>{
+    if(built[k]){ wrap.appendChild(built[k]); anySection = true; }
+  });
 
   if(!anySection){
     // Antes, quando nenhuma seção tinha o que mostrar, a Home ficava
@@ -5250,13 +5338,13 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
 // pra comparar "o que já está na tela" com "o que acabou de chegar do
 // Drive" e decidir se vale a pena redesenhar tudo de novo (ver
 // lastPaintedHomeSignature abaixo).
-function homeSectionsSignature({aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, allComics}){
+function homeSectionsSignature({aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, allComics}){
   const ids = arr => (arr||[]).map(x=>x.id).join(',');
   // Nas HQs o nome entra na assinatura também: renomear arquivos no Drive
   // (ex.: virar "Capítulo 30") não muda o ID, e sem isso a tela continuava
   // mostrando o nome antigo até uma nova abertura do app.
   const namedIds = arr => (arr||[]).map(x=>x.id+':'+x.name).join(',');
-  return [ids(aranhaFolders), ids(xmenFolders), ids(mangaFolders), ids(batmanFolders), ids(salvatFolders), ids(hulkFolders), ids(lanternaFolders), ids(ironmanFolders), ids(supermanFolders), ids(universoAbsolutoFolders), ids(mulherMaravilhaFolders), ids(doomsdayFolders), namedIds(allComics)].join('|');
+  return [ids(aranhaFolders), ids(xmenFolders), ids(mangaFolders), ids(batmanFolders), ids(salvatFolders), ids(hulkFolders), ids(lanternaFolders), ids(ironmanFolders), ids(supermanFolders), ids(universoAbsolutoFolders), ids(mulherMaravilhaFolders), ids(doomsdayFolders), ids(thanosFolders), ids(darkseidFolders), namedIds(allComics)].join('|');
 }
 let lastPaintedHomeSignature = null;
 
@@ -5275,7 +5363,7 @@ async function renderHomeSections(forceRefresh, onProgress){
   // o cache antes de buscar de novo, e por isso todas as seções sumiam da
   // tela até a busca nova terminar). A busca de verdade (item 2 abaixo)
   // troca pelos dados frescos assim que chegar, sem travar nada.
-  const [cachedAranha, cachedXMen, cachedManga, cachedComics, continueItemsFast, cachedBatman, cachedSalvat, cachedHulk, cachedLanterna, cachedIronman, cachedSuperman, cachedUniversoAbsoluto, cachedMulherMaravilha, cachedDoomsday] = await Promise.all([
+  const [cachedAranha, cachedXMen, cachedManga, cachedComics, continueItemsFast, cachedBatman, cachedSalvat, cachedHulk, cachedLanterna, cachedIronman, cachedSuperman, cachedUniversoAbsoluto, cachedMulherMaravilha, cachedDoomsday, cachedThanos, cachedDarkseid] = await Promise.all([
     readHomeCache(ARANHA_CACHE_KEY, 'folders'),
     readHomeCache(XMEN_CACHE_KEY, 'folders'),
     readHomeCache(MANGA_CACHE_KEY, 'folders'),
@@ -5289,11 +5377,13 @@ async function renderHomeSections(forceRefresh, onProgress){
     readHomeCache(SUPERMAN_CACHE_KEY, 'folders'),
     readHomeCache(UNIVERSO_ABSOLUTO_CACHE_KEY, 'folders'),
     readHomeCache(MULHER_MARAVILHA_CACHE_KEY, 'folders'),
-    readHomeCache(DOOMSDAY_CACHE_KEY, 'folders')
+    readHomeCache(DOOMSDAY_CACHE_KEY, 'folders'),
+    readHomeCache(THANOS_CACHE_KEY, 'folders'),
+    readHomeCache(DARKSEID_CACHE_KEY, 'folders')
   ]);
   if(isStale(myToken)) return;
 
-  if(cachedAranha || cachedXMen || cachedManga || cachedComics || cachedBatman || cachedSalvat || cachedHulk || cachedLanterna || cachedIronman || cachedSuperman || cachedUniversoAbsoluto || cachedMulherMaravilha || cachedDoomsday){
+  if(cachedAranha || cachedXMen || cachedManga || cachedComics || cachedBatman || cachedSalvat || cachedHulk || cachedLanterna || cachedIronman || cachedSuperman || cachedUniversoAbsoluto || cachedMulherMaravilha || cachedDoomsday || cachedThanos || cachedDarkseid){
     wrap.classList.remove('hidden');
     const fastData = {
       continueItems: continueItemsFast,
@@ -5309,6 +5399,8 @@ async function renderHomeSections(forceRefresh, onProgress){
       universoAbsolutoFolders: cachedUniversoAbsoluto ? cachedUniversoAbsoluto.folders : [],
       mulherMaravilhaFolders: cachedMulherMaravilha ? cachedMulherMaravilha.folders : [],
       doomsdayFolders: cachedDoomsday ? cachedDoomsday.folders : [],
+      thanosFolders: cachedThanos ? cachedThanos.folders : [],
+      darkseidFolders: cachedDarkseid ? cachedDarkseid.folders : [],
       allComics: cachedComics ? cachedComics.comics : []
     };
     paintHomeSections(wrap, fastData);
@@ -5340,6 +5432,8 @@ async function renderHomeSections(forceRefresh, onProgress){
         universoAbsolutoFolders: cachedUniversoAbsoluto ? cachedUniversoAbsoluto.folders : [],
         mulherMaravilhaFolders: cachedMulherMaravilha ? cachedMulherMaravilha.folders : [],
         doomsdayFolders: cachedDoomsday ? cachedDoomsday.folders : [],
+        thanosFolders: cachedThanos ? cachedThanos.folders : [],
+        darkseidFolders: cachedDarkseid ? cachedDarkseid.folders : [],
         comics: cachedComics ? cachedComics.comics : [],
         hadError: true,
         errorMessage: e && e.message
@@ -5371,6 +5465,8 @@ async function renderHomeSections(forceRefresh, onProgress){
     universoAbsolutoFolders: sections.universoAbsolutoFolders,
     mulherMaravilhaFolders: sections.mulherMaravilhaFolders,
     doomsdayFolders: sections.doomsdayFolders,
+    thanosFolders: sections.thanosFolders,
+    darkseidFolders: sections.darkseidFolders,
     allComics: sections.comics,
     hadError: sections.hadError,
     errorMessage: sections.errorMessage
