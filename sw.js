@@ -222,7 +222,17 @@
   pra escondê-lo. Pausa enquanto o painel de configurações do leitor está
   aberto.
 */
-const CACHE_VERSION = 'v38';
+/*
+  v39: index.html mudou — nova seção "Clássico [logo Avengers]" na Home, do
+  tipo "edições conjuntas" (carrossel de HQs, com o botão de baixar no canto
+  da capa, em vez de subpastas). A logo dela vem direto do postimg.cc (não
+  passa pelo proxy/R2, que só conhece as logos antigas) e por isso entra na
+  casca do app abaixo pela URL original — precisa bater EXATAMENTE com
+  HOME_LOGOS.avengers no index.html. O boot também deixou de forçar o
+  carregamento das capas dessa seção na tela de carregamento inicial (são
+  muitas HQs; elas carregam conforme a pessoa rola o carrossel).
+*/
+const CACHE_VERSION = 'v39';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
@@ -253,7 +263,10 @@ const APP_SHELL = [
   'https://proxy1.planetahq01.workers.dev/?logo=superman',
   'https://proxy1.planetahq01.workers.dev/?logo=dc',
   'https://proxy1.planetahq01.workers.dev/?logo=mulhermaravilha',
-  'https://proxy1.planetahq01.workers.dev/?logo=doomsday'
+  'https://proxy1.planetahq01.workers.dev/?logo=doomsday',
+  // Logo "Clássico Avengers" (v39) — direto do postimg.cc, ver HOME_LOGOS
+  // e LOGO_IDS_DIRECT no index.html.
+  'https://i.postimg.cc/4dMsT0k3/Avengers(1963-1996)-1-png.webp'
 ];
 // URLs absolutas resolvidas uma única vez, pra comparar por igualdade exata
 // (nunca mais por sufixo/heurística) na hora de decidir o que é "casca".

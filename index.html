@@ -207,6 +207,27 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 .fav-btn:active{transform:scale(.9);}
 .carousel-card .fav-btn{top:6px;left:6px;width:26px;height:26px;}
 .carousel-card .fav-btn svg{width:13px;height:13px;}
+/* ---- Seção do tipo "edições conjuntas": o botão de baixar mora no canto
+   superior esquerdo da capa (mesmo lugar da estrelinha de favoritar das
+   seções "subpastas"), como uma setinha meio transparente — em vez do
+   botão "Baixar" largo embaixo do card. ---- */
+.carousel-card .dl-corner-btn{
+  position:absolute;top:6px;left:6px;z-index:3;
+  width:26px;height:26px;border-radius:50%;padding:0;border:none;
+  background:rgba(13,12,18,.28);color:#fff;
+  display:flex;align-items:center;justify-content:center;
+  font-family:var(--font-body);font-size:8px;font-weight:800;letter-spacing:-.2px;
+  cursor:pointer;-webkit-tap-highlight-color:transparent;
+  transition:background .15s ease, transform .15s ease;
+}
+.carousel-card .dl-corner-btn svg{
+  width:14px;height:14px;opacity:.72;
+  filter:drop-shadow(0 1px 1.5px rgba(0,0,0,.65));
+}
+.carousel-card .dl-corner-btn:active{transform:scale(.9);}
+.carousel-card .dl-corner-btn.busy{background:rgba(13,12,18,.62);pointer-events:none;}
+.carousel-card .dl-corner-btn.done{background:rgba(13,12,18,.62);color:var(--teal);}
+.carousel-card .dl-corner-btn.done svg{opacity:1;filter:none;}
 .reader-top .fav-btn{position:static;background:none;width:40px;height:40px;}
 .reader-top .fav-btn svg{width:18px;height:18px;}
 
@@ -443,6 +464,8 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 .home-section-title .section-logo[data-logo="dc"]{height:50px;}
 .home-section-title .section-logo[data-logo="mulhermaravilha"]{height:50px;}
 .home-section-title .section-logo[data-logo="doomsday"]{height:50px;}
+/* Logo "Avengers" do título "Clássico [logo]" (seção de edições conjuntas). */
+.home-section-title .section-logo[data-logo="avengers"]{height:50px;}
 .home-section-title .section-logo.hidden{display:none;}
 .home-section-title .section-logo-text.hidden{display:none;}
 .carousel{
@@ -783,6 +806,9 @@ const ICONS = {
   refresh: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><polyline points="1 20 1 14 7 14"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>',
   settings: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
   download: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>',
+  // Setinha simples (sem a "bandeja" do ícone download acima) — usada no botão
+  // de baixar do canto da capa nas seções de edições conjuntas.
+  downloadArrow: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="4" x2="12" y2="18"/><polyline points="6 12 12 18 18 12"/></svg>',
   check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>',
   close: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
   bug: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="8" y="6" width="8" height="14" rx="4"/><path d="M8 12H2M22 12h-6M8 8 4 5M16 8l4-3M8 17l-4 2M16 17l4 2M12 6V3"/></svg>',
@@ -1056,6 +1082,16 @@ async function idbGet(store, key){
     const tx = db.transaction(store,'readonly').objectStore(store).get(key);
     tx.onsuccess = ()=>resolve(tx.result || null);
     tx.onerror = ()=>reject(tx.error);
+  });
+}
+// Só confere se existe um registro com essa chave (count), sem carregar o
+// registro — importante pra 'downloads', cujo valor inclui o blob da HQ.
+async function idbHasKey(store, key){
+  const db = await openDB();
+  return new Promise((resolve,reject)=>{
+    const req = db.transaction(store,'readonly').objectStore(store).count(key);
+    req.onsuccess = ()=>resolve(req.result > 0);
+    req.onerror = ()=>reject(req.error);
   });
 }
 async function idbSet(store, value){
@@ -1982,12 +2018,20 @@ function lazyLoadCover(node, task){
 // de verdade, no ritmo real da rede, e a porcentagem sobe suavemente
 // (66%, 67%, 68%...) até realmente terminar, em vez de ficar parada.
 function forceLoadAllPendingCovers(){
+  // Seções do tipo "edições conjuntas" (ex.: Clássico Avengers) listam
+  // dezenas/centenas de HQs de uma vez numa mesma fila — forçar TODAS as
+  // capas dela a carregarem já no boot travaria a tela de carregamento
+  // (e a rede) à toa. Elas ficam de fora daqui e continuam observadas: só
+  // carregam quando a capa chega perto da tela, como em qualquer grid.
+  const keep = [];
   pendingCoverNodes.forEach(node=>{
+    if(node.closest && node.closest('[data-section-kind="edicoes-conjuntas"]')){ keep.push(node); return; }
     if(coverObserver) coverObserver.unobserve(node);
     const task = node._coverTask;
     if(task) scheduleCoverTask(task);
   });
   pendingCoverNodes.clear();
+  keep.forEach(node=>pendingCoverNodes.add(node));
 }
 function fmtSize(bytes){
   if(!bytes) return '';
@@ -2031,7 +2075,9 @@ function sleep(ms){ return new Promise(r=>setTimeout(r, ms)); }
 // prender a pessoa pra sempre na tela de carregamento.
 function waitForVisibleCovers(maxWaitMs, onProgress){
   return new Promise(resolve=>{
-    const selector = '#grid-library .cover-placeholder.skeleton, #home-sections .cover-placeholder.skeleton, #home-sections .cc-placeholder.skeleton';
+    // As capas das seções "edições conjuntas" não entram na conta (ver
+    // forceLoadAllPendingCovers): carregam sob demanda, não gatam a abertura.
+    const selector = '#grid-library .cover-placeholder.skeleton, #home-sections .cover-placeholder.skeleton, #home-sections .home-section:not([data-section-kind="edicoes-conjuntas"]) .cc-placeholder.skeleton';
     const initial = Math.max(1, document.querySelectorAll(selector).length);
     const start = Date.now();
     const tick = ()=>{
@@ -3481,6 +3527,77 @@ function buildFavButton(fileMeta, tag){
   return btn;
 }
 
+// Botão de baixar do canto da capa (seções "edições conjuntas"): uma
+// setinha meio transparente no canto superior esquerdo, no mesmo lugar da
+// estrelinha das pastas. Usa exatamente o mesmo download em segundo plano
+// e a mesma lista de "Baixados" do botão "Baixar" da biblioteca —
+// mostra a porcentagem enquanto baixa, um check quando já está offline, e
+// tocar de novo num item já baixado remove ele dos baixados (igual ao
+// botão de sempre). É um <span role="button"> (não <button>) porque o card
+// do carrossel já é um <button>, e botão dentro de botão é inválido.
+function buildCornerDownloadButton(f){
+  const btn = elHtml('span','dl-corner-btn', ICONS.downloadArrow);
+  btn.setAttribute('role','button');
+  btn.tabIndex = 0;
+  btn.title = 'Baixar';
+  btn.setAttribute('aria-label','Baixar para ler offline');
+  const pathStr = ['Biblioteca'].concat(f._path || []).join(' / ');
+  let unsubscribe = ()=>{};
+
+  const showIdle = ()=>{
+    btn.classList.remove('busy','done');
+    btn.innerHTML = ICONS.downloadArrow;
+    btn.title = 'Baixar';
+  };
+  const showDone = ()=>{
+    btn.classList.remove('busy');
+    btn.classList.add('done');
+    btn.innerHTML = ICONS.check;
+    btn.title = 'Disponível offline — toque para remover';
+  };
+  const render = (entry, initial)=>{
+    // Depois que a Home é repintada este botão sai da tela — para de
+    // acompanhar o download sozinho. (Na chamada inicial ele ainda nem
+    // entrou no DOM, por isso a checagem só vale nas seguintes.)
+    if(!initial && !document.body.contains(btn)){ unsubscribe(); return; }
+    if(entry.status === 'downloading'){
+      btn.classList.add('busy'); btn.classList.remove('done');
+      btn.innerHTML = `<span>${Math.round(entry.progress*100)}%</span>`;
+    } else if(entry.status === 'done'){
+      showDone();
+    } else if(entry.status === 'error'){
+      showIdle();
+      toast('Erro ao baixar: ' + (entry.error && entry.error.message || ''));
+    }
+  };
+
+  const alreadyActive = activeDownloads.get(f.id);
+  if(alreadyActive){
+    render(alreadyActive, true);
+    unsubscribe = subscribeDownload(f.id, render);
+  } else {
+    idbHasKey('downloads', f.id).then(has=>{ if(has) showDone(); }).catch(()=>{});
+  }
+
+  btn.onclick = async (e)=>{
+    e.stopPropagation();
+    e.preventDefault();
+    if(activeDownloads.has(f.id)) return; // já baixando (em qualquer tela) — ignora clique duplicado
+    if(await idbHasKey('downloads', f.id)){
+      await idbDelete('downloads', f.id);
+      showIdle();
+      toast('Removido dos baixados');
+      return;
+    }
+    const entry = startBackgroundDownload(f, pathStr);
+    unsubscribe();
+    unsubscribe = subscribeDownload(f.id, render);
+    render(entry, true);
+    toast('Baixando em segundo plano — pode navegar livremente');
+  };
+  return btn;
+}
+
 // Cada chamada a openReader() ganha um número sequencial próprio
 // (readerLoadToken). Se a pessoa sair de uma HQ em CBR/CBZ antes do
 // download terminar e abrir outra na sequência, o download da PRIMEIRA
@@ -4257,6 +4374,7 @@ function buildCarouselCard(item, opts){
     cover.appendChild(elHtml('div','cc-progress', `<i style="width:${opts.progressPct}%"></i>`));
   }
   if(isFolder) cover.appendChild(buildFavButton(item, 'span'));
+  else if(opts.dlCorner) cover.appendChild(buildCornerDownloadButton(item));
   btn.appendChild(cover);
 
   btn.appendChild(el('div','cc-name', item.name.replace(/\.(pdf|cbz|cbr)$/i,'')));
@@ -4324,9 +4442,39 @@ function buildCarouselCard(item, opts){
   return btn;
 }
 
-function buildHomeSection(titleHtml, items, builder){
+/* Os DOIS tipos de seção da Home:
+   - "subpastas" (SECTION_KINDS.SUBPASTAS): o padrão de sempre — cada card
+     do carrossel é uma SUBPASTA (com a estrelinha de favoritar no canto
+     superior esquerdo da capa); tocar abre a pasta.
+   - "edições conjuntas" (SECTION_KINDS.EDICOES_CONJUNTAS): cada card é uma
+     HQ (edição) direto, no lugar das subpastas — tocar abre o leitor, e o
+     botão de baixar fica numa setinha translúcida no canto superior
+     esquerdo da capa (mesmo lugar da estrelinha), sem o "Baixar" embaixo.
+   O tipo é gravado no DOM (data-section-kind) pra CSS/JS poderem
+   diferenciar. Seções que não são de nenhum dos dois (Continuar lendo,
+   Recomendados) ficam sem tipo. */
+const SECTION_KINDS = { SUBPASTAS: 'subpastas', EDICOES_CONJUNTAS: 'edicoes-conjuntas' };
+
+// HQs (arquivos) que estão DENTRO de uma pasta com um dos nomes-alvo — em
+// qualquer nível de subpasta abaixo dela. Sai da lista de HQs já varrida
+// (allComics, cada uma com _path = nomes das pastas até ela), então não
+// custa nenhuma chamada extra ao Drive nem precisa de cache próprio.
+// Ordem: por subpasta (ordem natural do nome) e, dentro dela, pelo nome
+// do arquivo (ordem natural: "Capítulo 9" antes de "Capítulo 10").
+function comicsInsideNamedFolder(allComics, targetNames){
+  const list = (allComics || []).filter(f=>{
+    const path = f._path || [];
+    return path.some(seg=>targetNames.includes(normalizeForFolderMatch(seg)));
+  });
+  const nat = (a,b)=>a.localeCompare(b, 'pt-BR', {numeric:true});
+  return list.sort((a,b)=>nat((a._path||[]).join(' / '), (b._path||[]).join(' / ')) || nat(a.name, b.name));
+}
+
+function buildHomeSection(titleHtml, items, builder, opts){
   if(!items || items.length===0) return null;
+  opts = opts || {};
   const section = el('div','home-section');
+  if(opts.kind) section.dataset.sectionKind = opts.kind;
   section.appendChild(elHtml('div','home-section-title', titleHtml));
   const carousel = el('div','carousel');
   items.forEach(it=>{
@@ -4338,6 +4486,17 @@ function buildHomeSection(titleHtml, items, builder){
   attachCarouselDrag(carousel);
   section.appendChild(carousel);
   return section;
+}
+
+// Seção do tipo "edições conjuntas": o carrossel é feito das próprias HQs
+// (ver SECTION_KINDS), com o botão de baixar no canto da capa.
+function buildEdicoesConjuntasSection(titleHtml, comics){
+  return buildHomeSection(
+    titleHtml,
+    comics,
+    (it)=>buildCarouselCard(it, { isFolder:false, dlCorner:true, size: it.size }),
+    { kind: SECTION_KINDS.EDICOES_CONJUNTAS }
+  );
 }
 
 // Estado de arrasto compartilhado por todos os carrosséis — evita ter um
@@ -4686,8 +4845,15 @@ const HOME_LOGOS = {
   superman: 'https://i.postimg.cc/Qty9mpmS/superman-seeklogo.png',
   dc: 'https://i.postimg.cc/Dygkx1bZ/DC-Comics-2024-svg.png',
   mulhermaravilha: 'https://i.postimg.cc/dVLHGCRP/584297fea6515b1e0ad75ad9.png',
-  doomsday: 'https://i.postimg.cc/jdGNkJVp/ncg-Hq-Zl-YPOb-Q0y6f-Moh1ib-Qnqgt.png'
+  doomsday: 'https://i.postimg.cc/jdGNkJVp/ncg-Hq-Zl-YPOb-Q0y6f-Moh1ib-Qnqgt.png',
+  avengers: 'https://i.postimg.cc/4dMsT0k3/Avengers(1963-1996)-1-png.webp'
 };
+
+// Logos que NÃO passam pelo proxy/R2 (o worker.js só conhece as ids antigas
+// acima): vão direto pela URL do postimg.cc, sem gastar uma requisição
+// ao proxy que só ia falhar antes de cair no link direto. Se um dia você
+// adicionar 'avengers' ao mapa de logos do worker.js, é só tirar daqui.
+const LOGO_IDS_DIRECT = new Set(['avengers']);
 
 // Com proxy configurado, a logo vem do cache compartilhado (R2) via
 // worker.js — instantânea pra qualquer pessoa, mesmo na primeira visita
@@ -4695,6 +4861,7 @@ const HOME_LOGOS = {
 // o que o sw.js já cobria antes). Sem proxy configurado, cai pro link
 // direto de sempre.
 function logoSrc(id){
+  if(LOGO_IDS_DIRECT.has(id)) return HOME_LOGOS[id];
   return CONFIG.proxyUrl ? `${CONFIG.proxyUrl}?logo=${encodeURIComponent(id)}` : HOME_LOGOS[id];
 }
 
@@ -4711,7 +4878,7 @@ function wireHomeLogoFallback(section, id){
     // 1ª falha: se estava vindo do proxy/R2, tenta uma vez o link direto
     // do postimg.cc antes de desistir de vez — cobre o caso raro do
     // Worker/R2 estarem fora do ar com a origem original ainda de pé.
-    if(!triedDirect && CONFIG.proxyUrl && img.src !== HOME_LOGOS[id]){
+    if(!triedDirect && CONFIG.proxyUrl && !LOGO_IDS_DIRECT.has(id) && img.src !== HOME_LOGOS[id]){
       triedDirect = true;
       img.src = HOME_LOGOS[id];
       return;
@@ -4746,7 +4913,8 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
     aranhaFolders,
     (it)=>{
       return buildCarouselCard(it, { isFolder:true });
-    }
+    },
+    { kind: SECTION_KINDS.SUBPASTAS }
   );
   if(secAranha){ wrap.appendChild(secAranha); anySection = true; wireHomeLogoFallback(secAranha, 'aranha'); }
 
@@ -4758,7 +4926,8 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
     hulkFolders,
     (it)=>{
       return buildCarouselCard(it, { isFolder:true });
-    }
+    },
+    { kind: SECTION_KINDS.SUBPASTAS }
   );
   if(secHulk){ wrap.appendChild(secHulk); anySection = true; wireHomeLogoFallback(secHulk, 'hulk'); }
 
@@ -4767,7 +4936,8 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
     xmenFolders,
     (it)=>{
       return buildCarouselCard(it, { isFolder:true });
-    }
+    },
+    { kind: SECTION_KINDS.SUBPASTAS }
   );
   if(secXMen){ wrap.appendChild(secXMen); anySection = true; wireHomeLogoFallback(secXMen, 'xmen'); }
 
@@ -4778,7 +4948,8 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
     lanternaFolders,
     (it)=>{
       return buildCarouselCard(it, { isFolder:true });
-    }
+    },
+    { kind: SECTION_KINDS.SUBPASTAS }
   );
   if(secLanterna){ wrap.appendChild(secLanterna); anySection = true; wireHomeLogoFallback(secLanterna, 'lanterna'); }
 
@@ -4787,7 +4958,8 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
     mangaFolders,
     (it)=>{
       return buildCarouselCard(it, { isFolder:true });
-    }
+    },
+    { kind: SECTION_KINDS.SUBPASTAS }
   );
   if(secManga){ wrap.appendChild(secManga); anySection = true; }
 
@@ -4799,7 +4971,8 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
     batmanFolders,
     (it)=>{
       return buildCarouselCard(it, { isFolder:true });
-    }
+    },
+    { kind: SECTION_KINDS.SUBPASTAS }
   );
   if(secBatman){ wrap.appendChild(secBatman); anySection = true; wireHomeLogoFallback(secBatman, 'batman'); }
 
@@ -4810,7 +4983,8 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
     ironmanFolders,
     (it)=>{
       return buildCarouselCard(it, { isFolder:true });
-    }
+    },
+    { kind: SECTION_KINDS.SUBPASTAS }
   );
   if(secIronman){ wrap.appendChild(secIronman); anySection = true; wireHomeLogoFallback(secIronman, 'ironman'); }
 
@@ -4821,7 +4995,8 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
     supermanFolders,
     (it)=>{
       return buildCarouselCard(it, { isFolder:true });
-    }
+    },
+    { kind: SECTION_KINDS.SUBPASTAS }
   );
   if(secSuperman){ wrap.appendChild(secSuperman); anySection = true; wireHomeLogoFallback(secSuperman, 'superman'); }
 
@@ -4834,7 +5009,8 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
     universoAbsolutoFolders,
     (it)=>{
       return buildCarouselCard(it, { isFolder:true });
-    }
+    },
+    { kind: SECTION_KINDS.SUBPASTAS }
   );
   if(secUniversoAbsoluto){ wrap.appendChild(secUniversoAbsoluto); anySection = true; wireHomeLogoFallback(secUniversoAbsoluto, 'dc'); }
 
@@ -4846,9 +5022,21 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
     mulherMaravilhaFolders,
     (it)=>{
       return buildCarouselCard(it, { isFolder:true });
-    }
+    },
+    { kind: SECTION_KINDS.SUBPASTAS }
   );
   if(secMulherMaravilha){ wrap.appendChild(secMulherMaravilha); anySection = true; wireHomeLogoFallback(secMulherMaravilha, 'mulhermaravilha'); }
+
+  // "Clássico [logo Avengers]" — seção do tipo EDIÇÕES CONJUNTAS: em vez de
+  // subpastas, o carrossel é feito das próprias HQs que estão dentro da
+  // pasta "Vingadores (Clássico)" (todas as subpastas dela, em ordem —
+  // Capítulo 30 em diante), cada uma com o botão de baixar no canto da
+  // capa. Sai da lista de HQs já varrida (ver comicsInsideNamedFolder).
+  const secClassicoAvengers = buildEdicoesConjuntasSection(
+    `Clássico <span class="section-logo-text hidden" data-logo-text="avengers">Avengers</span><img class="section-logo" data-logo="avengers" src="${logoSrc('avengers')}" alt="Avengers" loading="eager" decoding="async">`,
+    comicsInsideNamedFolder(allComics, ['vingadores classico'])
+  );
+  if(secClassicoAvengers){ wrap.appendChild(secClassicoAvengers); anySection = true; wireHomeLogoFallback(secClassicoAvengers, 'avengers'); }
 
   // "Se prepare para [logo Avengers Doomsday]": subpastas de dentro da
   // pasta "Doomsday" — aqui a frase inteira "Avengers DoomsDay" vira logo,
@@ -4858,7 +5046,8 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
     doomsdayFolders,
     (it)=>{
       return buildCarouselCard(it, { isFolder:true });
-    }
+    },
+    { kind: SECTION_KINDS.SUBPASTAS }
   );
   if(secDoomsday){ wrap.appendChild(secDoomsday); anySection = true; wireHomeLogoFallback(secDoomsday, 'doomsday'); }
 
@@ -4872,7 +5061,8 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
     salvatFolders,
     (it)=>{
       return buildCarouselCard(it, { isFolder:true });
-    }
+    },
+    { kind: SECTION_KINDS.SUBPASTAS }
   );
   if(secSalvat){ wrap.appendChild(secSalvat); anySection = true; }
 
@@ -4914,7 +5104,11 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
 // lastPaintedHomeSignature abaixo).
 function homeSectionsSignature({aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, allComics}){
   const ids = arr => (arr||[]).map(x=>x.id).join(',');
-  return [ids(aranhaFolders), ids(xmenFolders), ids(mangaFolders), ids(batmanFolders), ids(salvatFolders), ids(hulkFolders), ids(lanternaFolders), ids(ironmanFolders), ids(supermanFolders), ids(universoAbsolutoFolders), ids(mulherMaravilhaFolders), ids(doomsdayFolders), ids(allComics)].join('|');
+  // Nas HQs o nome entra na assinatura também: renomear arquivos no Drive
+  // (ex.: virar "Capítulo 30") não muda o ID, e sem isso a tela continuava
+  // mostrando o nome antigo até uma nova abertura do app.
+  const namedIds = arr => (arr||[]).map(x=>x.id+':'+x.name).join(',');
+  return [ids(aranhaFolders), ids(xmenFolders), ids(mangaFolders), ids(batmanFolders), ids(salvatFolders), ids(hulkFolders), ids(lanternaFolders), ids(ironmanFolders), ids(supermanFolders), ids(universoAbsolutoFolders), ids(mulherMaravilhaFolders), ids(doomsdayFolders), namedIds(allComics)].join('|');
 }
 let lastPaintedHomeSignature = null;
 
