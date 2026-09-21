@@ -318,7 +318,31 @@
   SHELVES.manga.logo no index.html) e o tema dessa estante passou de
   vermelho pra laranja.
 */
-const CACHE_VERSION = 'v54';
+/*
+  v55: index.html mudou — (1) ao trocar de estante, a Home nova abre lá do
+  começo (primeira seção da estante), e se a pessoa estava dentro de uma
+  pasta, volta pra Home; (2) toda pasta aberta (entrando nela ou voltando
+  pra ela) aparece lá do início, nas primeiras HQs/subpastas, em vez de
+  herdar a rolagem da tela anterior.
+*/
+/*
+  v56: index.html mudou — a pasta só abre lá do início quando a pessoa ENTRA
+  nela; ao VOLTAR pra uma pasta anterior (seta, breadcrumb ou botão de
+  voltar) a rolagem não é mais zerada.
+*/
+/*
+  v57: index.html mudou — nova ordem das seções da estante "Marvel + DC"
+  (Homem-Aranha, Batman, Homem de Ferro, Superman, Hulk, Doomsday, ...),
+  ver SHELVES.todas.sections no index.html.
+*/
+/*
+  v58: index.html mudou — leitor: com a página já ampliada (zoom), arrastar
+  com UM dedo passeia pela imagem em qualquer direção, sem precisar da
+  pinça de dois dedos de novo (antes só funcionava se um dos dedos da
+  pinça continuasse na tela). Ao chegar na borda da imagem ampliada, o
+  arrasto deixa a lista rolar pra próxima/anterior página.
+*/
+const CACHE_VERSION = 'v58';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [

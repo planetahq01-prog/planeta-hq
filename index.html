@@ -2717,6 +2717,16 @@ function restoreHomeScrollOnReturn(){
   $('#view-library').addEventListener(ev, ()=>{ homeRestoreWindow = null; }, {passive:true});
 });
 
+// A rolagem da Biblioteca (Home e pastas) é a do #view-library. Toda vez que
+// uma pasta é ABERTA (entrando nela — não ao voltar), ela começa lá do topo
+// (primeiras HQs/subpastas) — sem
+// isso a pasta nova herdava a posição de rolagem da tela anterior (ex.: a
+// Home rolada lá embaixo) e aparecia no meio.
+function scrollLibraryToTop(){
+  const v = $('#view-library');
+  if(v) v.scrollTop = 0;
+}
+
 async function enterFolder(id, name, {reset=false, skipHome=false}={}){
   // Saindo da Home pra uma subpasta: guarda a posição exata pra voltar nela.
   if(!reset) captureHomeScroll();
@@ -2724,6 +2734,9 @@ async function enterFolder(id, name, {reset=false, skipHome=false}={}){
   state.path.push({id, name});
   $('#search-input').value = '';
   renderBreadcrumb();
+  // Depois de guardar a posição da Home (acima) e ANTES de trocar o
+  // conteúdo: a pasta nova já nasce no topo.
+  if(id !== CONFIG.rootFolderId) scrollLibraryToTop();
   await renderLibrary(id, false);
   if(id === CONFIG.rootFolderId && !skipHome){
     renderHomeSections();
@@ -2737,6 +2750,9 @@ function goToBreadcrumbIndex(idx){
   state.path = state.path.slice(0, idx+1);
   $('#search-input').value = '';
   renderBreadcrumb();
+  // De propósito NÃO rola pro topo aqui: só ENTRAR numa pasta abre lá do
+  // início (ver enterFolder). Voltar pra uma pasta anterior não mexe na
+  // rolagem. (Voltar pra Home restaura a posição de onde a pessoa estava.)
   renderLibrary(state.path[state.path.length-1].id, false);
   if(state.path[state.path.length-1].id === CONFIG.rootFolderId){
     renderHomeSections();
@@ -4180,8 +4196,11 @@ function unloadScrollPage(pageDiv){
    movendo juntos), igual o zoom padrão de fotos/PDFs.
 
    Só entra em ação durante um gesto de 2 dedos (ou 1 dedo arrastando uma
-   página que já está com zoom>1); fora isso a rolagem normal do
-   navegador cuida de tudo sozinha — é por isso que não trava mais.
+   página que já está com zoom>1 — em qualquer momento, mesmo depois de
+   soltar a pinça); fora isso a rolagem normal do navegador cuida de tudo
+   sozinha — é por isso que não trava mais. Ao chegar na borda da imagem
+   ampliada, o arrasto deixa de mexer nela e (no modo rolagem) a lista
+   continua rolando normalmente.
    ========================================================================= */
 const PINCH_MAX_SCALE = 4;
 const PINCH_MIN_SCALE = 1;
@@ -4250,9 +4269,17 @@ function setupPinchZoom(container, getImg, getContainerFor){
       prevDist = pinchDist(e.touches[0], e.touches[1]);
       prevMid = pinchMid(e.touches[0], e.touches[1]);
     } else if(e.touches.length===1){
+      // Um dedo só numa página que JÁ está com zoom: arrastar passeia pela
+      // imagem. Antes isso só funcionava se um dos dois dedos da pinça
+      // continuasse na tela — ao soltar os dois, `img` era zerado e o
+      // próximo toque virava rolagem normal (a página zoomada não saía do
+      // lugar), obrigando a usar dois dedos de novo. Agora o alvo é
+      // reencontrado a cada toque, pelo zoom guardado na própria imagem.
       const target = getImg(e);
-      if(target && target===img && getPinchState(img).scale>1.01){
+      if(target && getPinchState(target).scale>1.01){
+        img = target;
         mode = 'pan';
+        img.style.transition = '';
         lastTouch = {x:e.touches[0].clientX, y:e.touches[0].clientY};
       }
     }
@@ -4272,13 +4299,25 @@ function setupPinchZoom(container, getImg, getContainerFor){
       clampPinch(img, getContainerFor(img));
       applyPinchTransform(img);
     } else if(mode==='pan' && e.touches.length===1 && img){
-      e.preventDefault();
       const z = getPinchState(img);
       const t = e.touches[0];
-      z.tx += t.clientX - lastTouch.x;
-      z.ty += t.clientY - lastTouch.y;
+      const dx = t.clientX - lastTouch.x, dy = t.clientY - lastTouch.y;
       lastTouch = {x:t.clientX, y:t.clientY};
+      // Se o navegador já assumiu este gesto como rolagem nativa (não dá
+      // mais pra cancelar), não mexe na imagem — só deixa a lista rolar.
+      if(!e.cancelable) return;
+      const prevTx = z.tx, prevTy = z.ty;
+      z.tx += dx;
+      z.ty += dy;
       clampPinch(img, getContainerFor(img));
+      if(z.tx === prevTx && z.ty === prevTy){
+        // Já está na borda da imagem nessa direção e não há mais o que
+        // arrastar: não cancela o gesto, então no modo rolagem a lista
+        // segue pra próxima/anterior página em vez de "prender" a pessoa
+        // na página ampliada.
+        return;
+      }
+      e.preventDefault();
       applyPinchTransform(img);
     }
   }, {passive:false});
@@ -5412,7 +5451,29 @@ const SHELVES = {
     pathKeywords: ['mangas','manga']
   }
 };
-SHELVES.todas.sections = SHELVES.marvel.sections.concat(SHELVES.dc.sections.filter(k=>k!=='recomendados'));
+// Ordem das seções da estante padrão "Marvel + DC" (definida pelo usuário —
+// as duas listas ficam misturadas, não Marvel e depois DC).
+SHELVES.todas.sections = [
+  'aranha',            // Homem-Aranha
+  'batman',            // Batman
+  'ironman',           // Homem de Ferro
+  'superman',          // Superman
+  'hulk',              // Hulk
+  'doomsday',          // Avengers Doomsday
+  'sagaLiga',          // A Saga da Liga da Justiça
+  'classicoAvengers',  // Clássicos: Avengers
+  'classicoLiga',      // Clássicos: Liga da Justiça da América
+  'recomendados',      // Recomendados
+  'salvat',            // Graphic Novels Marvel
+  'especiaisAranha',   // Edições Especiais: Homem-Aranha
+  'lanterna',          // Lanterna Verde
+  'mulhermaravilha',   // Mulher Maravilha
+  'quarteto',          // Quarteto Fantástico
+  'xmen',              // X-Men
+  'thanos',            // Thanos
+  'darkseid',          // Darkseid
+  'universoAbsoluto'   // Universo Absoluto
+];
 let currentShelf = DEFAULT_SHELF;
 document.body.dataset.shelf = currentShelf; // aplica o tema salvo o quanto antes, sem esperar nada
 // Guarda o último pacote de dados usado pra pintar a Home — troca de
@@ -6100,14 +6161,27 @@ async function switchShelf(key){
   await sleep(320); // tempo da logo crescer/aparecer, tela já 100% coberta
   currentShelf = key;
   document.body.dataset.shelf = key;
-  if(lastHomeSectionsData){
+  // Trocar de estante = ver a Home dela desde o começo (primeira seção).
+  // Descarta qualquer posição de Home guardada/restaurando (senão a Home
+  // nova herdava a rolagem da estante anterior) e rola o #view-library —
+  // que é quem rola de verdade — pro topo. (O código antigo zerava a
+  // rolagem do #home-sections, que não rola, então não fazia efeito.)
+  homeRestoreWindow = null;
+  homeScrollSnapshot = null;
+  if(state.currentTab === 'library' && state.path.length > 1){
+    // Estava dentro de uma pasta: volta pra Home, que já repinta com a
+    // estante nova (antes, a Home repintada aparecia por cima da pasta).
+    goToBreadcrumbIndex(0);
+    navSyncAfterBack();
+  } else if(lastHomeSectionsData){
     const wrap = $('#home-sections');
     if(wrap) paintHomeSections(wrap, lastHomeSectionsData);
-    if(wrap) wrap.scrollTop = 0;
   }
+  scrollLibraryToTop();
   renderShelfPicker();
   await sleep(500); // segura a logo em tela um instante
   overlay.classList.remove('show');
+  scrollLibraryToTop(); // garante o topo antes de revelar (a repintura da Home pode ter acabado depois)
   await sleep(480); // tempo do fade-out revelando a Home nova por baixo
   overlay.classList.add('hidden');
   document.body.classList.remove('theme-transitioning');
