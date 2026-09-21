@@ -4645,6 +4645,39 @@ async function crawlLibrarySections(token, isStale, errorState){
   const aranhaFolders = await childrenOfNamedFolder(['colecao homem aranha']);
   const xmenFolders = await childrenOfNamedFolder(['x men','xmen']);
   const mangaFolders = await childrenOfNamedFolder(['mangas','manga']);
+  // Seções "edição única" de cada mangá (ver MANGA_SECTIONS): marca cada HQ
+  // com o ID da pasta-de-mangá (filha de "MANGÁS") a que ela pertence, em
+  // qualquer nível de subpasta. Isso é feito por ID de pasta (não pelo
+  // caminho de nomes em _path) de propósito: as pastas dentro de "MANGÁS"
+  // são ATALHOS do Drive, e a varredura só entra uma única vez em cada pasta
+  // real — se o mesmo mangá também está guardado em outro lugar da
+  // biblioteca, o _path da HQ pode ter vindo por esse outro caminho, sem
+  // passar por "MANGÁS". O _parentId, ao contrário, é sempre o ID real da
+  // pasta onde a HQ está, então funciona nos dois casos. As listagens já
+  // estão em cache (foram visitadas no walk acima): não gasta rede extra.
+  if(mangaFolders.length && !isStale(token)){
+    const folderToMangaRoot = new Map();
+    for(const root of mangaFolders){
+      const queue = [root.id];
+      const seenHere = new Set([root.id]);
+      while(queue.length){
+        if(isStale(token)) break;
+        const fid = queue.shift();
+        if(!folderToMangaRoot.has(fid)) folderToMangaRoot.set(fid, root.id);
+        let listing;
+        try{ listing = await driveListFolder(fid); }catch(e){ continue; }
+        listing.folders.forEach(sub=>{
+          if(seenHere.has(sub.id)) return;
+          seenHere.add(sub.id);
+          queue.push(sub.id);
+        });
+      }
+    }
+    comics.forEach(c=>{
+      const rootId = folderToMangaRoot.get(c._parentId);
+      if(rootId) c._mangaFolderId = rootId;
+    });
+  }
   // Pasta "Batman" (dentro de "DC" na prática, mas achamos pelo nome em
   // qualquer nível, do mesmo jeito que X-Men/Mangás — sem depender do
   // caminho exato "DC > Batman"), listando as subpastas dela (ex.: "1 -
@@ -4824,6 +4857,16 @@ function comicsDirectlyInNamedFolder(allComics, targetNames){
   return list.sort((a,b)=>a.name.localeCompare(b.name, 'pt-BR', {numeric:true}));
 }
 
+// HQs de UM mangá (pasta filha de "MANGÁS"), em qualquer nível de subpasta
+// dela — usa o _mangaFolderId gravado na varredura (ver
+// crawlLibrarySections). Ordem natural: por subpasta e depois pelo nome do
+// arquivo ("Volume 2" antes de "Volume 10").
+function comicsInsideMangaFolder(allComics, mangaFolderId){
+  const list = (allComics || []).filter(f=>f._mangaFolderId === mangaFolderId);
+  const nat = (a,b)=>a.localeCompare(b, 'pt-BR', {numeric:true});
+  return list.sort((a,b)=>nat((a._path||[]).join(' / '), (b._path||[]).join(' / ')) || nat(a.name, b.name));
+}
+
 function buildHomeSection(titleHtml, items, builder, opts){
   if(!items || items.length===0) return null;
   opts = opts || {};
@@ -4890,7 +4933,7 @@ function attachCarouselDrag(carousel){
 const ARANHA_CACHE_KEY = 'planetahq_aranha_cache_v3'; // v3: seção passou a ser baseada na pasta "Coleção Homem-Aranha", não mais filtro por nome
 const XMEN_CACHE_KEY = 'planetahq_xmen_cache_v1';
 const MANGA_CACHE_KEY = 'planetahq_manga_cache_v1';
-const ALLCOMICS_CACHE_KEY = 'planetahq_allcomics_cache_v1';
+const ALLCOMICS_CACHE_KEY = 'planetahq_allcomics_cache_v2'; // v2: cada HQ de mangá ganhou _mangaFolderId (ver crawlLibrarySections)
 const BATMAN_CACHE_KEY = 'planetahq_batman_cache_v1';
 const SALVAT_CACHE_KEY = 'planetahq_salvat_cache_v1';
 const HULK_CACHE_KEY = 'planetahq_hulk_cache_v1';
@@ -5267,6 +5310,38 @@ function wireHomeLogoFallback(section, id){
 // comicsInsideNamedFolder) usados pra decidir se um item de "Continuar
 // lendo" pertence a esta estante — ver filterContinueItemsForShelf.
 const SHELF_KEY = 'planetahq_shelf_v1';
+
+// Seções "edição única" da estante Mangás — UMA por subpasta de "MANGÁS".
+// `title` é o que aparece na Home; `match` são trechos (já sem acento/caixa/
+// pontuação, como em normalizeForFolderMatch) que precisam aparecer no NOME
+// da subpasta no Drive pra ela ser a desta seção — assim "Attack on Titan
+// (Shingeki no Kyojin)" ou "Jujutsu Kaisen (30) Completo" casam sem precisar
+// digitar o nome inteiro. A ordem desta lista é a ordem das seções na tela.
+const MANGA_SECTIONS = [
+  {key:'manga_akira',        title:'Akira',                 match:['akira']},
+  {key:'manga_ashitanojoe',  title:'Ashita no Joe',         match:['ashita no joe']},
+  {key:'manga_aot',          title:'Attack On Titan',       match:['attack on titan','shingeki no kyojin']},
+  {key:'manga_blackclover',  title:'Black Clover',          match:['black clover']},
+  {key:'manga_bokunohero',   title:'Boku no Hero',          match:['boku no hero']},
+  {key:'manga_cdz',          title:'Cavaleiros do Zodíaco', match:['cavaleiros do zodiaco','saint seiya']},
+  {key:'manga_deathnote',    title:'Death Note',            match:['death note']},
+  {key:'manga_dbs',          title:'Dragon Ball Super',     match:['dragon ball super']},
+  {key:'manga_fairytail',    title:'Fairy Tail',            match:['fairy tail']},
+  {key:'manga_gantz',        title:'Gantz',                 match:['gantz']},
+  {key:'manga_hxh',          title:'Hunter x Hunter',       match:['hunter x hunter']},
+  {key:'manga_jjk',          title:'Jujutsu Kaisen',        match:['jujutsu kaisen']},
+  {key:'manga_kny',          title:'Kimetsu no Yaiba',      match:['kimetsu no yaiba']},
+  {key:'manga_kingdom',      title:'Kingdom',               match:['kingdom']},
+  {key:'manga_monster',      title:'Monster',               match:['monster']},
+  {key:'manga_nanatsu',      title:'Nanatsu no Taizai',     match:['nanatsu no taizai']},
+  {key:'manga_naruto',       title:'Naruto',                match:['naruto']},
+  {key:'manga_eva',          title:'Neon Gênesis Evangelion', match:['evangelion']},
+  {key:'manga_oldboy',       title:'Old Boy',               match:['old boy','oldboy']},
+  {key:'manga_souleater',    title:'Soul Eater',            match:['soul eater']},
+  {key:'manga_tokyoghoul',   title:'Tokyo Ghoul',           match:['tokyo ghoul']},
+  {key:'manga_yyh',          title:'Yu Yu Hakusho',         match:['yu yu hakusho','yuyu hakusho']}
+];
+
 const SHELVES = {
   marvel: {
     key: 'marvel', label: 'Marvel',
@@ -5282,8 +5357,10 @@ const SHELVES = {
   },
   manga: {
     key: 'manga', label: 'Mangás',
-    logo: null, // sem imagem — o nome "Mangás" em si é a logo, ver .manga-logo-text
-    sections: ['manga'],
+    logo: 'https://i.postimg.cc/W1f9HGcs/IMG-20260921-002327.png',
+    // 'manga' = carrossel de subpastas (Coleção: Mangás); depois, uma seção
+    // "edição única" por mangá (ver MANGA_SECTIONS).
+    sections: ['manga', ...MANGA_SECTIONS.map(d=>d.key)],
     pathKeywords: ['mangas','manga']
   }
 };
@@ -5388,6 +5465,23 @@ function paintHomeSections(wrap, data){
     { kind: SECTION_KINDS.SUBPASTAS }
   );
   if(secManga){ built['manga'] = secManga; }
+
+  // Uma seção "edição única" por mangá da lista MANGA_SECTIONS: o carrossel
+  // é feito das próprias HQs (volumes/capítulos) da subpasta de "MANGÁS"
+  // correspondente, com o botão de baixar no canto da capa. Título em texto
+  // simples (sem logo). Mangá sem pasta correspondente, ou sem HQs, some.
+  MANGA_SECTIONS.forEach(def=>{
+    const folder = (mangaFolders || []).find(f=>{
+      const n = normalizeForFolderMatch(f.name);
+      return def.match.some(m=>n.includes(m));
+    });
+    if(!folder) return;
+    const secMangaTitle = buildEdicoesConjuntasSection(
+      escapeHtml(def.title),
+      comicsInsideMangaFolder(allComics, folder.id)
+    );
+    if(secMangaTitle) built[def.key] = secMangaTitle;
+  });
 
   // "Coleção [logo do Batman]": subpastas de dentro da pasta "Batman" (ex.:
   // "DC > Batman > 1 - Batman: Ano Um" e as demais) — mesma lógica das
@@ -5626,7 +5720,7 @@ function homeSectionsSignature({aranhaFolders, xmenFolders, mangaFolders, batman
   // Nas HQs o nome entra na assinatura também: renomear arquivos no Drive
   // (ex.: virar "Capítulo 30") não muda o ID, e sem isso a tela continuava
   // mostrando o nome antigo até uma nova abertura do app.
-  const namedIds = arr => (arr||[]).map(x=>x.id+':'+x.name).join(',');
+  const namedIds = arr => (arr||[]).map(x=>x.id+':'+x.name+':'+(x._mangaFolderId||'')).join(',');
   return [ids(aranhaFolders), ids(xmenFolders), ids(mangaFolders), ids(batmanFolders), ids(salvatFolders), ids(hulkFolders), ids(lanternaFolders), ids(ironmanFolders), ids(supermanFolders), ids(universoAbsolutoFolders), ids(mulherMaravilhaFolders), ids(doomsdayFolders), ids(thanosFolders), ids(darkseidFolders), ids(quartetoFolders), namedIds(allComics)].join('|');
 }
 let lastPaintedHomeSignature = null;

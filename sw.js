@@ -279,7 +279,17 @@
   v46: index.html mudou — títulos das seções da Home: "Coleção" virou
   "Coleção:" e "Clássico" virou "Clássicos:".
 */
-const CACHE_VERSION = 'v47';
+/*
+  v48: index.html mudou — (1) a estante Mangás agora tem uma logo de imagem
+  (antes era só o nome "Mangás" estilizado em CSS), que entra na casca do
+  app abaixo pra abrir instantânea/offline, do mesmo jeito das logos de
+  Marvel e DC; (2) 22 seções novas do tipo "edição única" na estante
+  Mangás, uma por subpasta de "MANGÁS" (ver MANGA_SECTIONS no index.html),
+  e o cache das HQs da Home subiu de v1 pra v2 (cada HQ agora guarda a
+  qual mangá pertence), então a primeira abertura depois desta versão faz
+  uma varredura completa da biblioteca.
+*/
+const CACHE_VERSION = 'v48';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
@@ -322,11 +332,12 @@ const APP_SHELL = [
   'https://i.postimg.cc/G2MpJDRx/who-was-the-most-nostalgic-spiderman-artwork-used-for-v0-vse6zzup5ih91.png',
   'https://i.postimg.cc/pL2X7kdz/logo-liga-da-justica-novo.png',
   'https://i.postimg.cc/cLHGwzCJ/fantastic-four-1985-1992-seeklogo.png',
-  // Logos das ESTANTES (v47) — botão/painel/tela de transição do seletor
-  // Marvel/DC/Mangás (ver SHELVES no index.html). A de Mangás não tem
-  // imagem (é o nome "Mangás" estilizado em CSS), por isso só 2 aqui.
+  // Logos das ESTANTES (v47/v48) — botão/painel/tela de transição do
+  // seletor Marvel/DC/Mangás (ver SHELVES no index.html). Precisam bater
+  // EXATAMENTE com o `logo` de cada estante lá.
   'https://i.postimg.cc/vBNJsJVq/Marvel-Logo.jpg',
-  'https://i.postimg.cc/P550CfQJ/DC-Comics-logo.png'
+  'https://i.postimg.cc/P550CfQJ/DC-Comics-logo.png',
+  'https://i.postimg.cc/W1f9HGcs/IMG-20260921-002327.png'
 ];
 // URLs absolutas resolvidas uma única vez, pra comparar por igualdade exata
 // (nunca mais por sufixo/heurística) na hora de decidir o que é "casca".
