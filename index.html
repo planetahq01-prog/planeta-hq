@@ -495,8 +495,15 @@ body[data-shelf="dc"]{
   --accent:#0476f2; --accent-dark:#023e82; --gold:#5ac8fa;
 }
 body[data-shelf="manga"]{
-  --accent:#e60012; --accent-dark:#a5000c; --gold:#ffd400;
+  --accent:#ff7a00; --accent-dark:#b85300; --gold:#ffb703;
 }
+/* Brilhos que no CSS base são fixos em vermelho-rosado — na estante Mangás
+   acompanham o laranja. */
+body[data-shelf="manga"] .wordmark span,
+body[data-shelf="manga"] #view-loading .loading-word span{text-shadow:0 0 18px rgba(255,122,0,.5);}
+body[data-shelf="manga"] .btn-primary{box-shadow:0 10px 22px -10px rgba(255,122,0,.65);}
+body[data-shelf="manga"] .welcome-card{background-image:radial-gradient(ellipse 260px 160px at 50% 0%, rgba(255,122,0,.16) 0%, transparent 70%);}
+body[data-shelf="manga"] .welcome-badge{box-shadow:0 10px 22px -8px rgba(255,122,0,.7);}
 /* Enquanto a transição roda, as cores acima de fato ANIMAM em vez de trocar
    seco — escopado a poucos elementos (não '*' inteiro) por desempenho. */
 body.theme-transitioning,
@@ -538,7 +545,10 @@ body.theme-transitioning .tab.active{
   font-family:var(--font-display);letter-spacing:.03em;font-size:13px;
   color:var(--paper-dim);text-transform:uppercase;margin-bottom:10px;
 }
-.shelf-picker-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+.shelf-picker-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;}
+.shelf-logo-row{display:flex;align-items:center;justify-content:center;gap:8px;max-width:100%;}
+.shelf-option .shelf-logo-row img{max-width:46%;max-height:34px;}
+.shelf-transition-logo-slot .shelf-logo-row img{max-width:min(36vw,150px);max-height:150px;}
 .shelf-option{
   display:flex;flex-direction:column;align-items:center;justify-content:center;
   gap:8px;padding:14px 6px;border-radius:var(--radius-md);
@@ -5194,6 +5204,30 @@ function matchesRecommendedPick(file, segments){
   return tail.every((seg,i)=>normalizeStr(seg)===normalizeStr(folderSegs[i]));
 }
 
+// A que estante (marvel / dc / manga) uma HQ pertence — usado só pra
+// "Recomendados" mostrar apenas o que é da estante atual.
+//  - manga: a HQ está dentro de uma pasta de mangá (_mangaFolderId, gravado
+//    na varredura — ver crawlLibrarySections) ou o caminho passa por "MANGÁS";
+//  - dc: algum nome de pasta do caminho é "DC"/"DC ..." ou contém o nome de
+//    um personagem/equipe da DC (lista abaixo);
+//  - marvel: todo o resto (a biblioteca é Marvel + DC + Mangás).
+// Compara só os nomes das PASTAS do caminho (não o nome do arquivo), pra
+// evitar falso positivo tipo "Flash Thompson" (Marvel) cair na DC.
+const DC_SHELF_PATH_KEYWORDS = [
+  'batman','superman','superboy','supergirl','lanterna verde','green lantern',
+  'mulher maravilha','wonder woman','universo absoluto','liga da justica',
+  'justice league','darkseid','aquaman','flash','arqueiro verde','green arrow',
+  'esquadrao suicida','suicide squad','asa noturna','nightwing','coringa','joker',
+  'shazam','watchmen','crise nas infinitas terras'
+];
+function comicShelfOf(f){
+  if(f._mangaFolderId) return 'manga';
+  const segs = (f._path || []).map(normalizeForFolderMatch);
+  if(segs.some(seg=>seg==='mangas' || seg==='manga')) return 'manga';
+  const isDc = segs.some(seg=>seg==='dc' || seg.startsWith('dc ') || DC_SHELF_PATH_KEYWORDS.some(k=>seg.includes(k)));
+  return isDc ? 'dc' : 'marvel';
+}
+
 function buildRecommended(allComics){
   const used = new Set();
   const picked = [];
@@ -5309,7 +5343,9 @@ function wireHomeLogoFallback(section, id){
 // de pasta (já normalizados como em childrenOfNamedFolder/
 // comicsInsideNamedFolder) usados pra decidir se um item de "Continuar
 // lendo" pertence a esta estante — ver filterContinueItemsForShelf.
-const SHELF_KEY = 'planetahq_shelf_v1';
+// A estante NÃO é mais lembrada entre aberturas: o app sempre abre na estante
+// padrão (DEFAULT_SHELF), e trocar de estante vale só até fechar o app.
+const DEFAULT_SHELF = 'todas';
 
 // Seções "edição única" da estante Mangás — UMA por subpasta de "MANGÁS".
 // `title` é o que aparece na Home; `match` são trechos (já sem acento/caixa/
@@ -5342,29 +5378,42 @@ const MANGA_SECTIONS = [
   {key:'manga_yyh',          title:'Yu Yu Hakusho',         match:['yu yu hakusho','yuyu hakusho']}
 ];
 
+const MARVEL_LOGO = 'https://i.postimg.cc/vBNJsJVq/Marvel-Logo.jpg';
+const DC_LOGO = 'https://i.postimg.cc/P550CfQJ/DC-Comics-logo.png';
 const SHELVES = {
+  // Estante PADRÃO: todas as seções da Marvel e da DC juntas (sem os mangás),
+  // com um único "Recomendados" (Marvel + DC). Sem paleta própria em CSS
+  // (não há body[data-shelf="todas"] lá em cima): usa as cores originais do
+  // app — "Planeta HQ", abas e destaques como sempre foram antes das estantes.
+  todas: {
+    key: 'todas', label: 'Marvel + DC',
+    logos: [MARVEL_LOGO, DC_LOGO],
+    sections: [],  // preenchido logo abaixo do objeto (Marvel + DC, sem repetir "Recomendados")
+    pathKeywords: [],
+    excludePathKeywords: ['mangas','manga'] // "Continuar lendo": tudo, menos mangás
+  },
   marvel: {
     key: 'marvel', label: 'Marvel',
-    logo: 'https://i.postimg.cc/vBNJsJVq/Marvel-Logo.jpg',
+    logo: MARVEL_LOGO,
     sections: ['aranha','especiaisAranha','hulk','ironman','recomendados','doomsday','xmen','quarteto','classicoAvengers','thanos','salvat'],
     pathKeywords: ['colecao homem aranha','edicoes especiais homem aranha','colecao hulk','colecao homem de ferro','doomsday','x men','xmen','colecao quarteto fantastico','vingadores classico','colecao thanos','graphic novels marvel']
   },
   dc: {
     key: 'dc', label: 'DC',
-    logo: 'https://i.postimg.cc/P550CfQJ/DC-Comics-logo.png',
+    logo: DC_LOGO,
     sections: ['batman','superman','lanterna','mulhermaravilha','recomendados','universoAbsoluto','classicoLiga','sagaLiga','darkseid'],
     pathKeywords: ['batman','superman','lanterna verde','mulher maravilha','wonder woman','universo absoluto','liga da justica da america','a saga da liga da justica','colecao darkseid']
   },
   manga: {
     key: 'manga', label: 'Mangás',
-    logo: 'https://i.postimg.cc/W1f9HGcs/IMG-20260921-002327.png',
-    // 'manga' = carrossel de subpastas (Coleção: Mangás); depois, uma seção
-    // "edição única" por mangá (ver MANGA_SECTIONS).
-    sections: ['manga', ...MANGA_SECTIONS.map(d=>d.key)],
+    logo: 'https://i.postimg.cc/SRVMTbts/Manga-21-09-2026-(1).png',
+    // Só as seções "edição única", uma por mangá (ver MANGA_SECTIONS).
+    sections: MANGA_SECTIONS.map(d=>d.key),
     pathKeywords: ['mangas','manga']
   }
 };
-let currentShelf = (localStorage.getItem(SHELF_KEY) && SHELVES[localStorage.getItem(SHELF_KEY)]) ? localStorage.getItem(SHELF_KEY) : 'marvel';
+SHELVES.todas.sections = SHELVES.marvel.sections.concat(SHELVES.dc.sections.filter(k=>k!=='recomendados'));
+let currentShelf = DEFAULT_SHELF;
 document.body.dataset.shelf = currentShelf; // aplica o tema salvo o quanto antes, sem esperar nada
 // Guarda o último pacote de dados usado pra pintar a Home — troca de
 // estante repinta na hora com o que já está em memória, sem esperar
@@ -5382,6 +5431,9 @@ function filterContinueItemsForShelf(items, shelfKey){
   if(!shelf) return items || [];
   return (items||[]).filter(it=>{
     const p = normalizeForFolderMatch(it.path || '');
+    if(shelf.excludePathKeywords && shelf.excludePathKeywords.length){
+      return !shelf.excludePathKeywords.some(k=>p.includes(k));
+    }
     return shelf.pathKeywords.some(k=>p.includes(k));
   });
 }
@@ -5389,7 +5441,13 @@ function filterContinueItemsForShelf(items, shelfKey){
 function paintHomeSections(wrap, data){
   lastHomeSectionsData = data;
   const {continueItems, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders, allComics, hadError, errorMessage} = data;
-  const recommended = buildRecommended(allComics);
+  // "Recomendados" só com HQs da estante atual (Marvel só recomenda Marvel,
+  // DC só DC etc.) — ver comicShelfOf. Repintar ao trocar de estante já
+  // recalcula isto (switchShelf chama paintHomeSections de novo).
+  const recommended = buildRecommended((allComics || []).filter(f=>{
+    const sh = comicShelfOf(f);
+    return currentShelf === 'todas' ? sh !== 'manga' : sh === currentShelf; // padrão = Marvel + DC
+  }));
   releaseCoverObservers(wrap);
   wrap.innerHTML = '';
   let anySection = false;
@@ -5455,16 +5513,6 @@ function paintHomeSections(wrap, data){
     { kind: SECTION_KINDS.SUBPASTAS }
   );
   if(secLanterna){ built['lanterna'] = secLanterna; wireHomeLogoFallback(secLanterna, 'lanterna'); }
-
-  const secManga = buildHomeSection(
-    '🎌 Coleção: Mangás',
-    mangaFolders,
-    (it)=>{
-      return buildCarouselCard(it, { isFolder:true });
-    },
-    { kind: SECTION_KINDS.SUBPASTAS }
-  );
-  if(secManga){ built['manga'] = secManga; }
 
   // Uma seção "edição única" por mangá da lista MANGA_SECTIONS: o carrossel
   // é feito das próprias HQs (volumes/capítulos) da subpasta de "MANGÁS"
@@ -5995,6 +6043,16 @@ $('#btn-debug-copy').onclick = async ()=>{
 /* ---------------------------------------------------------------------
    10.5) Estantes (Marvel / DC / Mangás)
    --------------------------------------------------------------------- */
+// Logo(s) de uma estante: uma imagem só, várias lado a lado (estante padrão
+// Marvel + DC) ou, sem imagem nenhuma, o nome em texto.
+function shelfLogoHtml(shelf, big){
+  const logos = shelf.logos || (shelf.logo ? [shelf.logo] : []);
+  const lazy = big ? '' : ' loading="lazy"';
+  const alt = escapeHtml(shelf.label);
+  if(!logos.length) return `<span class="manga-logo-text${big ? ' big' : ''}">${alt}</span>`;
+  const imgs = logos.map(u=>`<img src="${u}" alt="${alt}"${lazy}>`).join('');
+  return logos.length > 1 ? `<span class="shelf-logo-row">${imgs}</span>` : imgs;
+}
 function renderShelfPicker(){
   const grid = $('#shelf-picker-grid');
   if(!grid) return;
@@ -6003,9 +6061,7 @@ function renderShelfPicker(){
     const btn = el('button', 'shelf-option');
     btn.type = 'button';
     if(shelf.key === currentShelf) btn.classList.add('active');
-    const logoHtml = shelf.logo
-      ? `<img src="${shelf.logo}" alt="${escapeHtml(shelf.label)}" loading="lazy">`
-      : `<span class="manga-logo-text">${escapeHtml(shelf.label)}</span>`;
+    const logoHtml = shelfLogoHtml(shelf, false);
     btn.innerHTML = `${logoHtml}<span class="shelf-option-label">${escapeHtml(shelf.label)}</span>`;
     btn.onclick = ()=>{ closeShelfPicker(); switchShelf(shelf.key); };
     grid.appendChild(btn);
@@ -6036,16 +6092,13 @@ async function switchShelf(key){
   if(!shelf || key === currentShelf) return;
   const overlay = $('#shelf-transition');
   const logoSlot = $('#shelf-transition-logo-slot');
-  logoSlot.innerHTML = shelf.logo
-    ? `<img src="${shelf.logo}" alt="${escapeHtml(shelf.label)}">`
-    : `<span class="manga-logo-text big">${escapeHtml(shelf.label)}</span>`;
+  logoSlot.innerHTML = shelfLogoHtml(shelf, true);
   overlay.classList.remove('hidden');
   void overlay.offsetWidth;
   overlay.classList.add('show');
   document.body.classList.add('theme-transitioning');
   await sleep(320); // tempo da logo crescer/aparecer, tela já 100% coberta
   currentShelf = key;
-  localStorage.setItem(SHELF_KEY, key);
   document.body.dataset.shelf = key;
   if(lastHomeSectionsData){
     const wrap = $('#home-sections');

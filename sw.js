@@ -289,7 +289,36 @@
   qual mangá pertence), então a primeira abertura depois desta versão faz
   uma varredura completa da biblioteca.
 */
-const CACHE_VERSION = 'v48';
+/*
+  v49: index.html mudou — removida a seção "🎌 Coleção: Mangás" (carrossel
+  de subpastas) da estante Mangás; ficam só as seções "edição única", uma
+  por subpasta de "MANGÁS".
+*/
+/*
+  v50: index.html mudou — a seção "Recomendados" agora só recomenda HQs da
+  estante atual (Marvel só Marvel, DC só DC; ver comicShelfOf no
+  index.html), em vez de misturar a biblioteca inteira.
+*/
+/*
+  v52: index.html mudou — desfeitos os temas visuais por estante da v51
+  (fundo, texturas, tipografia, logo "HQ" do topo, molduras, tela de
+  transição): a aparência voltou a ser a de antes, só com a cor de destaque
+  de cada estante. A versão sobe (em vez de voltar pra v50) pra todo
+  aparelho que já recebeu a v51 buscar este index.html de novo.
+*/
+/*
+  v53: index.html mudou — nova estante PADRÃO "Marvel + DC" (todas as seções
+  das duas, sem mangás, com as cores originais do app); o app agora sempre
+  abre nela (a última estante escolhida deixou de ser lembrada). As logos
+  usadas são as mesmas da Marvel e da DC, que já estão na casca abaixo.
+*/
+/*
+  v54: index.html mudou — nova logo da estante Mangás (a URL antiga saiu da
+  casca do app acima e a nova entrou no lugar; precisa bater EXATAMENTE com
+  SHELVES.manga.logo no index.html) e o tema dessa estante passou de
+  vermelho pra laranja.
+*/
+const CACHE_VERSION = 'v54';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
@@ -337,7 +366,7 @@ const APP_SHELL = [
   // EXATAMENTE com o `logo` de cada estante lá.
   'https://i.postimg.cc/vBNJsJVq/Marvel-Logo.jpg',
   'https://i.postimg.cc/P550CfQJ/DC-Comics-logo.png',
-  'https://i.postimg.cc/W1f9HGcs/IMG-20260921-002327.png'
+  'https://i.postimg.cc/SRVMTbts/Manga-21-09-2026-(1).png'
 ];
 // URLs absolutas resolvidas uma única vez, pra comparar por igualdade exata
 // (nunca mais por sufixo/heurística) na hora de decidir o que é "casca".
