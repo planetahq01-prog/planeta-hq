@@ -736,7 +736,7 @@ body.theme-transitioning .tab.active{
       <p>Conecte a pasta do Google Drive onde estão suas HQs (PDF, CBZ) para montar sua biblioteca. Arquivos CBR não são exibidos, pois o app ainda não consegue lê-los.</p>
 
       <div class="field">
-        <label>Chave de API do Google (API key)</label>
+        <label>Chave de API do Google (só se NÃO usar proxy)</label>
         <input type="text" id="in-apikey" placeholder="AIzaSy...">
       </div>
       <div class="field">
@@ -744,7 +744,7 @@ body.theme-transitioning .tab.active{
         <input type="text" id="in-folderid" placeholder="1AbCdEfGhIjKlMnOpQrSt...">
       </div>
       <div class="field">
-        <label>URL do proxy (opcional, corrige "Failed to fetch")</label>
+        <label>URL do proxy (recomendado — corrige "Failed to fetch"/403 e evita expor sua chave de API)</label>
         <input type="text" id="in-proxyurl" placeholder="https://seu-worker.workers.dev">
       </div>
       <button class="btn-primary" id="btn-save-config">Salvar e abrir biblioteca</button>
@@ -756,7 +756,7 @@ body.theme-transitioning .tab.active{
           <li>Em "Credenciais", crie uma <code>Chave de API</code> e (recomendado) restrinja-a à Drive API.</li>
           <li>No Google Drive, clique com o botão direito na pasta raiz das HQs → <code>Compartilhar</code> → mude para <code>"Qualquer pessoa com o link" → "Leitor"</code>. Isso é necessário para o app ler os arquivos sem exigir login de cada usuário.</li>
           <li>Abra a pasta no navegador; o ID é o trecho da URL depois de <code>/folders/</code>.</li>
-          <li>Se ao abrir uma HQ der erro <code>Failed to fetch</code>, o navegador está bloqueando o download do conteúdo do arquivo por CORS (isso acontece com PDF/CBR mas não com a listagem, que é só metadado). Cole ali a URL de um Cloudflare Worker proxy — veja o texto abaixo do formulário para o código pronto.</li>
+          <li>Publique o Cloudflare Worker (<code>worker.js</code>, que acompanha este app) e cole a URL dele em "URL do proxy". Com o proxy configurado, a chave de API fica guardada só no próprio Worker (como "secret") — o app não precisa mais dela, e o campo acima pode ficar em branco. Sem proxy, o app fala direto com o Google e a chave precisa ir no campo acima, visível a quem olhar o código-fonte do app.</li>
           <li>Cole os valores acima. Eles ficam salvos só neste dispositivo (não são enviados a nenhum servidor além do próprio Google e, se você configurar, do seu proxy).</li>
         </ol>
       </details>
@@ -1012,8 +1012,18 @@ let CONFIG = null;
 // preencher a tela de configuração manualmente. Isso não afeta quem já
 // tinha uma configuração diferente salva no próprio aparelho — o valor
 // salvo em localStorage sempre tem prioridade (ver boot()).
+//
+// apiKey fica vazia de propósito: a chave de API do Google não mora mais
+// no código do app (ela ficava visível no código-fonte pra qualquer
+// pessoa que abrisse o app, mesmo sem o link ser compartilhado — bastava
+// ver o código). Agora ela é um secret configurado só no Worker do proxy
+// (env.GOOGLE_API_KEY, ver worker.js) — o navegador nunca recebe nem
+// manda essa chave. O campo abaixo só existe/é usado no modo avançado
+// "sem proxy" (ver driveMediaUrl e driveFilesList), pra quem preferir
+// falar direto com o Google Drive usando a própria chave, assumindo o
+// mesmo risco de exposição que existia antes.
 const DEFAULT_CONFIG = {
-  apiKey: 'AIzaSyBUmhXMkyiimcQAMV3p9xIGjs-u2Zv8tdc',
+  apiKey: '',
   rootFolderId: '11JGPcNE-t4R4G8NaefyATXW3cWeu2n8Y',
   proxyUrl: 'https://proxy1.planetahq01.workers.dev/'
 };
@@ -1435,25 +1445,49 @@ function resolveShortcuts(rawFiles){
   });
 }
 
+// Faz uma chamada (paginada) a "files.list" do Drive, com os mesmos
+// parâmetros sempre — só muda a cláusula "q" de quem chama (listar uma
+// pasta ou buscar por nome). Centralizado aqui por dois motivos: evita
+// manter dois pedaços de código quase idênticos, e é o único lugar que
+// decide COMO mandar a chave de API:
+//   - Com proxy configurado (o normal): manda pro Worker em
+//     "?drive_list=1&...", SEM a chave — quem preenche a chave de verdade
+//     antes de repassar pro Google é o Worker (env.GOOGLE_API_KEY), que
+//     nunca fica visível no navegador. Ver worker.js.
+//   - Sem proxy (modo avançado, exige preencher CONFIG.apiKey na tela de
+//     configuração): fala direto com o Google, com a chave na URL — mesmo
+//     risco de exposição que o app tinha antes, assumido conscientemente
+//     por quem optar por não usar proxy.
+async function driveFilesList(q){
+  let files = [];
+  let pageToken = null;
+  do{
+    const params = new URLSearchParams({
+      q,
+      fields: 'nextPageToken, files(id,name,mimeType,size,modifiedTime,shortcutDetails,thumbnailLink)',
+      pageSize: '1000',
+      supportsAllDrives: 'true',
+      includeItemsFromAllDrives: 'true'
+    });
+    if(pageToken) params.set('pageToken', pageToken);
+    let requestUrl;
+    if(CONFIG.proxyUrl){
+      requestUrl = `${CONFIG.proxyUrl}?drive_list=1&${params.toString()}`;
+    } else {
+      params.set('key', CONFIG.apiKey);
+      requestUrl = `https://www.googleapis.com/drive/v3/files?${params.toString()}`;
+    }
+    const data = await driveFetchJson(requestUrl);
+    files = files.concat(resolveShortcuts(data.files));
+    pageToken = data.nextPageToken || null;
+  } while(pageToken);
+  return files;
+}
+
 async function driveListFolderUncached(folderId){
   driveInFlightFolders.set(folderId, Date.now());
   try{
-    let files = [];
-    let pageToken = null;
-    do{
-      const params = new URLSearchParams({
-        q: `'${folderId}' in parents and trashed = false`,
-        fields: 'nextPageToken, files(id,name,mimeType,size,modifiedTime,shortcutDetails,thumbnailLink)',
-        pageSize: '1000',
-        supportsAllDrives: 'true',
-        includeItemsFromAllDrives: 'true',
-        key: CONFIG.apiKey
-      });
-      if(pageToken) params.set('pageToken', pageToken);
-      const data = await driveFetchJson(`https://www.googleapis.com/drive/v3/files?${params.toString()}`);
-      files = files.concat(resolveShortcuts(data.files));
-      pageToken = data.nextPageToken || null;
-    } while(pageToken);
+    const files = await driveFilesList(`'${folderId}' in parents and trashed = false`);
 
     const rawFolders = files
       .filter(f=>f.mimeType === 'application/vnd.google-apps.folder')
@@ -1497,8 +1531,13 @@ async function folderHasQualifyingContent(folderId){
 }
 
 function driveMediaUrl(fileId){
+  // Com proxy: manda só o "id" — sem "key" nenhuma. É o Worker quem tem a
+  // chave de verdade (env.GOOGLE_API_KEY) e a usa por trás, sem nunca
+  // expô-la ao navegador. Sem proxy (modo avançado): fala direto com o
+  // Google, e aí sim precisa da chave que a pessoa preencheu na tela de
+  // configuração (com o mesmo risco de exposição de antes).
   return CONFIG.proxyUrl
-    ? `${CONFIG.proxyUrl}?id=${encodeURIComponent(fileId)}&key=${encodeURIComponent(CONFIG.apiKey)}`
+    ? `${CONFIG.proxyUrl}?id=${encodeURIComponent(fileId)}`
     : `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&key=${CONFIG.apiKey}`;
 }
 
@@ -3071,7 +3110,7 @@ async function uploadCoverToR2(fileId, dataUrl){
   if(!CONFIG.proxyUrl || !dataUrl) return;
   try{
     const blob = await (await fetch(dataUrl)).blob();
-    await fetch(`${CONFIG.proxyUrl}?cover_put=1&id=${encodeURIComponent(fileId)}&key=${encodeURIComponent(CONFIG.apiKey)}`, {
+    await fetch(`${CONFIG.proxyUrl}?cover_put=1&id=${encodeURIComponent(fileId)}`, {
       method: 'PUT',
       headers: {'Content-Type': blob.type || 'image/jpeg'},
       body: blob
@@ -3531,23 +3570,7 @@ async function driveSearchByName(term){
   // Pede pro próprio Google Drive procurar pelo nome — uma chamada (ou
   // poucas, se paginar), independente de quantas pastas a biblioteca tem.
   const escaped = term.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-  let files = [];
-  let pageToken = null;
-  do{
-    const params = new URLSearchParams({
-      q: `name contains '${escaped}' and trashed = false`,
-      fields: 'nextPageToken, files(id,name,mimeType,size,modifiedTime,shortcutDetails,thumbnailLink)',
-      pageSize: '1000',
-      supportsAllDrives: 'true',
-      includeItemsFromAllDrives: 'true',
-      key: CONFIG.apiKey
-    });
-    if(pageToken) params.set('pageToken', pageToken);
-    const data = await driveFetchJson(`https://www.googleapis.com/drive/v3/files?${params.toString()}`);
-    files = files.concat(resolveShortcuts(data.files));
-    pageToken = data.nextPageToken || null;
-  } while(pageToken);
-  return files;
+  return await driveFilesList(`name contains '${escaped}' and trashed = false`);
 }
 
 async function searchLibrary(normTerm, rawTerm, token, isStale){
@@ -6219,7 +6242,13 @@ $('#btn-save-config').onclick = async ()=>{
   const apiKey = $('#in-apikey').value.trim();
   const folderId = $('#in-folderid').value.trim();
   const proxyUrl = $('#in-proxyurl').value.trim();
-  if(!apiKey || !folderId){ toast('Preencha os dois campos obrigatórios'); return; }
+  // A chave de API só é obrigatória no modo "sem proxy" (fala direto com
+  // o Google). Com proxy configurado, quem guarda a chave é o Worker
+  // (env.GOOGLE_API_KEY) — o app não precisa de nenhuma aqui.
+  if(!folderId || (!proxyUrl && !apiKey)){
+    toast(proxyUrl ? 'Preencha o ID da pasta' : 'Preencha o ID da pasta e a chave de API (ou configure um proxy)');
+    return;
+  }
   saveConfig(apiKey, folderId, proxyUrl);
   await boot();
 };

@@ -342,7 +342,22 @@
   pinça continuasse na tela). Ao chegar na borda da imagem ampliada, o
   arrasto deixa a lista rolar pra próxima/anterior página.
 */
-const CACHE_VERSION = 'v58';
+/*
+  v59: index.html e worker.js mudaram — a chave de API do Google
+  (CONFIG.apiKey) parou de ser embutida no código do app e de ser mandada
+  pelo navegador em toda chamada ao Drive (listagem de pastas/busca por
+  nome, além do que já passava pelo proxy). Ela agora mora só como secret
+  do Worker (env.GOOGLE_API_KEY) — o app manda pro Worker só o que
+  precisa (pasta/nome pra listar, id do arquivo pra baixar), sem chave
+  nenhuma, e é o Worker quem completa a chave antes de falar com o
+  Google. O modo "sem proxy" continua existindo como opção avançada
+  (exige preencher a chave manualmente na tela de configuração, com o
+  mesmo risco de exposição de antes). worker.js também passou a exigir a
+  chave real (não mais qualquer texto) nos endpoints administrativos
+  (list_cache, purge_logos, forget, warm), que só você aciona manualmente
+  — o app nunca chama esses.
+*/
+const CACHE_VERSION = 'v59';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
