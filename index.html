@@ -207,27 +207,31 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 .fav-btn:active{transform:scale(.9);}
 .carousel-card .fav-btn{top:6px;left:6px;width:26px;height:26px;}
 .carousel-card .fav-btn svg{width:13px;height:13px;}
-/* ---- Seção do tipo "edições conjuntas": o botão de baixar mora no canto
-   superior esquerdo da capa (mesmo lugar da estrelinha de favoritar das
-   seções "subpastas"), como uma setinha meio transparente — em vez do
-   botão "Baixar" largo embaixo do card. ---- */
-.carousel-card .dl-corner-btn{
-  position:absolute;top:6px;left:6px;z-index:3;
-  width:26px;height:26px;border-radius:50%;padding:0;border:none;
-  background:rgba(13,12,18,.28);color:#fff;
+/* ---- Botão de baixar no canto superior esquerdo da capa (mesmo lugar
+   da estrelinha de favoritar das pastas) — usado tanto nas seções do
+   tipo "edição única" (carrossel) quanto nos cards de HQ da Biblioteca
+   normal, pra manter a mesma aparência em todo lugar. ---- */
+.dl-corner-btn{
+  position:absolute;top:8px;left:8px;z-index:3;
+  width:30px;height:30px;border-radius:50%;padding:0;border:none;
+  background:rgba(13,12,18,.55);color:#fff;
   display:flex;align-items:center;justify-content:center;
   font-family:var(--font-body);font-size:8px;font-weight:800;letter-spacing:-.2px;
   cursor:pointer;-webkit-tap-highlight-color:transparent;
   transition:background .15s ease, transform .15s ease;
 }
-.carousel-card .dl-corner-btn svg{
-  width:14px;height:14px;opacity:.72;
-  filter:drop-shadow(0 1px 1.5px rgba(0,0,0,.65));
+.dl-corner-btn svg{width:16px;height:16px;opacity:.9;filter:drop-shadow(0 1px 1.5px rgba(0,0,0,.5));}
+.dl-corner-btn:active{transform:scale(.9);}
+.dl-corner-btn.busy{background:rgba(13,12,18,.75);pointer-events:none;}
+.dl-corner-btn.done{background:rgba(13,12,18,.75);color:var(--teal);}
+.dl-corner-btn.done svg{opacity:1;filter:none;}
+.carousel-card .dl-corner-btn{
+  top:6px;left:6px;width:26px;height:26px;
+  background:rgba(13,12,18,.28);
 }
-.carousel-card .dl-corner-btn:active{transform:scale(.9);}
-.carousel-card .dl-corner-btn.busy{background:rgba(13,12,18,.62);pointer-events:none;}
-.carousel-card .dl-corner-btn.done{background:rgba(13,12,18,.62);color:var(--teal);}
-.carousel-card .dl-corner-btn.done svg{opacity:1;filter:none;}
+.carousel-card .dl-corner-btn svg{width:14px;height:14px;opacity:.72;filter:drop-shadow(0 1px 1.5px rgba(0,0,0,.65));}
+.carousel-card .dl-corner-btn.busy{background:rgba(13,12,18,.62);}
+.carousel-card .dl-corner-btn.done{background:rgba(13,12,18,.62);}
 .reader-top .fav-btn{position:static;background:none;width:40px;height:40px;}
 .reader-top .fav-btn svg{width:18px;height:18px;}
 
@@ -2750,45 +2754,12 @@ function renderComicCard(f){
   meta.appendChild(el('span','ext-badge', f.name.split('.').pop().toUpperCase()));
   meta.appendChild(el('span','', fmtSize(Number(f.size))));
   card.appendChild(meta);
-  const dlBtn = elHtml('button','dl-btn', `${ICONS.download}<span>Baixar</span>`);
-  card.appendChild(dlBtn);
-
-  function renderDlBtnFromEntry(entry){
-    // Se este card já não está mais na tela (a pessoa navegou pra outro
-    // lugar), não tem sentido continuar atualizando um botão invisível —
-    // se desinscreve sozinho, sem precisar de nenhum gancho especial de
-    // "saída da tela".
-    if(!document.body.contains(dlBtn)){
-      unsubscribe();
-      return;
-    }
-    if(entry.status === 'downloading'){
-      dlBtn.disabled = true;
-      dlBtn.innerHTML = `<span>${Math.round(entry.progress*100)}%</span>`;
-    } else if(entry.status === 'done'){
-      dlBtn.disabled = false;
-      dlBtn.innerHTML = `${ICONS.check}<span>Offline</span>`;
-      dlBtn.classList.add('done');
-    } else if(entry.status === 'error'){
-      dlBtn.disabled = false;
-      dlBtn.innerHTML = `${ICONS.download}<span>Baixar</span>`;
-      toast('Erro ao baixar: ' + (entry.error && entry.error.message || ''));
-    }
-  }
-  let unsubscribe = ()=>{};
-
-  const alreadyActive = activeDownloads.get(f.id);
-  if(alreadyActive){
-    // Já tem um download deste arquivo rodando (iniciado nesta pasta, em
-    // outra, ou na aba Baixados) — só passa a acompanhar, sem começar
-    // um segundo.
-    renderDlBtnFromEntry(alreadyActive);
-    unsubscribe = subscribeDownload(f.id, renderDlBtnFromEntry);
-  } else {
-    idbGet('downloads', f.id).then(d=>{
-      if(d){ dlBtn.innerHTML = `${ICONS.check}<span>Offline</span>`; dlBtn.classList.add('done'); }
-    });
-  }
+  // Mesmo botão de baixar (setinha no canto) usado nas seções de "edição
+  // única" — dá pra reaproveitar direto porque ele já cuida sozinho do
+  // download em segundo plano, do estado (baixando/offline) e do toque
+  // pra remover; só precisa saber o caminho da pasta atual pro toast/label.
+  f._path = state.path.map(p=>p.name);
+  card.appendChild(buildCornerDownloadButton(f));
 
   card.onclick = async ()=>{
     if(card.classList.contains('loading')) return;
@@ -2796,23 +2767,6 @@ function renderComicCard(f){
     const pid = f._parentId!=null ? f._parentId : (state.path[state.path.length-1] && state.path[state.path.length-1].id);
     try{ await openReader(f, undefined, pid); }
     finally{ card.classList.remove('loading'); }
-  };
-  dlBtn.onclick = async (e)=>{
-    e.stopPropagation();
-    if(activeDownloads.has(f.id)) return; // já baixando (em qualquer tela) — ignora clique duplicado
-    const existing = await idbGet('downloads', f.id);
-    if(existing){
-      await idbDelete('downloads', f.id);
-      dlBtn.innerHTML = `${ICONS.download}<span>Baixar</span>`; dlBtn.classList.remove('done');
-      toast('Removido dos baixados');
-      return;
-    }
-    const pathStr = state.path.map(p=>p.name).join(' / ');
-    const entry = startBackgroundDownload(f, pathStr);
-    unsubscribe();
-    unsubscribe = subscribeDownload(f.id, renderDlBtnFromEntry);
-    renderDlBtnFromEntry(entry);
-    toast('Baixando em segundo plano — pode navegar livremente');
   };
   return card;
 }
