@@ -279,7 +279,7 @@
   v46: index.html mudou — títulos das seções da Home: "Coleção" virou
   "Coleção:" e "Clássico" virou "Clássicos:".
 */
-const CACHE_VERSION = 'v46';
+const CACHE_VERSION = 'v47';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
@@ -321,7 +321,12 @@ const APP_SHELL = [
   // no index.html (aranhaespecial, ligasaga, quarteto).
   'https://i.postimg.cc/G2MpJDRx/who-was-the-most-nostalgic-spiderman-artwork-used-for-v0-vse6zzup5ih91.png',
   'https://i.postimg.cc/pL2X7kdz/logo-liga-da-justica-novo.png',
-  'https://i.postimg.cc/cLHGwzCJ/fantastic-four-1985-1992-seeklogo.png'
+  'https://i.postimg.cc/cLHGwzCJ/fantastic-four-1985-1992-seeklogo.png',
+  // Logos das ESTANTES (v47) — botão/painel/tela de transição do seletor
+  // Marvel/DC/Mangás (ver SHELVES no index.html). A de Mangás não tem
+  // imagem (é o nome "Mangás" estilizado em CSS), por isso só 2 aqui.
+  'https://i.postimg.cc/vBNJsJVq/Marvel-Logo.jpg',
+  'https://i.postimg.cc/P550CfQJ/DC-Comics-logo.png'
 ];
 // URLs absolutas resolvidas uma única vez, pra comparar por igualdade exata
 // (nunca mais por sufixo/heurística) na hora de decidir o que é "casca".

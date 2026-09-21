@@ -10,7 +10,7 @@
 <!-- Fontes -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Anton&family=Bangers&family=Inter:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 
 <!-- Bibliotecas de leitura -->
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
@@ -478,6 +478,113 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 .home-section-title .section-logo[data-logo="quarteto"]{height:50px;}
 .home-section-title .section-logo.hidden{display:none;}
 .home-section-title .section-logo-text.hidden{display:none;}
+
+/* =======================================================================
+   ESTANTES (Marvel / DC / Mangás) — botão, painel seletor, overlay de
+   transição e paletas de tema por estante.
+   ======================================================================= */
+
+/* Paletas de tema por estante — sobrescrevem só as variáveis de cor que
+   já são usadas em cascata no resto da folha de estilo (var(--accent),
+   var(--gold) etc.), então botões, barra de progresso, destaques de texto
+   e afins mudam de cor sozinhos, sem precisar tocar em cada componente. */
+body[data-shelf="marvel"]{
+  --accent:#ed1d24; --accent-dark:#9e1015; --gold:#f2a900;
+}
+body[data-shelf="dc"]{
+  --accent:#0476f2; --accent-dark:#023e82; --gold:#5ac8fa;
+}
+body[data-shelf="manga"]{
+  --accent:#e60012; --accent-dark:#a5000c; --gold:#ffd400;
+}
+/* Enquanto a transição roda, as cores acima de fato ANIMAM em vez de trocar
+   seco — escopado a poucos elementos (não '*' inteiro) por desempenho. */
+body.theme-transitioning,
+body.theme-transitioning .topbar,
+body.theme-transitioning .icon-btn,
+body.theme-transitioning .btn-primary,
+body.theme-transitioning .carousel-card,
+body.theme-transitioning .progress-inner,
+body.theme-transitioning .home-section-title,
+body.theme-transitioning .wordmark span,
+body.theme-transitioning .tab.active{
+  transition:background-color .55s ease, border-color .55s ease, color .55s ease, box-shadow .55s ease;
+}
+
+/* Botão de estantes (topbar) — mesmo círculo dos outros icon-btn. */
+#btn-shelf svg{width:19px;height:19px;}
+
+.shelf-picker-backdrop{
+  position:fixed;inset:0;background:rgba(0,0,0,.55);z-index:60;
+  opacity:0;transition:opacity .25s ease;
+}
+.shelf-picker-backdrop.hidden{display:none;}
+.shelf-picker-backdrop.show{opacity:1;}
+
+/* Painel com as 3 colunas — cai como um "menu" ancorado no canto superior
+   esquerdo, perto do botão que o abre. */
+.shelf-picker{
+  position:fixed;top:64px;left:12px;right:12px;max-width:420px;
+  background:var(--ink-elevated);border:1px solid var(--ink-border);
+  border-radius:var(--radius-lg);box-shadow:var(--shadow-card);
+  z-index:61;padding:14px;
+  opacity:0;transform:translateY(-10px) scale(.97);
+  transition:opacity .25s ease, transform .25s ease;
+  transform-origin:top left;
+}
+.shelf-picker.hidden{display:none;}
+.shelf-picker.show{opacity:1;transform:translateY(0) scale(1);}
+.shelf-picker-title{
+  font-family:var(--font-display);letter-spacing:.03em;font-size:13px;
+  color:var(--paper-dim);text-transform:uppercase;margin-bottom:10px;
+}
+.shelf-picker-grid{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;}
+.shelf-option{
+  display:flex;flex-direction:column;align-items:center;justify-content:center;
+  gap:8px;padding:14px 6px;border-radius:var(--radius-md);
+  background:var(--ink-soft);border:1.5px solid var(--ink-border);
+  cursor:pointer;transition:border-color .2s ease, transform .15s ease, background .2s ease;
+  min-height:88px;
+}
+.shelf-option:active{transform:scale(.95);}
+.shelf-option.active{border-color:var(--accent);background:var(--ink-elevated);}
+.shelf-option img{max-width:100%;max-height:40px;object-fit:contain;}
+.shelf-option-label{font-size:11.5px;color:var(--paper-dim);font-weight:600;}
+.shelf-option.active .shelf-option-label{color:var(--paper);}
+
+/* Fonte "estilo anime" (Bangers) usada onde o nome "Mangás" faz o papel de
+   logo — tanto no seletor quanto na tela cheia de transição. */
+.manga-logo-text{
+  font-family:'Bangers',var(--font-display),sans-serif;
+  letter-spacing:.03em;line-height:1;
+  background:linear-gradient(180deg,#fff59a 0%,#ffd400 35%,#e60012 100%);
+  -webkit-background-clip:text;background-clip:text;color:transparent;
+  -webkit-text-stroke:1px rgba(0,0,0,.35);
+  text-shadow:0 3px 0 rgba(0,0,0,.25);
+  font-size:26px;
+}
+.manga-logo-text.big{font-size:64px;-webkit-text-stroke:2px rgba(0,0,0,.4);}
+
+/* Tela cheia de transição — mostra a logo grande enquanto o tema troca por
+   baixo dela (ver switchShelf no JS: o body ganha o data-shelf novo bem no
+   meio da animação, escondido atrás desta camada). */
+.shelf-transition{
+  position:fixed;inset:0;z-index:200;
+  display:flex;align-items:center;justify-content:center;
+  background:var(--ink);
+  opacity:0;transition:opacity .45s ease;
+}
+.shelf-transition.hidden{display:none;}
+.shelf-transition.show{opacity:1;}
+.shelf-transition-logo-slot{
+  display:flex;align-items:center;justify-content:center;
+  transform:scale(.75);opacity:0;
+  transition:transform .5s cubic-bezier(.34,1.56,.64,1), opacity .4s ease;
+}
+.shelf-transition.show .shelf-transition-logo-slot{transform:scale(1);opacity:1;}
+.shelf-transition-logo-slot img{max-width:min(70vw,320px);max-height:220px;object-fit:contain;
+  filter:drop-shadow(0 10px 30px rgba(0,0,0,.5));}
+
 .carousel{
   display:flex;gap:10px;overflow-x:auto;overflow-y:hidden;
   scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;
@@ -678,6 +785,7 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
   <div id="chrome" class="hidden">
     <div class="topbar">
       <div class="topbar-top">
+        <button class="icon-btn" id="btn-shelf" title="Estantes"></button>
         <div class="wordmark">PLANETA <span>HQ</span></div>
         <button class="icon-btn" id="btn-refresh" title="Atualizar pasta"></button>
         <button class="icon-btn" id="btn-debug" title="Diagnóstico"></button>
@@ -717,6 +825,22 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
       <button class="icon-btn small hidden" id="btn-back" title="Voltar"></button>
       <div id="breadcrumb" class="breadcrumb"></div>
     </div>
+  </div>
+
+  <!-- Painel de estantes — abre em 3 colunas ao tocar no botão do canto
+       superior esquerdo. As opções (logo + rótulo) são preenchidas via JS
+       a partir de SHELVES, pra ter um único lugar de verdade. -->
+  <div id="shelf-picker-backdrop" class="shelf-picker-backdrop hidden"></div>
+  <div id="shelf-picker" class="shelf-picker hidden">
+    <div class="shelf-picker-title">Escolha uma estante</div>
+    <div id="shelf-picker-grid" class="shelf-picker-grid"></div>
+  </div>
+
+  <!-- Overlay de transição de estante: cobre a tela inteira com a logo da
+       estante escolhida enquanto o tema troca por baixo, e revela a Home já
+       filtrada quando termina de sumir. Ver switchShelf(). -->
+  <div id="shelf-transition" class="shelf-transition hidden">
+    <div id="shelf-transition-logo-slot" class="shelf-transition-logo-slot"></div>
   </div>
 
   <!-- ===================== BIBLIOTECA ===================== -->
@@ -5135,36 +5259,59 @@ function wireHomeLogoFallback(section, id){
   });
 }
 
-// Ordem das seções na Home, de cima pra baixo. Pra mudar a ordem, é só
-// reorganizar esta lista (as chaves são as usadas em `built[...]` dentro de
-// paintHomeSections). "Continuar lendo" só aparece quando há algo em
-// andamento; "universoAbsoluto" não estava na lista de ordem pedida e ficou
-// por último.
-const HOME_SECTION_ORDER = [
-  'continuar',
-  'aranha',            // Homem-Aranha
-  'especiaisAranha',   // Edições especiais [Homem-Aranha]
-  'batman',
-  'superman',
-  'hulk',
-  'doomsday',          // Se prepare para Avengers Doomsday
-  'classicoAvengers',  // Clássico Avengers
-  'classicoLiga',      // Clássico Liga da Justiça (da América)
-  'sagaLiga',          // A Saga da [Liga da Justiça]
-  'recomendados',
-  'ironman',           // Homem de Ferro
-  'lanterna',          // Lanterna Verde
-  'mulhermaravilha',   // Mulher Maravilha
-  'xmen',
-  'quarteto',          // Coleção [Quarteto Fantástico] (subpastas + HQs soltas)
-  'thanos',            // Coleção Thanos
-  'darkseid',          // Coleção Darkseid
-  'salvat',            // Graphic Novels Marvel (Salvat)
-  'manga',             // Coleção Mangás
-  'universoAbsoluto'   // DC Universo Absoluto
-];
+// Estantes — cada uma é uma "vitrine" com seu próprio subconjunto e ordem
+// de seções (as chaves são as usadas em `built[...]` dentro de
+// paintHomeSections; "continuar" é tratado separadamente, sempre primeiro,
+// e nunca precisa estar nesta lista). `pathKeywords` são os mesmos nomes
+// de pasta (já normalizados como em childrenOfNamedFolder/
+// comicsInsideNamedFolder) usados pra decidir se um item de "Continuar
+// lendo" pertence a esta estante — ver filterContinueItemsForShelf.
+const SHELF_KEY = 'planetahq_shelf_v1';
+const SHELVES = {
+  marvel: {
+    key: 'marvel', label: 'Marvel',
+    logo: 'https://i.postimg.cc/vBNJsJVq/Marvel-Logo.jpg',
+    sections: ['aranha','especiaisAranha','hulk','ironman','recomendados','doomsday','xmen','quarteto','classicoAvengers','thanos','salvat'],
+    pathKeywords: ['colecao homem aranha','edicoes especiais homem aranha','colecao hulk','colecao homem de ferro','doomsday','x men','xmen','colecao quarteto fantastico','vingadores classico','colecao thanos','graphic novels marvel']
+  },
+  dc: {
+    key: 'dc', label: 'DC',
+    logo: 'https://i.postimg.cc/P550CfQJ/DC-Comics-logo.png',
+    sections: ['batman','superman','lanterna','mulhermaravilha','recomendados','universoAbsoluto','classicoLiga','sagaLiga','darkseid'],
+    pathKeywords: ['batman','superman','lanterna verde','mulher maravilha','wonder woman','universo absoluto','liga da justica da america','a saga da liga da justica','colecao darkseid']
+  },
+  manga: {
+    key: 'manga', label: 'Mangás',
+    logo: null, // sem imagem — o nome "Mangás" em si é a logo, ver .manga-logo-text
+    sections: ['manga'],
+    pathKeywords: ['mangas','manga']
+  }
+};
+let currentShelf = (localStorage.getItem(SHELF_KEY) && SHELVES[localStorage.getItem(SHELF_KEY)]) ? localStorage.getItem(SHELF_KEY) : 'marvel';
+document.body.dataset.shelf = currentShelf; // aplica o tema salvo o quanto antes, sem esperar nada
+// Guarda o último pacote de dados usado pra pintar a Home — troca de
+// estante repinta na hora com o que já está em memória, sem esperar
+// IndexedDB nem rede de novo (ver switchShelf).
+let lastHomeSectionsData = null;
 
-function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders, allComics, hadError, errorMessage}){
+// Um item de "Continuar lendo" pertence a uma estante se o caminho de
+// pastas salvo (path, gravado em saveProgress) contém o nome de alguma das
+// pastas daquela estante. normalizeForFolderMatch já reduz acentos,
+// maiúsculas e qualquer pontuação (hífen, ":", "/") a espaços, então o
+// teste funciona mesmo com variações de escrita entre o path salvo e o
+// nome real da pasta.
+function filterContinueItemsForShelf(items, shelfKey){
+  const shelf = SHELVES[shelfKey];
+  if(!shelf) return items || [];
+  return (items||[]).filter(it=>{
+    const p = normalizeForFolderMatch(it.path || '');
+    return shelf.pathKeywords.some(k=>p.includes(k));
+  });
+}
+
+function paintHomeSections(wrap, data){
+  lastHomeSectionsData = data;
+  const {continueItems, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders, allComics, hadError, errorMessage} = data;
   const recommended = buildRecommended(allComics);
   releaseCoverObservers(wrap);
   wrap.innerHTML = '';
@@ -5174,7 +5321,7 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
   // UM lugar só, sem mexer no código de cada seção.
   const built = {};
 
-  const secContinue = buildHomeSection('Continuar lendo', continueItems, (it)=>{
+  const secContinue = buildHomeSection('Continuar lendo', filterContinueItemsForShelf(continueItems, currentShelf), (it)=>{
     return buildCarouselCard(it, { isFolder:false, progressPct: it.pct, sub: `${it.pct}% · pág. ${it.pageIndex+1}/${it.pageCount}` });
   });
   if(secContinue){ built['continuar'] = secContinue; }
@@ -5425,10 +5572,13 @@ function paintHomeSections(wrap, {continueItems, aranhaFolders, xmenFolders, man
   });
   if(secRec){ built['recomendados'] = secRec; }
 
-  // Coloca as seções na tela, na ordem definida em HOME_SECTION_ORDER.
-  // Qualquer seção que exista mas não esteja na lista vai pro final (rede
-  // de segurança: uma seção nova nunca some só por ter sido esquecida lá).
-  const orderedKeys = HOME_SECTION_ORDER.concat(Object.keys(built).filter(k=>!HOME_SECTION_ORDER.includes(k)));
+  // Coloca na tela só as seções da estante atual (SHELVES[currentShelf]),
+  // na ordem definida ali — "continuar" vem sempre primeiro, quando existe.
+  // Uma seção que exista mas não pertença a nenhuma estante simplesmente
+  // não aparece em lugar nenhum (é o comportamento certo aqui: as estantes
+  // são vitrines curadas, não "mostra tudo que tiver").
+  const shelfDef = SHELVES[currentShelf] || SHELVES.marvel;
+  const orderedKeys = ['continuar', ...shelfDef.sections];
   orderedKeys.forEach(k=>{
     if(built[k]){
       built[k].dataset.homeKey = k; // âncora estável pra restaurar a posição da Home (ver captureHomeScroll)
@@ -5748,8 +5898,83 @@ $('#btn-debug-copy').onclick = async ()=>{
 /* ---------------------------------------------------------------------
    11) Inicialização
    --------------------------------------------------------------------- */
+/* ---------------------------------------------------------------------
+   10.5) Estantes (Marvel / DC / Mangás)
+   --------------------------------------------------------------------- */
+function renderShelfPicker(){
+  const grid = $('#shelf-picker-grid');
+  if(!grid) return;
+  grid.innerHTML = '';
+  Object.values(SHELVES).forEach(shelf=>{
+    const btn = el('button', 'shelf-option');
+    btn.type = 'button';
+    if(shelf.key === currentShelf) btn.classList.add('active');
+    const logoHtml = shelf.logo
+      ? `<img src="${shelf.logo}" alt="${escapeHtml(shelf.label)}" loading="lazy">`
+      : `<span class="manga-logo-text">${escapeHtml(shelf.label)}</span>`;
+    btn.innerHTML = `${logoHtml}<span class="shelf-option-label">${escapeHtml(shelf.label)}</span>`;
+    btn.onclick = ()=>{ closeShelfPicker(); switchShelf(shelf.key); };
+    grid.appendChild(btn);
+  });
+}
+function openShelfPicker(){
+  $('#shelf-picker-backdrop').classList.remove('hidden');
+  $('#shelf-picker').classList.remove('hidden');
+  void $('#shelf-picker').offsetWidth; // força reflow antes de animar
+  $('#shelf-picker-backdrop').classList.add('show');
+  $('#shelf-picker').classList.add('show');
+}
+function closeShelfPicker(){
+  $('#shelf-picker-backdrop').classList.remove('show');
+  $('#shelf-picker').classList.remove('show');
+  setTimeout(()=>{
+    $('#shelf-picker-backdrop').classList.add('hidden');
+    $('#shelf-picker').classList.add('hidden');
+  }, 250);
+}
+// Troca de estante: cobre a tela com a logo da estante escolhida, troca o
+// tema (data-shelf) e repinta a Home já filtrada ENQUANTO a tela ainda
+// está coberta, e só então revela — assim a pessoa nunca vê o "salto" de
+// cor nem os cards trocando no meio da transição, só a logo bonita e a
+// Home nova já pronta quando ela sai de cena.
+async function switchShelf(key){
+  const shelf = SHELVES[key];
+  if(!shelf || key === currentShelf) return;
+  const overlay = $('#shelf-transition');
+  const logoSlot = $('#shelf-transition-logo-slot');
+  logoSlot.innerHTML = shelf.logo
+    ? `<img src="${shelf.logo}" alt="${escapeHtml(shelf.label)}">`
+    : `<span class="manga-logo-text big">${escapeHtml(shelf.label)}</span>`;
+  overlay.classList.remove('hidden');
+  void overlay.offsetWidth;
+  overlay.classList.add('show');
+  document.body.classList.add('theme-transitioning');
+  await sleep(320); // tempo da logo crescer/aparecer, tela já 100% coberta
+  currentShelf = key;
+  localStorage.setItem(SHELF_KEY, key);
+  document.body.dataset.shelf = key;
+  if(lastHomeSectionsData){
+    const wrap = $('#home-sections');
+    if(wrap) paintHomeSections(wrap, lastHomeSectionsData);
+    if(wrap) wrap.scrollTop = 0;
+  }
+  renderShelfPicker();
+  await sleep(500); // segura a logo em tela um instante
+  overlay.classList.remove('show');
+  await sleep(480); // tempo do fade-out revelando a Home nova por baixo
+  overlay.classList.add('hidden');
+  document.body.classList.remove('theme-transitioning');
+}
+$('#btn-shelf').onclick = ()=>{
+  if($('#shelf-picker').classList.contains('hidden')) openShelfPicker();
+  else closeShelfPicker();
+};
+$('#shelf-picker-backdrop').onclick = closeShelfPicker;
+renderShelfPicker();
+
 Object.entries({
   'search-icon-slot': ICONS.search,
+  'btn-shelf': ICONS.library,
   'btn-refresh': ICONS.refresh,
   'btn-debug': ICONS.bug,
   'btn-debug-close': ICONS.close,
