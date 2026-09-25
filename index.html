@@ -1506,12 +1506,21 @@ setInterval(flushFolderOkCache, 1500);
 const DRIVE_MAX_CONCURRENT = 10;
 let driveActiveRequests = 0;
 const driveWaitQueue = [];
-function driveAcquireSlot(){
+function driveAcquireSlot(priority){
   if(driveActiveRequests < DRIVE_MAX_CONCURRENT){
     driveActiveRequests++;
     return Promise.resolve();
   }
-  return new Promise(resolve=>driveWaitQueue.push(resolve));
+  // Prioridade: usada por ações que a pessoa está esperando NA HORA (ex.:
+  // busca) — em vez de entrar no fim da fila atrás de uma varredura de
+  // fundo (que pode ter dezenas de pastas enfileiradas), essas furam pra
+  // frente e pegam a próxima vaga livre primeiro. Sem isso, digitar uma
+  // busca enquanto a Home revalida em segundo plano podia ficar "quase
+  // infinito" esperando atrás de toda a varredura.
+  return new Promise(resolve=>{
+    if(priority) driveWaitQueue.unshift(resolve);
+    else driveWaitQueue.push(resolve);
+  });
 }
 function driveReleaseSlot(){
   const next = driveWaitQueue.shift();
@@ -1547,10 +1556,10 @@ let driveFoldersVisited = 0;
 // preenchido durante crawlLibrarySections só pra diagnóstico — ver ali.
 const crawlFolderLabels = {};
 
-async function driveFetchJson(url){
+async function driveFetchJson(url, priority){
   const MAX_ATTEMPTS = 6;
   for(let attempt=1; attempt<=MAX_ATTEMPTS; attempt++){
-    await driveAcquireSlot();
+    await driveAcquireSlot(priority);
     let res, errBody, networkErr;
     const reqCtrl = new AbortController();
     try{
@@ -1635,7 +1644,7 @@ function resolveShortcuts(rawFiles){
 //     configuração): fala direto com o Google, com a chave na URL — mesmo
 //     risco de exposição que o app tinha antes, assumido conscientemente
 //     por quem optar por não usar proxy.
-async function driveFilesList(q){
+async function driveFilesList(q, priority){
   let files = [];
   let pageToken = null;
   do{
@@ -1654,7 +1663,7 @@ async function driveFilesList(q){
       params.set('key', CONFIG.apiKey);
       requestUrl = `https://www.googleapis.com/drive/v3/files?${params.toString()}`;
     }
-    const data = await driveFetchJson(requestUrl);
+    const data = await driveFetchJson(requestUrl, priority);
     files = files.concat(resolveShortcuts(data.files));
     pageToken = data.nextPageToken || null;
   } while(pageToken);
@@ -2932,7 +2941,7 @@ function restoreHomeScrollOnReturn(){
   const wrap = $('#home-sections');
   // A Home antiga ainda está no DOM (só ficou escondida): mostra na hora,
   // já na posição certa, em vez de deixar passar um instante no topo.
-  if(wrap && wrap.querySelector(HOME_SECTION_SEL)) wrap.classList.remove('hidden');
+  if(wrap && wrap.querySelector(HOME_SECTION_SEL) && !isSearchActive()) wrap.classList.remove('hidden');
   applyHomeRestore(snap);
   // Reaplica algumas vezes enquanto o layout assenta (repintura, capas...).
   [50, 150, 350, 800, 1600].forEach(ms=>setTimeout(()=>{
@@ -3757,8 +3766,10 @@ function normalizeStr(s){
 async function driveSearchByName(term){
   // Pede pro próprio Google Drive procurar pelo nome — uma chamada (ou
   // poucas, se paginar), independente de quantas pastas a biblioteca tem.
+  // priority=true: a pessoa está esperando isso na tela AGORA, então fura
+  // a fila em vez de esperar atrás de uma varredura de fundo da Home.
   const escaped = term.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-  return await driveFilesList(`name contains '${escaped}' and trashed = false`);
+  return await driveFilesList(`name contains '${escaped}' and trashed = false`, true);
 }
 
 async function searchLibrary(normTerm, rawTerm, token, isStale){
@@ -3802,6 +3813,16 @@ function openFolderFromSearch(f){
   $('#search-input').value = '';
   state.path = [{id: CONFIG.rootFolderId, name:'Biblioteca'}];
   enterFolder(f.id, f.name).then(navSyncAfterBack);
+}
+
+// Verdadeiro enquanto há um termo digitado na busca. Usado pra impedir que
+// a Home reapareça por baixo/atrás dos resultados de busca quando uma
+// revalidação de fundo (ex.: a que roda sozinha ao abrir o app) termina
+// DEPOIS que a pessoa já começou a buscar — sem essa checagem, a Home e os
+// resultados de busca "grudavam" na tela ao mesmo tempo.
+function isSearchActive(){
+  const input = $('#search-input');
+  return !!(input && input.value.trim());
 }
 
 let searchToken = 0;
@@ -6207,7 +6228,7 @@ function paintHomeSections(wrap, data){
     // mesmo problema sem avisar nada. Agora mostramos qual dos dois casos
     // é, com um jeito de tentar de novo sem precisar procurar o botão lá
     // em cima.
-    wrap.classList.remove('hidden');
+    if(!isSearchActive()) wrap.classList.remove('hidden');
     if(hadError){
       wrap.innerHTML = `<div class="empty-state">${ICONS.warning}<h3>Não foi possível carregar a biblioteca</h3>
         Houve uma falha ao buscar os dados do Google Drive${errorMessage ? ': ' + escapeHtml(errorMessage) : '.'}
@@ -6220,7 +6241,7 @@ function paintHomeSections(wrap, data){
     }
     return;
   }
-  wrap.classList.remove('hidden');
+  if(!isSearchActive()) wrap.classList.remove('hidden');
   // Voltando de uma subpasta: toda vez que a Home é repintada durante a
   // janela de restauração, recoloca a posição de onde a pessoa estava.
   if(homeRestoreWindow && Date.now() < homeRestoreWindow.until) applyHomeRestore(homeRestoreWindow.snap);
@@ -6277,7 +6298,7 @@ async function renderHomeSections(forceRefresh, onProgress){
   if(isStale(myToken)) return;
 
   if(cachedAranha || cachedXMen || cachedManga || cachedComics || cachedBatman || cachedSalvat || cachedHulk || cachedLanterna || cachedIronman || cachedSuperman || cachedUniversoAbsoluto || cachedMulherMaravilha || cachedDoomsday || cachedThanos || cachedDarkseid || cachedQuarteto){
-    wrap.classList.remove('hidden');
+    if(!isSearchActive()) wrap.classList.remove('hidden');
     const fastData = {
       continueItems: continueItemsFast,
       aranhaFolders: cachedAranha ? cachedAranha.folders : [],
@@ -6301,7 +6322,7 @@ async function renderHomeSections(forceRefresh, onProgress){
     lastPaintedHomeSignature = homeSectionsSignature(fastData);
   } else {
     wrap.innerHTML = `<div class="home-section"><div class="home-section-title">Carregando seções…</div></div>`;
-    wrap.classList.remove('hidden');
+    if(!isSearchActive()) wrap.classList.remove('hidden');
     lastPaintedHomeSignature = null;
   }
 
