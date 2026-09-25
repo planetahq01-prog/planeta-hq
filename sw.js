@@ -357,7 +357,26 @@
   (list_cache, purge_logos, forget, warm), que só você aciona manualmente
   — o app nunca chama esses.
 */
-const CACHE_VERSION = 'v59';
+/*
+  v60: index.html mudou — no boot() (caminho rápido, quando já existe cache
+  local), a revalidação da Home em segundo plano passou a rodar com
+  forceRefresh=true. Antes ela chamava renderHomeSections() sem esse
+  parâmetro: a tela pintava rápido com o cache (isso não mudou), mas a busca
+  de verdade no Drive só rodava se o cache de 6h já tivesse vencido — então
+  fechar e reabrir o app não trazia HQ nova nenhuma antes das 6h, e só
+  limpar os dados do app (ou reinstalar) resolvia. Subindo a versão pra
+  forçar os aparelhos a buscarem o index.html novo.
+*/
+/*
+  v61: index.html mudou — novo pop-up "Conteúdo novo adicionado ⭐" (ver
+  detectAndQueueNewFolders/showNextNewFolderPopup): toda vez que uma
+  varredura da biblioteca termina limpa (ao abrir o app ou clicar em
+  "Atualizar"), compara as pastas encontradas com as da varredura anterior;
+  quem for pasta/subpasta nova aparece num cartão central com capa, nome e
+  botão "Ler agora" que leva direto pra dentro dela. Subindo a versão pra
+  forçar os aparelhos a buscarem o index.html novo.
+*/
+const CACHE_VERSION = 'v61';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [

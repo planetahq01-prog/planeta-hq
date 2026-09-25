@@ -719,6 +719,66 @@ body.theme-transitioning .tab.active{
   color:var(--paper-dim);font-size:14px;line-height:1.65;margin:0 0 22px;
 }
 .welcome-card .btn-primary{margin-top:0;}
+/* ---- Pop-up "conteúdo novo" (pasta/subpasta adicionada) ---- */
+#view-new-folder{
+  position:fixed;inset:0;z-index:1150;
+  display:flex;align-items:center;justify-content:center;
+  padding:24px;
+  background:rgba(8,7,12,.72);
+  -webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);
+  animation:welcome-fade-in .3s ease;
+}
+#view-new-folder.hidden{display:none;}
+.new-folder-card{
+  position:relative;width:100%;max-width:340px;
+  background:var(--ink-soft);border:1px solid var(--ink-border);
+  border-radius:var(--radius-lg);box-shadow:0 24px 60px -20px rgba(0,0,0,.8);
+  overflow:hidden;
+  animation:welcome-pop-in .35s cubic-bezier(.2,.9,.3,1.2);
+}
+.new-folder-card.card-swap{animation:new-folder-swap-in .32s cubic-bezier(.2,.9,.3,1.2);}
+@keyframes new-folder-swap-in{
+  from{opacity:0;transform:scale(.96) translateY(8px);}
+  to{opacity:1;transform:scale(1) translateY(0);}
+}
+.new-folder-close{
+  position:absolute;top:10px;right:10px;z-index:2;
+  background:rgba(13,12,18,.6);border-color:rgba(255,255,255,.12);
+}
+.new-folder-cover-wrap{
+  position:relative;width:100%;aspect-ratio:3/4;max-height:280px;
+  background:var(--ink-elevated);overflow:hidden;
+}
+.new-folder-cover-wrap img{
+  width:100%;height:100%;object-fit:cover;display:block;
+  opacity:0;transition:opacity .35s ease;
+}
+.new-folder-cover-wrap img.loaded{opacity:1;}
+.new-folder-cover-wrap .cover-placeholder-icon{
+  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--text-muted);
+}
+.new-folder-cover-wrap .cover-placeholder-icon svg{width:56px;height:56px;opacity:.5;}
+.new-folder-cover-wrap::after{
+  content:'';position:absolute;left:0;right:0;bottom:0;height:60%;
+  background:linear-gradient(to top, var(--ink-soft) 4%, rgba(23,21,31,0) 100%);
+  pointer-events:none;
+}
+.new-folder-badge-pill{
+  position:relative;margin:-24px auto 0;width:max-content;max-width:calc(100% - 20px);
+  display:flex;align-items:center;gap:6px;padding:7px 16px;border-radius:999px;
+  background:linear-gradient(135deg,var(--accent),var(--accent-dark));color:#fff;
+  font-weight:700;font-size:12px;letter-spacing:.2px;white-space:normal;text-align:center;
+  box-shadow:0 10px 22px -8px rgba(255,77,94,.7);z-index:1;
+}
+.new-folder-body{padding:14px 22px 22px;text-align:center;}
+.new-folder-name{
+  font-family:var(--font-display);font-size:22px;font-weight:400;letter-spacing:.3px;
+  color:var(--paper);margin:14px 0 2px;line-height:1.25;overflow-wrap:break-word;
+}
+.new-folder-path{font-size:12px;color:var(--text-muted);margin-bottom:18px;}
+.new-folder-name + .new-folder-path.hidden{margin-bottom:0;}
+.new-folder-actions{display:flex;flex-direction:column;gap:10px;margin-top:18px;}
+.new-folder-queue-hint{font-size:11px;color:var(--text-muted);margin-top:14px;}
 .debug-panel-head{display:flex;align-items:center;gap:10px;}
 .debug-panel-head strong{flex:1;font-size:16px;}
 #debug-panel-text{
@@ -788,6 +848,26 @@ body.theme-transitioning .tab.active{
       <div class="wordmark">PLANETA <span>HQ</span></div>
       <p>Bem vindo ao Planeta HQ!<br><br>Aqui você vai poder desfrutar dos quadrinhos e mangás mais amados da cultura pop, reviver a nostalgia das revistas de vídeo-game e muito mais! Tenha uma boa leitura ⭐</p>
       <button class="btn-primary" id="btn-welcome-close">Fechar</button>
+    </div>
+  </div>
+
+  <!-- ===================== CONTEÚDO NOVO (pop-up de pasta/subpasta adicionada) =====================
+       Ver detectAndQueueNewFolders/showNextNewFolderPopup no JS. Some sozinho
+       ao trocar de pasta/atualizar quando não há nada de novo. -->
+  <div id="view-new-folder" class="hidden">
+    <div class="new-folder-card">
+      <button class="icon-btn small new-folder-close" id="btn-new-folder-close" aria-label="Fechar"></button>
+      <div class="new-folder-cover-wrap" id="new-folder-cover-wrap"></div>
+      <div class="new-folder-body">
+        <div class="new-folder-badge-pill">✨ Novo conteúdo adicionado ⭐</div>
+        <div class="new-folder-name" id="new-folder-name">—</div>
+        <div class="new-folder-path hidden" id="new-folder-path"></div>
+        <div class="new-folder-actions">
+          <button class="btn-primary" id="btn-new-folder-read">Ler agora</button>
+          <button class="btn-secondary" id="btn-new-folder-later">Depois</button>
+        </div>
+        <div class="new-folder-queue-hint hidden" id="new-folder-queue-hint"></div>
+      </div>
     </div>
   </div>
 
@@ -2509,7 +2589,18 @@ async function runInitialLoad(){
     }catch(e){
       logErr('[PlanetaHQ] Falha no carregamento rápido (pasta raiz)', e);
     }
-    renderHomeSections().catch(e=>logErr('[PlanetaHQ] Falha ao revalidar a Home em segundo plano', e));
+    // v60: antes chamava renderHomeSections() SEM forceRefresh — isso
+    // pintava a tela com o cache local (correto, é rápido) mas a "revalidação
+    // de verdade" descrita no comentário acima nunca acontecia de fato: sem
+    // forceRefresh, getLibrarySections só busca no Drive se o cache
+    // (HOME_CACHE_MAX_AGE, 6h) já tiver vencido. Resultado: fechar e reabrir
+    // o app não trazia HQ nova nenhuma antes de 6h passarem — só limpar os
+    // dados do app ou reinstalar (que apaga esse cache) resolvia. Agora
+    // passa true: a tela continua abrindo instantânea com o cache (isso não
+    // muda), mas a busca no Drive em segundo plano passa a acontecer sempre,
+    // então uma HQ adicionada enquanto o app estava fechado aparece assim
+    // que ele reabre, sem esperar as 6h nem precisar tocar em "Atualizar".
+    renderHomeSections(true).catch(e=>logErr('[PlanetaHQ] Falha ao revalidar a Home em segundo plano', e));
     maybeShowWelcome();
     return;
   }
@@ -4675,7 +4766,7 @@ async function crawlLibrarySections(token, isStale, errorState){
     await runLimited(toVisit, 6, sub=>walk(sub.id, [...path, sub.name]));
   }
   await walk(CONFIG.rootFolderId, []);
-  if(isStale(token)) return {comics: [], folders: [], aranhaFolders: [], xmenFolders: [], mangaFolders: [], batmanFolders: [], salvatFolders: [], hulkFolders: [], lanternaFolders: [], ironmanFolders: [], supermanFolders: [], universoAbsolutoFolders: [], mulherMaravilhaFolders: [], doomsdayFolders: [], thanosFolders: [], darkseidFolders: [], quartetoFolders: [], hadError:false, errorMessage:null};
+  if(isStale(token)) return {comics: [], folders: [], aranhaFolders: [], xmenFolders: [], mangaFolders: [], batmanFolders: [], salvatFolders: [], hulkFolders: [], lanternaFolders: [], ironmanFolders: [], supermanFolders: [], universoAbsolutoFolders: [], mulherMaravilhaFolders: [], doomsdayFolders: [], thanosFolders: [], darkseidFolders: [], quartetoFolders: [], folderParentId: {}, hadError:false, errorMessage:null};
 
   // Antes: a seção "Coleção Homem-Aranha" juntava, de QUALQUER lugar da
   // biblioteca, toda pasta cujo nome contivesse "aranha" ou "spider" (com
@@ -4790,8 +4881,160 @@ async function crawlLibrarySections(token, isStale, errorState){
   const quartetoFolders = await childrenOfNamedFolder(['colecao quarteto fantastico']);
 
   return {comics, folders: allFolders, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders,
+    // Pasta-mãe de cada pasta encontrada (id -> id da mãe), convertido de Map
+    // pra objeto simples. Usado só pelo pop-up de "conteúdo novo" (ver
+    // detectAndQueueNewFolders), pra saber se uma pasta nova é o TOPO de uma
+    // adição (mostra pop-up) ou só uma subpasta de dentro de algo que já vai
+    // ganhar o próprio pop-up (não duplica).
+    folderParentId: Object.fromEntries(folderParentId),
     hadError: !!(errorState && errorState.hadError),
     errorMessage: errorState && errorState.lastError ? errorState.lastError.message : null};
+}
+
+/* ---------------------------------------------------------------------
+   6.65) POP-UP "CONTEÚDO NOVO" (pasta/subpasta adicionada no Drive)
+   Toda vez que uma varredura da biblioteca termina 100% limpa (ver
+   getLibrarySections/finalizeHomeSectionResult acima — nunca roda em cima
+   de uma varredura com erro parcial ou cancelada, pelo mesmo motivo que o
+   cache normal não é sobrescrito nesses casos), comparamos a lista de
+   pastas encontrada agora com a lista da ÚLTIMA varredura limpa (guardada
+   em KNOWN_FOLDERS_KEY, reaproveitando o mesmo mecanismo de
+   readHomeCache/writeHomeCache do resto da Home — sem gaveta nova no
+   IndexedDB). Toda pasta com um ID que não estava na lista anterior é
+   "nova"; e como o ID de uma pasta no Drive nunca muda (renomear ou mover
+   não gera ID novo), isso nunca confunde uma pasta renomeada com uma
+   pasta nova de verdade.
+
+   Detalhe importante: se você adiciona uma coleção inteira nova (ex.:
+   "Dragon Ball Completo" com 20 subpastas de volumes dentro), as 21
+   pastas (a coleção + os 20 volumes) entram TODAS como "novas" nessa
+   comparação — mas só queremos UM pop-up, o da pasta de cima. Por isso
+   filtramos pra só sobrar quem é "topo": uma pasta nova só vira pop-up se
+   a pasta-mãe dela NÃO for, ela também, uma pasta nova desta mesma leva
+   (ver folderParentId, devolvido por crawlLibrarySections). Uma subpasta
+   nova dentro de uma pasta que JÁ existia antes (ex.: você só adicionou
+   "Volume 21" dentro de uma coleção que já estava lá) continua gerando
+   pop-up normalmente, porque nesse caso ela É o topo da adição.
+
+   Logo na primeira vez que essa gaveta é criada (instalação nova do app,
+   ou primeira varredura depois desta atualização) não existe "lista
+   anterior" nenhuma pra comparar — nesse caso só gravamos a base, sem
+   pop-up nenhum (senão a biblioteca inteira apareceria como "nova" de
+   uma vez só, na primeira varredura depois de instalar este recurso). */
+const KNOWN_FOLDERS_KEY = 'planetahq_known_folders_v1';
+// Proteção contra fila enorme numa reorganização grande da biblioteca de
+// uma vez só (ex.: você moveu dezenas de pastas no Drive no mesmo dia) —
+// mostra as primeiras, o resto só aparece normalmente ao navegar.
+const NEW_FOLDER_POPUP_MAX = 12;
+
+async function detectAndQueueNewFolders(allFoldersNow, folderParentId){
+  try{
+    const prevRec = await readHomeCache(KNOWN_FOLDERS_KEY, 'ids');
+    const currentIds = allFoldersNow.map(f=>f.id);
+    await writeHomeCache(KNOWN_FOLDERS_KEY, 'ids', currentIds);
+    if(!prevRec) return;
+    const prevIds = new Set(prevRec.ids);
+    const newFolders = allFoldersNow.filter(f=>!prevIds.has(f.id));
+    if(!newFolders.length) return;
+    const newIdsSet = new Set(newFolders.map(f=>f.id));
+    const topMost = newFolders.filter(f=>{
+      let pid = folderParentId[f.id];
+      while(pid){
+        if(newIdsSet.has(pid)) return false;
+        pid = folderParentId[pid];
+      }
+      return true;
+    });
+    if(topMost.length) queueNewFolderPopups(topMost.slice(0, NEW_FOLDER_POPUP_MAX));
+  }catch(e){
+    logErr('[PlanetaHQ] Falha ao detectar pastas novas para o pop-up', e);
+  }
+}
+
+let newFolderQueue = [];
+let newFolderPopupShowing = false;
+
+function queueNewFolderPopups(folders){
+  newFolderQueue = newFolderQueue.concat(folders);
+  if(!newFolderPopupShowing) showNextNewFolderPopup();
+}
+
+// Mesma capa mostrada nos cards de pasta normais (override manual, senão o
+// primeiro arquivo de dentro dela — ver resolveFolderCoverFile), só que
+// sem exigir que a pasta já esteja com a miniatura pré-aquecida em
+// memória: se precisar, busca na hora (é só esta pasta, não a biblioteca
+// inteira, então não pesa).
+async function getFolderCoverSrcForPopup(folderObj){
+  const override = getFolderCoverOverride(folderObj.name);
+  if(override) return override;
+  const immediate = getImmediateFolderCoverSrc(folderObj);
+  if(immediate) return immediate;
+  const file = await resolveFolderCoverFile(folderObj.id);
+  if(!file) return null;
+  return await resolveCoverSrc(file);
+}
+
+async function showNextNewFolderPopup(){
+  if(!newFolderQueue.length){ newFolderPopupShowing = false; return; }
+  newFolderPopupShowing = true;
+  const folder = newFolderQueue.shift();
+  const view = $('#view-new-folder');
+  const card = view.querySelector('.new-folder-card');
+  const coverWrap = $('#new-folder-cover-wrap');
+  const nameEl = $('#new-folder-name');
+  const pathEl = $('#new-folder-path');
+  const hintEl = $('#new-folder-queue-hint');
+
+  nameEl.textContent = folder.name;
+  // O caminho (breadcrumb até a pasta-mãe) vem de graça de crawlFolderLabels,
+  // preenchido durante a própria varredura que achou esta pasta — sem
+  // nenhuma chamada de rede extra só pra montar o pop-up.
+  const label = crawlFolderLabels[folder.id];
+  const parts = label ? label.split(' / ') : [];
+  const parentPath = parts.slice(0, -1).join(' › ');
+  pathEl.textContent = parentPath;
+  pathEl.classList.toggle('hidden', !parentPath);
+  const restCount = newFolderQueue.length;
+  hintEl.textContent = restCount ? `+ ${restCount} ${restCount>1?'novidades':'novidade'} depois desta` : '';
+  hintEl.classList.toggle('hidden', !restCount);
+
+  coverWrap.innerHTML = `<div class="cover-placeholder-icon">${ICONS.folder}</div>`;
+  view.classList.remove('hidden');
+  // Reinicia a animação de entrada do card a cada troca (mesmo com o
+  // overlay já visível, quando a fila tem mais de um item) — sem isso, o
+  // navegador só roda a animação CSS na primeira vez que a classe aparece.
+  card.classList.remove('card-swap');
+  void card.offsetWidth;
+  card.classList.add('card-swap');
+
+  $('#btn-new-folder-read').onclick = ()=>{
+    dismissNewFolderPopup();
+    $('#search-input').value = '';
+    state.path = [{id: CONFIG.rootFolderId, name:'Biblioteca'}];
+    enterFolder(folder.id, folder.name).then(navSyncAfterBack);
+  };
+  $('#btn-new-folder-close').onclick = dismissNewFolderPopup;
+  $('#btn-new-folder-later').onclick = dismissNewFolderPopup;
+
+  try{
+    const src = await getFolderCoverSrcForPopup(folder);
+    // Se enquanto a capa carregava a pessoa já fechou ou já avançou pra
+    // outra pasta da fila, não troca mais nada aqui.
+    if(src && !view.classList.contains('hidden') && nameEl.textContent === folder.name){
+      const img = buildCoverNode(src);
+      coverWrap.innerHTML = '';
+      coverWrap.appendChild(img);
+    }
+  }catch(e){ /* fica com o ícone de pasta mesmo — nada quebra por causa disso */ }
+}
+
+function dismissNewFolderPopup(){
+  $('#view-new-folder').classList.add('hidden');
+  if(newFolderQueue.length){
+    setTimeout(showNextNewFolderPopup, 260); // pequena pausa: sensação de transição, não de troca brusca
+  } else {
+    newFolderPopupShowing = false;
+  }
 }
 
 function buildCarouselCard(item, opts){
@@ -5152,7 +5395,14 @@ async function getLibrarySections(forceRefresh){
     // (mesmo que vazia de verdade) tem permissão de gravar.
     const wasAborted = token !== librarySectionsToken;
     const skipWrite = errorState.hadError || wasAborted;
-    if(!skipWrite) revalidateFolderCovers(); // sem await: não atrasa a resposta, roda em segundo plano
+    if(!skipWrite){
+      revalidateFolderCovers(); // sem await: não atrasa a resposta, roda em segundo plano
+      // Idem: compara a lista de pastas desta varredura (100% limpa, sem
+      // erro parcial) com a da varredura anterior, e enfileira o pop-up de
+      // "conteúdo novo" pra quem for detectado. Também sem await — a
+      // resolução da capa faz pedidos de rede e não pode atrasar a Home.
+      detectAndQueueNewFolders(raw.folders, raw.folderParentId).catch(e=>logErr('[PlanetaHQ] Falha ao detectar pastas novas', e));
+    }
     const [aranhaFolders, xmenFolders, mangaFolders, comics, allFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders] = await Promise.all([
       finalizeHomeSectionResult(ARANHA_CACHE_KEY, 'folders', raw.aranhaFolders, skipWrite),
       finalizeHomeSectionResult(XMEN_CACHE_KEY, 'folders', raw.xmenFolders, skipWrite),
@@ -6222,6 +6472,7 @@ Object.entries({
   'btn-refresh': ICONS.refresh,
   'btn-debug': ICONS.bug,
   'btn-debug-close': ICONS.close,
+  'btn-new-folder-close': ICONS.close,
   'btn-settings': ICONS.settings,
   'btn-back': ICONS.chevLeft,
   'btn-close-reader': ICONS.close,
