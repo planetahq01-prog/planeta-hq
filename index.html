@@ -719,65 +719,151 @@ body.theme-transitioning .tab.active{
   color:var(--paper-dim);font-size:14px;line-height:1.65;margin:0 0 22px;
 }
 .welcome-card .btn-primary{margin-top:0;}
-/* ---- Pop-up "conteúdo novo" (pasta/subpasta adicionada) ---- */
+/* ---- Pop-up "conteúdo novo" (pasta/subpasta adicionada) ----
+   Estrutura: #view-new-folder (fundo) > .new-folder-card (só segura a
+   "aura" brilhante ao redor, via ::before) > .new-folder-inner (o cartão
+   em si, com overflow:hidden pra cortar a capa/faixa/confete nos cantos
+   arredondados — por isso a aura precisa morar num elemento DE FORA
+   desse, senão o próprio overflow:hidden cortaria o brilho). */
 #view-new-folder{
   position:fixed;inset:0;z-index:1150;
   display:flex;align-items:center;justify-content:center;
   padding:24px;
-  background:rgba(8,7,12,.72);
-  -webkit-backdrop-filter:blur(3px);backdrop-filter:blur(3px);
+  background:radial-gradient(560px 460px at 50% 30%, rgba(255,120,140,.16), transparent 70%), rgba(8,7,12,.78);
+  -webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);
   animation:welcome-fade-in .3s ease;
 }
 #view-new-folder.hidden{display:none;}
 .new-folder-card{
   position:relative;width:100%;max-width:340px;
-  background:var(--ink-soft);border:1px solid var(--ink-border);
-  border-radius:var(--radius-lg);box-shadow:0 24px 60px -20px rgba(0,0,0,.8);
-  overflow:hidden;
-  animation:welcome-pop-in .35s cubic-bezier(.2,.9,.3,1.2);
+  border-radius:var(--radius-lg);
+  animation:welcome-pop-in .4s cubic-bezier(.2,.9,.3,1.2);
 }
 .new-folder-card.card-swap{animation:new-folder-swap-in .32s cubic-bezier(.2,.9,.3,1.2);}
 @keyframes new-folder-swap-in{
   from{opacity:0;transform:scale(.96) translateY(8px);}
   to{opacity:1;transform:scale(1) translateY(0);}
 }
+/* Aura pulsante e com leve troca de matiz (accent -> gold -> accent),
+   dando a sensação de "coisa viva, chegando na hora" — sem depender de
+   nenhum recurso CSS moderno arriscado, só gradiente + blur + opacidade
+   animados, que qualquer navegador de celular atual já suporta bem. */
+.new-folder-card::before{
+  content:'';position:absolute;inset:-4px;border-radius:calc(var(--radius-lg) + 4px);
+  background:linear-gradient(120deg, var(--accent), var(--gold), var(--accent));
+  background-size:220% 220%;
+  filter:blur(18px);opacity:.45;z-index:-1;
+  animation:new-folder-glow-pulse 2.6s ease-in-out infinite, new-folder-glow-shift 7s linear infinite;
+}
+@keyframes new-folder-glow-pulse{0%,100%{opacity:.32;}50%{opacity:.68;}}
+@keyframes new-folder-glow-shift{0%{background-position:0% 50%;}100%{background-position:220% 50%;}}
+.new-folder-inner{
+  position:relative;background:var(--ink-soft);border:1px solid var(--ink-border);
+  border-radius:var(--radius-lg);overflow:hidden;box-shadow:0 24px 60px -20px rgba(0,0,0,.85);
+}
 .new-folder-close{
-  position:absolute;top:10px;right:10px;z-index:2;
-  background:rgba(13,12,18,.6);border-color:rgba(255,255,255,.12);
+  position:absolute;top:10px;right:10px;z-index:6;
+  background:rgba(13,12,18,.6);border-color:rgba(255,255,255,.14);
 }
 .new-folder-cover-wrap{
   position:relative;width:100%;aspect-ratio:3/4;max-height:280px;
   background:var(--ink-elevated);overflow:hidden;
 }
+.new-folder-cover-img-slot{position:absolute;inset:0;}
 .new-folder-cover-wrap img{
   width:100%;height:100%;object-fit:cover;display:block;
-  opacity:0;transition:opacity .35s ease;
+  opacity:0;transform:scale(1.06);
+  transition:opacity .4s ease, transform .6s cubic-bezier(.2,.8,.3,1);
 }
-.new-folder-cover-wrap img.loaded{opacity:1;}
+.new-folder-cover-wrap img.loaded{opacity:1;transform:scale(1);}
 .new-folder-cover-wrap .cover-placeholder-icon{
   position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--text-muted);
 }
 .new-folder-cover-wrap .cover-placeholder-icon svg{width:56px;height:56px;opacity:.5;}
 .new-folder-cover-wrap::after{
-  content:'';position:absolute;left:0;right:0;bottom:0;height:60%;
+  content:'';position:absolute;left:0;right:0;bottom:0;height:62%;
   background:linear-gradient(to top, var(--ink-soft) 4%, rgba(23,21,31,0) 100%);
-  pointer-events:none;
+  pointer-events:none;z-index:1;
 }
-.new-folder-badge-pill{
-  position:relative;margin:-24px auto 0;width:max-content;max-width:calc(100% - 20px);
-  display:flex;align-items:center;gap:6px;padding:7px 16px;border-radius:999px;
-  background:linear-gradient(135deg,var(--accent),var(--accent-dark));color:#fff;
-  font-weight:700;font-size:12px;letter-spacing:.2px;white-space:normal;text-align:center;
-  box-shadow:0 10px 22px -8px rgba(255,77,94,.7);z-index:1;
+/* Faixa diagonal "NOVO" no canto — o clássico selo de "item novo",
+   reconhecível na hora. Só entra em cena de verdade (animação) quando a
+   classe .shine-play é alternada pelo JS a cada exibição (ver
+   restartCssAnim), senão fica parada fora da tela (left:-60%) — assim ela
+   "varre" a capa de novo toda vez que troca de item na fila, não só na
+   primeiríssima vez. */
+.new-folder-ribbon{
+  position:absolute;top:16px;left:-42px;width:160px;z-index:3;
+  background:linear-gradient(135deg,var(--accent),var(--accent-dark));
+  color:#fff;font-family:var(--font-display);font-size:13px;letter-spacing:2px;
+  text-align:center;padding:5px 0;transform:rotate(-45deg);
+  box-shadow:0 6px 16px -4px rgba(0,0,0,.55);
 }
-.new-folder-body{padding:14px 22px 22px;text-align:center;}
+.new-folder-cover-wrap.shine-play::before{
+  content:'';position:absolute;top:0;left:-60%;width:45%;height:100%;
+  background:linear-gradient(75deg, transparent, rgba(255,255,255,.4), transparent);
+  transform:skewX(-18deg);z-index:2;pointer-events:none;
+  animation:new-folder-shine 1.5s ease .45s 1;
+}
+@keyframes new-folder-shine{
+  from{left:-60%;}
+  to{left:135%;}
+}
+/* Confete: gerado no JS (posições/cores/atrasos aleatórios a cada
+   exibição — ver spawnConfetti), pra nunca parecer sempre igual. */
+.new-folder-kicker-wrap{position:relative;}
+.new-folder-confetti{
+  position:absolute;left:50%;top:6px;width:1px;height:1px;
+  pointer-events:none;overflow:visible;z-index:0;
+}
+.new-folder-confetti span{
+  position:absolute;top:0;left:0;
+  width:6px;height:6px;border-radius:50%;
+  opacity:0;
+  animation:new-folder-confetti-burst .95s ease-out forwards;
+}
+.new-folder-confetti span.square{border-radius:2px;}
+@keyframes new-folder-confetti-burst{
+  0%{opacity:1;transform:translate(-50%,-50%) scale(1) rotate(0deg);}
+  100%{opacity:0;transform:translate(var(--dx),var(--dy)) scale(.3) rotate(200deg);}
+}
+.new-folder-body{padding:16px 22px 22px;text-align:center;}
+.new-folder-kicker{
+  position:relative;z-index:1;font-size:12px;font-weight:800;letter-spacing:.6px;
+  text-transform:uppercase;color:var(--gold);display:flex;align-items:center;justify-content:center;gap:6px;
+}
+.new-folder-kicker .spark{display:inline-block;animation:new-folder-twinkle 1.7s ease-in-out infinite;}
+.new-folder-kicker .spark:nth-child(3){animation-delay:.5s;}
+@keyframes new-folder-twinkle{0%,100%{opacity:.35;transform:scale(.75);}50%{opacity:1;transform:scale(1.2);}}
 .new-folder-name{
-  font-family:var(--font-display);font-size:22px;font-weight:400;letter-spacing:.3px;
-  color:var(--paper);margin:14px 0 2px;line-height:1.25;overflow-wrap:break-word;
+  font-family:var(--font-display);font-size:24px;font-weight:400;letter-spacing:.3px;
+  color:var(--paper);margin:12px 0 4px;line-height:1.22;overflow-wrap:break-word;
+  text-shadow:0 0 22px rgba(255,77,94,.4);
 }
-.new-folder-path{font-size:12px;color:var(--text-muted);margin-bottom:18px;}
+.new-folder-path{
+  display:flex;align-items:center;justify-content:center;gap:5px;
+  font-size:12px;color:var(--text-muted);margin-bottom:20px;
+}
+.new-folder-path svg{width:12px;height:12px;flex-shrink:0;opacity:.7;}
 .new-folder-name + .new-folder-path.hidden{margin-bottom:0;}
-.new-folder-actions{display:flex;flex-direction:column;gap:10px;margin-top:18px;}
+.new-folder-actions{display:flex;flex-direction:column;gap:8px;margin-top:20px;}
+.new-folder-cta{
+  position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;gap:8px;
+  background:linear-gradient(135deg,var(--accent),var(--accent-dark));color:#fff;border:none;
+  padding:15px 20px;border-radius:999px;font-weight:800;font-size:15px;letter-spacing:.2px;
+  box-shadow:0 14px 28px -10px rgba(255,77,94,.65);transition:transform .12s ease, filter .12s ease;
+}
+.new-folder-cta:active{transform:scale(.97);filter:brightness(.92);}
+.new-folder-cta svg{width:18px;height:18px;flex-shrink:0;}
+.new-folder-cta::after{
+  content:'';position:absolute;top:0;left:-70%;width:50%;height:100%;
+  background:linear-gradient(75deg, transparent, rgba(255,255,255,.5), transparent);
+  transform:skewX(-18deg);
+  animation:new-folder-shine 2.6s ease-in-out .9s infinite;
+}
+.new-folder-ghost{
+  background:none;border:none;color:var(--text-muted);font-size:13px;font-weight:600;
+  padding:8px;text-decoration:underline;text-underline-offset:3px;
+}
 .new-folder-queue-hint{font-size:11px;color:var(--text-muted);margin-top:14px;}
 .debug-panel-head{display:flex;align-items:center;gap:10px;}
 .debug-panel-head strong{flex:1;font-size:16px;}
@@ -856,17 +942,28 @@ body.theme-transitioning .tab.active{
        ao trocar de pasta/atualizar quando não há nada de novo. -->
   <div id="view-new-folder" class="hidden">
     <div class="new-folder-card">
-      <button class="icon-btn small new-folder-close" id="btn-new-folder-close" aria-label="Fechar"></button>
-      <div class="new-folder-cover-wrap" id="new-folder-cover-wrap"></div>
-      <div class="new-folder-body">
-        <div class="new-folder-badge-pill">✨ Novo conteúdo adicionado ⭐</div>
-        <div class="new-folder-name" id="new-folder-name">—</div>
-        <div class="new-folder-path hidden" id="new-folder-path"></div>
-        <div class="new-folder-actions">
-          <button class="btn-primary" id="btn-new-folder-read">Ler agora</button>
-          <button class="btn-secondary" id="btn-new-folder-later">Depois</button>
+      <div class="new-folder-inner">
+        <button class="icon-btn small new-folder-close" id="btn-new-folder-close" aria-label="Fechar"></button>
+        <div class="new-folder-cover-wrap" id="new-folder-cover-wrap">
+          <div class="new-folder-ribbon">Novo</div>
+          <div class="new-folder-cover-img-slot" id="new-folder-cover-img-slot"></div>
         </div>
-        <div class="new-folder-queue-hint hidden" id="new-folder-queue-hint"></div>
+        <div class="new-folder-body">
+          <div class="new-folder-kicker-wrap">
+            <div class="new-folder-confetti" id="new-folder-confetti"></div>
+            <div class="new-folder-kicker"><span class="spark">✦</span> Novo conteúdo adicionado <span class="spark">✦</span></div>
+          </div>
+          <div class="new-folder-name" id="new-folder-name">—</div>
+          <div class="new-folder-path hidden" id="new-folder-path"></div>
+          <div class="new-folder-actions">
+            <button class="new-folder-cta" id="btn-new-folder-read">
+              <span>Ler agora</span>
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
+            </button>
+            <button class="new-folder-ghost" id="btn-new-folder-later">Ver depois</button>
+          </div>
+          <div class="new-folder-queue-hint hidden" id="new-folder-queue-hint"></div>
+        </div>
       </div>
     </div>
   </div>
@@ -4964,6 +5061,35 @@ function queueNewFolderPopups(folders){
 // sem exigir que a pasta já esteja com a miniatura pré-aquecida em
 // memória: se precisar, busca na hora (é só esta pasta, não a biblioteca
 // inteira, então não pesa).
+// Confete: uma dúzia de pontinhos que nascem no centro do "kicker" e
+// voam em direções/distâncias/cores aleatórias, sumindo no fim — puro
+// CSS pra animação, só a posição/cor/atraso de cada um vem do JS, pra
+// nunca parecer o mesmo "efeitinho engessado" duas vezes seguidas.
+const CONFETTI_COLORS = ['var(--accent)','var(--gold)','#7CFC9A','#6FC3FF'];
+function spawnConfetti(container){
+  container.innerHTML = '';
+  const count = 12;
+  for(let i=0;i<count;i++){
+    const dot = document.createElement('span');
+    const angle = (Math.PI*2/count)*i + (Math.random()*0.5 - 0.25);
+    const dist = 46 + Math.random()*34;
+    dot.style.setProperty('--dx', `${Math.cos(angle)*dist}px`);
+    dot.style.setProperty('--dy', `${Math.sin(angle)*dist - 10}px`);
+    dot.style.background = CONFETTI_COLORS[i % CONFETTI_COLORS.length];
+    dot.style.animationDelay = `${Math.random()*120}ms`;
+    if(i % 3 === 0) dot.classList.add('square');
+    container.appendChild(dot);
+  }
+}
+// Reinicia uma animação CSS ligada a uma classe (remove -> força reflow
+// -> adiciona de novo). Usado pro brilho que "varre" a capa toda vez que
+// o pop-up troca de pasta na fila, não só da primeira vez que aparece.
+function restartCssAnim(elm, cls){
+  elm.classList.remove(cls);
+  void elm.offsetWidth;
+  elm.classList.add(cls);
+}
+
 async function getFolderCoverSrcForPopup(folderObj){
   const override = getFolderCoverOverride(folderObj.name);
   if(override) return override;
@@ -4981,9 +5107,11 @@ async function showNextNewFolderPopup(){
   const view = $('#view-new-folder');
   const card = view.querySelector('.new-folder-card');
   const coverWrap = $('#new-folder-cover-wrap');
+  const coverSlot = $('#new-folder-cover-img-slot');
   const nameEl = $('#new-folder-name');
   const pathEl = $('#new-folder-path');
   const hintEl = $('#new-folder-queue-hint');
+  const confettiEl = $('#new-folder-confetti');
 
   nameEl.textContent = folder.name;
   // O caminho (breadcrumb até a pasta-mãe) vem de graça de crawlFolderLabels,
@@ -4992,20 +5120,25 @@ async function showNextNewFolderPopup(){
   const label = crawlFolderLabels[folder.id];
   const parts = label ? label.split(' / ') : [];
   const parentPath = parts.slice(0, -1).join(' › ');
-  pathEl.textContent = parentPath;
+  if(parentPath){
+    pathEl.innerHTML = `${ICONS.folder}<span>${escapeHtml(parentPath)}</span>`;
+  } else {
+    pathEl.innerHTML = '';
+  }
   pathEl.classList.toggle('hidden', !parentPath);
   const restCount = newFolderQueue.length;
   hintEl.textContent = restCount ? `+ ${restCount} ${restCount>1?'novidades':'novidade'} depois desta` : '';
   hintEl.classList.toggle('hidden', !restCount);
 
-  coverWrap.innerHTML = `<div class="cover-placeholder-icon">${ICONS.folder}</div>`;
+  coverSlot.innerHTML = `<div class="cover-placeholder-icon">${ICONS.folder}</div>`;
   view.classList.remove('hidden');
-  // Reinicia a animação de entrada do card a cada troca (mesmo com o
-  // overlay já visível, quando a fila tem mais de um item) — sem isso, o
-  // navegador só roda a animação CSS na primeira vez que a classe aparece.
-  card.classList.remove('card-swap');
-  void card.offsetWidth;
-  card.classList.add('card-swap');
+  // Reinicia a animação de entrada do card, o brilho na capa e o confete a
+  // cada troca (mesmo com o overlay já visível, quando a fila tem mais de
+  // um item) — sem isso, o navegador só roda a animação CSS na primeira
+  // vez que a classe aparece.
+  restartCssAnim(card, 'card-swap');
+  restartCssAnim(coverWrap, 'shine-play');
+  spawnConfetti(confettiEl);
 
   $('#btn-new-folder-read').onclick = ()=>{
     dismissNewFolderPopup();
@@ -5022,8 +5155,8 @@ async function showNextNewFolderPopup(){
     // outra pasta da fila, não troca mais nada aqui.
     if(src && !view.classList.contains('hidden') && nameEl.textContent === folder.name){
       const img = buildCoverNode(src);
-      coverWrap.innerHTML = '';
-      coverWrap.appendChild(img);
+      coverSlot.innerHTML = '';
+      coverSlot.appendChild(img);
     }
   }catch(e){ /* fica com o ícone de pasta mesmo — nada quebra por causa disso */ }
 }

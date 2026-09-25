@@ -376,7 +376,14 @@
   botão "Ler agora" que leva direto pra dentro dela. Subindo a versão pra
   forçar os aparelhos a buscarem o index.html novo.
 */
-const CACHE_VERSION = 'v61';
+/*
+  v62: index.html mudou — o pop-up "Conteúdo novo adicionado" ficou bem
+  mais estiloso: aura brilhante pulsante ao redor do card, faixa "Novo" na
+  capa, brilho passando pela capa e pelo botão, confete colorido ao
+  aparecer e estrelinhas piscando no textinho de cima. Subindo a versão pra
+  forçar os aparelhos a buscarem o index.html novo.
+*/
+const CACHE_VERSION = 'v62';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
