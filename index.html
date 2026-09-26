@@ -5,6 +5,9 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#0d0c12">
 <link rel="manifest" href="./manifest.json">
+<link rel="icon" href="./favicon-32.png" sizes="32x32" type="image/png">
+<link rel="icon" href="./icon-192.png" sizes="192x192" type="image/png">
+<link rel="apple-touch-icon" href="./icon-192.png">
 <title>Planeta HQ</title>
 
 <!-- Fontes -->
@@ -938,7 +941,7 @@ body.theme-transitioning .tab.active{
   </div>
 
   <!-- ===================== CONTEÚDO NOVO (pop-up de pasta/subpasta adicionada) =====================
-       Ver detectAndQueueNewFolders/showNextNewFolderPopup no JS. Some sozinho
+       Ver detectAndQueueNewContent/showNextNewFolderPopup no JS. Some sozinho
        ao trocar de pasta/atualizar quando não há nada de novo. -->
   <div id="view-new-folder" class="hidden">
     <div class="new-folder-card">
@@ -1615,19 +1618,43 @@ async function driveListFolder(folderId){
   return promise;
 }
 
+// Tag "[pop-up-att]": marca uma pasta OU HQ pra ganhar pop-up de "conteúdo
+// novo" PRÓPRIO mesmo quando não é o topo de uma leva nova (ex.: um
+// capítulo novo isolado dentro de uma coleção que já existia, ou um volume
+// específico que você quer destacar dentro de uma leva grande de pastas
+// novas). Ver detectAndQueueNewContent, mais abaixo.
+// A tag nunca aparece em lugar nenhum do app: é removida do nome bem aqui,
+// no único lugar por onde passa toda pasta/HQ vinda do Drive (listagem de
+// pasta E busca, já que ambas usam driveFilesList -> resolveShortcuts) —
+// então todo o resto do app (cards, breadcrumb, leitor, pop-up, busca) só
+// enxerga o nome já limpo, e a própria busca não consegue "achar" nada pelo
+// texto da tag.
+const POPUP_ATT_TAG_TEST_RE = /\[pop-up-att\]/i;
+const POPUP_ATT_TAG_STRIP_RE = /\s*\[pop-up-att\]\s*/gi;
+function stripPopupAttTag(rawName){
+  return String(rawName || '')
+    .replace(POPUP_ATT_TAG_STRIP_RE, ' ')
+    .replace(/\s+/g, ' ')
+    .replace(/\s+\./g, '.')
+    .trim();
+}
+
 function resolveShortcuts(rawFiles){
   return (rawFiles || []).map(f=>{
+    const hasPopupTag = POPUP_ATT_TAG_TEST_RE.test(f.name || '');
+    const cleanName = hasPopupTag ? stripPopupAttTag(f.name) : f.name;
     if(f.mimeType === 'application/vnd.google-apps.shortcut' && f.shortcutDetails){
       return {
         id: f.shortcutDetails.targetId,
-        name: f.name,
+        name: cleanName,
         mimeType: f.shortcutDetails.targetMimeType,
         size: f.size,
         modifiedTime: f.modifiedTime,
-        thumbnailLink: f.thumbnailLink
+        thumbnailLink: f.thumbnailLink,
+        _popupAtt: hasPopupTag
       };
     }
-    return f;
+    return {...f, name: cleanName, _popupAtt: hasPopupTag};
   });
 }
 
@@ -5001,7 +5028,7 @@ async function crawlLibrarySections(token, isStale, errorState){
   return {comics, folders: allFolders, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders,
     // Pasta-mãe de cada pasta encontrada (id -> id da mãe), convertido de Map
     // pra objeto simples. Usado só pelo pop-up de "conteúdo novo" (ver
-    // detectAndQueueNewFolders), pra saber se uma pasta nova é o TOPO de uma
+    // detectAndQueueNewContent), pra saber se uma pasta nova é o TOPO de uma
     // adição (mostra pop-up) ou só uma subpasta de dentro de algo que já vai
     // ganhar o próprio pop-up (não duplica).
     folderParentId: Object.fromEntries(folderParentId),
@@ -5040,32 +5067,146 @@ async function crawlLibrarySections(token, isStale, errorState){
    pop-up nenhum (senão a biblioteca inteira apareceria como "nova" de
    uma vez só, na primeira varredura depois de instalar este recurso). */
 const KNOWN_FOLDERS_KEY = 'planetahq_known_folders_v1';
+// Mesma ideia do KNOWN_FOLDERS_KEY, mas pra HQs soltas — precisa de uma
+// gaveta própria porque, antes desta versão, HQs nunca eram comparadas
+// (só pastas geravam pop-up). Key nova de propósito: assim, na primeira
+// varredura depois desta atualização, não existe "lista anterior" de
+// comics pra comparar, e nenhuma HQ da biblioteca inteira aparece de
+// vez como "nova" só por causa da funcionalidade ter acabado de nascer —
+// mesma proteção que KNOWN_FOLDERS_KEY já tinha pra pastas.
+const KNOWN_COMICS_KEY = 'planetahq_known_comics_v1';
+// Fila de candidatos a pop-up cuja capa AINDA não estava pronta no R2 na
+// última vez que foram conferidos. Fica salva (sobrevive a fechar o app)
+// e é reconferida do zero a cada varredura nova: assim que a capa aparecer
+// no R2 — em qualquer varredura futura, mesmo dias depois —, o pop-up
+// aparece normalmente; até lá, o item nunca é esquecido nem duplicado.
+const PENDING_POPUP_KEY = 'planetahq_pending_popups_v1';
 // Proteção contra fila enorme numa reorganização grande da biblioteca de
 // uma vez só (ex.: você moveu dezenas de pastas no Drive no mesmo dia) —
-// mostra as primeiras, o resto só aparece normalmente ao navegar.
+// mostra as primeiras, o resto continua pendente e aparece normalmente
+// depois (não se perde, só espera a próxima vez).
 const NEW_FOLDER_POPUP_MAX = 12;
 
-async function detectAndQueueNewFolders(allFoldersNow, folderParentId){
+// Confere no R2 (via Worker) se a capa de um arquivo já está pronta lá.
+async function isCoverCachedInR2(fileId){
+  if(!CONFIG.proxyUrl || !fileId) return false;
   try{
-    const prevRec = await readHomeCache(KNOWN_FOLDERS_KEY, 'ids');
-    const currentIds = allFoldersNow.map(f=>f.id);
-    await writeHomeCache(KNOWN_FOLDERS_KEY, 'ids', currentIds);
-    if(!prevRec) return;
-    const prevIds = new Set(prevRec.ids);
-    const newFolders = allFoldersNow.filter(f=>!prevIds.has(f.id));
-    if(!newFolders.length) return;
-    const newIdsSet = new Set(newFolders.map(f=>f.id));
-    const topMost = newFolders.filter(f=>{
-      let pid = folderParentId[f.id];
-      while(pid){
-        if(newIdsSet.has(pid)) return false;
-        pid = folderParentId[pid];
+    const res = await fetch(`${CONFIG.proxyUrl}?cover_check=1&id=${encodeURIComponent(fileId)}`);
+    const data = await res.json();
+    return !!(data && data.cached);
+  }catch(e){ return false; }
+}
+
+// Só os campos realmente necessários pra reconstruir o pop-up mais tarde —
+// inclusive numa sessão futura, depois de fechar e reabrir o app (quando
+// crawlFolderLabels já não existe mais) —, por isso o caminho (popupPath) é
+// calculado e guardado JÁ PRONTO no momento da primeira detecção.
+function toPendingPopupRecord(item, kind, popupPath){
+  return {
+    _kind: kind,
+    id: item.id,
+    name: item.name,
+    _parentId: item._parentId,
+    _popupPath: popupPath || ''
+  };
+}
+
+async function detectAndQueueNewContent(allFoldersNow, folderParentId, allComicsNow){
+  try{
+    const [prevFoldersRec, prevComicsRec, pendingRec] = await Promise.all([
+      readHomeCache(KNOWN_FOLDERS_KEY, 'ids'),
+      readHomeCache(KNOWN_COMICS_KEY, 'ids'),
+      readHomeCache(PENDING_POPUP_KEY, 'items')
+    ]);
+    await Promise.all([
+      writeHomeCache(KNOWN_FOLDERS_KEY, 'ids', allFoldersNow.map(f=>f.id)),
+      writeHomeCache(KNOWN_COMICS_KEY, 'ids', allComicsNow.map(f=>f.id))
+    ]);
+
+    let pending = (pendingRec && pendingRec.items) || [];
+
+    // Só procura NOVIDADE (comparando com a varredura anterior) se pelo
+    // menos uma das duas gavetas de base já existia — nenhuma delas ainda
+    // ter base (instalação nova, ou primeiríssima varredura depois desta
+    // atualização) só grava a base, sem tratar a biblioteca inteira como
+    // "nova".
+    if(prevFoldersRec || prevComicsRec){
+      const prevFolderIds = new Set(prevFoldersRec ? prevFoldersRec.ids : []);
+      const prevComicIds = new Set(prevComicsRec ? prevComicsRec.ids : []);
+      const newFolders = prevFoldersRec ? allFoldersNow.filter(f=>!prevFolderIds.has(f.id)) : [];
+      const newComics = prevComicsRec ? allComicsNow.filter(f=>!prevComicIds.has(f.id)) : [];
+
+      if(newFolders.length || newComics.length){
+        // 1) Pastas do TOPO de uma adição nova — comportamento de sempre,
+        // sem precisar de tag: uma pasta nova só vira pop-up sozinha se a
+        // pasta-mãe dela não for, ela também, nova nesta mesma leva.
+        const newIdsSet = new Set(newFolders.map(f=>f.id));
+        const topMost = newFolders.filter(f=>{
+          let pid = folderParentId[f.id];
+          while(pid){
+            if(newIdsSet.has(pid)) return false;
+            pid = folderParentId[pid];
+          }
+          return true;
+        });
+        // 2) Tag "[pop-up-att]": pasta ou HQ nova marcada ganha pop-up
+        // PRÓPRIO mesmo sendo subpasta não-topo ou HQ solta numa pasta que
+        // já existia — os dois casos que o topMost sozinho não cobre.
+        const taggedFolders = newFolders.filter(f=>f._popupAtt);
+        const taggedComics = newComics.filter(f=>f._popupAtt);
+        const seenFolderIds = new Set(topMost.map(f=>f.id));
+        const candidateFolders = topMost.slice();
+        taggedFolders.forEach(f=>{
+          if(!seenFolderIds.has(f.id)){ seenFolderIds.add(f.id); candidateFolders.push(f); }
+        });
+
+        // Cada candidato novo vira um registro pendente, com o caminho já
+        // calculado agora (enquanto crawlFolderLabels ainda tem a
+        // informação fresca desta varredura) — a checagem de capa em si
+        // roda mais abaixo, junto com os pendentes de sessões anteriores.
+        candidateFolders.forEach(f=>{
+          const label = crawlFolderLabels[f.id];
+          const parts = label ? label.split(' / ') : [];
+          pending.push(toPendingPopupRecord(f, 'folder', parts.slice(0, -1).join(' › ')));
+        });
+        taggedComics.forEach(f=>{
+          pending.push(toPendingPopupRecord(f, 'comic', (f._path || []).join(' › ')));
+        });
       }
-      return true;
-    });
-    if(topMost.length) queueNewFolderPopups(topMost.slice(0, NEW_FOLDER_POPUP_MAX));
+    }
+
+    if(!pending.length){
+      if(pendingRec) await writeHomeCache(PENDING_POPUP_KEY, 'items', []);
+      return;
+    }
+
+    // Reconfere TODOS os pendentes (os de agora + os de varreduras/sessões
+    // anteriores que ainda não tinham capa pronta) contra o R2. Quem já
+    // tem capa agora entra na fila de pop-up e sai da lista de pendentes;
+    // quem ainda não tem continua pendente pra próxima vez — sem limite de
+    // tentativas, sem nunca ser esquecido.
+    const results = await Promise.all(pending.map(async rec=>{
+      let coverFileId = rec.id;
+      if(rec._kind === 'folder'){
+        const coverFile = await resolveFolderCoverFile(rec.id).catch(()=>null);
+        coverFileId = coverFile && coverFile.id;
+      }
+      const ready = coverFileId ? await isCoverCachedInR2(coverFileId) : false;
+      return {rec, ready};
+    }));
+
+    const stillPending = results.filter(r=>!r.ready).map(r=>r.rec);
+    const nowReady = results.filter(r=>r.ready).map(r=>r.rec);
+    // Só mostra até NEW_FOLDER_POPUP_MAX de uma vez — o excedente volta pra
+    // lista de pendentes (já com a capa pronta) e aparece assim que a fila
+    // atual esvaziar, numa próxima varredura.
+    const toQueue = nowReady.slice(0, NEW_FOLDER_POPUP_MAX);
+    const overflow = nowReady.slice(NEW_FOLDER_POPUP_MAX);
+
+    await writeHomeCache(PENDING_POPUP_KEY, 'items', [...stillPending, ...overflow]);
+    if(toQueue.length) queueNewFolderPopups(toQueue);
   }catch(e){
-    logErr('[PlanetaHQ] Falha ao detectar pastas novas para o pop-up', e);
+    logErr('[PlanetaHQ] Falha ao detectar conteúdo novo para o pop-up', e);
   }
 }
 
@@ -5124,7 +5265,8 @@ async function getFolderCoverSrcForPopup(folderObj){
 async function showNextNewFolderPopup(){
   if(!newFolderQueue.length){ newFolderPopupShowing = false; return; }
   newFolderPopupShowing = true;
-  const folder = newFolderQueue.shift();
+  const item = newFolderQueue.shift();
+  const isComic = item._kind === 'comic';
   const view = $('#view-new-folder');
   const card = view.querySelector('.new-folder-card');
   const coverWrap = $('#new-folder-cover-wrap');
@@ -5134,13 +5276,17 @@ async function showNextNewFolderPopup(){
   const hintEl = $('#new-folder-queue-hint');
   const confettiEl = $('#new-folder-confetti');
 
-  nameEl.textContent = folder.name;
-  // O caminho (breadcrumb até a pasta-mãe) vem de graça de crawlFolderLabels,
-  // preenchido durante a própria varredura que achou esta pasta — sem
-  // nenhuma chamada de rede extra só pra montar o pop-up.
-  const label = crawlFolderLabels[folder.id];
-  const parts = label ? label.split(' / ') : [];
-  const parentPath = parts.slice(0, -1).join(' › ');
+  // HQ: nome sem extensão, igual em qualquer outro card do app. Pasta: nome
+  // já vem limpo (sem extensão nem tag — ver resolveShortcuts).
+  const displayName = isComic ? item.name.replace(/\.(pdf|cbz|cbr)$/i,'') : item.name;
+  nameEl.textContent = displayName;
+  // Caminho (breadcrumb até a pasta-mãe): já vem pronto desde a detecção
+  // (ver toPendingPopupRecord) — precisa ser assim porque, quando o item
+  // ficou pendente esperando a capa aparecer no R2, o pop-up pode acabar
+  // aparecendo só numa sessão futura, depois de fechar e reabrir o app,
+  // quando crawlFolderLabels (que só existe durante UMA varredura) já não
+  // tem mais essa informação.
+  const parentPath = item._popupPath || '';
   if(parentPath){
     pathEl.innerHTML = `${ICONS.folder}<span>${escapeHtml(parentPath)}</span>`;
   } else {
@@ -5151,7 +5297,7 @@ async function showNextNewFolderPopup(){
   hintEl.textContent = restCount ? `+ ${restCount} ${restCount>1?'novidades':'novidade'} depois desta` : '';
   hintEl.classList.toggle('hidden', !restCount);
 
-  coverSlot.innerHTML = `<div class="cover-placeholder-icon">${ICONS.folder}</div>`;
+  coverSlot.innerHTML = `<div class="cover-placeholder-icon">${isComic ? ICONS.page : ICONS.folder}</div>`;
   view.classList.remove('hidden');
   // Reinicia a animação de entrada do card, o brilho na capa e o confete a
   // cada troca (mesmo com o overlay já visível, quando a fila tem mais de
@@ -5163,23 +5309,27 @@ async function showNextNewFolderPopup(){
 
   $('#btn-new-folder-read').onclick = ()=>{
     dismissNewFolderPopup();
-    $('#search-input').value = '';
-    state.path = [{id: CONFIG.rootFolderId, name:'Biblioteca'}];
-    enterFolder(folder.id, folder.name).then(navSyncAfterBack);
+    if(isComic){
+      openReader(item, undefined, item._parentId);
+    } else {
+      $('#search-input').value = '';
+      state.path = [{id: CONFIG.rootFolderId, name:'Biblioteca'}];
+      enterFolder(item.id, item.name).then(navSyncAfterBack);
+    }
   };
   $('#btn-new-folder-close').onclick = dismissNewFolderPopup;
   $('#btn-new-folder-later').onclick = dismissNewFolderPopup;
 
   try{
-    const src = await getFolderCoverSrcForPopup(folder);
+    const src = isComic ? await resolveCoverSrc(item) : await getFolderCoverSrcForPopup(item);
     // Se enquanto a capa carregava a pessoa já fechou ou já avançou pra
-    // outra pasta da fila, não troca mais nada aqui.
-    if(src && !view.classList.contains('hidden') && nameEl.textContent === folder.name){
+    // outro item da fila, não troca mais nada aqui.
+    if(src && !view.classList.contains('hidden') && nameEl.textContent === displayName){
       const img = buildCoverNode(src);
       coverSlot.innerHTML = '';
       coverSlot.appendChild(img);
     }
-  }catch(e){ /* fica com o ícone de pasta mesmo — nada quebra por causa disso */ }
+  }catch(e){ /* fica com o ícone padrão mesmo — nada quebra por causa disso */ }
 }
 
 function dismissNewFolderPopup(){
@@ -5555,7 +5705,7 @@ async function getLibrarySections(forceRefresh){
       // erro parcial) com a da varredura anterior, e enfileira o pop-up de
       // "conteúdo novo" pra quem for detectado. Também sem await — a
       // resolução da capa faz pedidos de rede e não pode atrasar a Home.
-      detectAndQueueNewFolders(raw.folders, raw.folderParentId).catch(e=>logErr('[PlanetaHQ] Falha ao detectar pastas novas', e));
+      detectAndQueueNewContent(raw.folders, raw.folderParentId, raw.comics).catch(e=>logErr('[PlanetaHQ] Falha ao detectar conteúdo novo', e));
     }
     const [aranhaFolders, xmenFolders, mangaFolders, comics, allFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders] = await Promise.all([
       finalizeHomeSectionResult(ARANHA_CACHE_KEY, 'folders', raw.aranhaFolders, skipWrite),

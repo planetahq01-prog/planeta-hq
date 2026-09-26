@@ -382,13 +382,21 @@
   capa, brilho passando pela capa e pelo botão, confete colorido ao
   aparecer e estrelinhas piscando no textinho de cima. Subindo a versão pra
   forçar os aparelhos a buscarem o index.html novo.
+  v64: ícone do app trocado pelo logo de verdade do Planeta HQ (arquivos
+  achatados na raiz — icon-192.png/icon-512.png/icon-512-maskable.png/
+  favicon-32.png — pra bater exatamente com os nomes que o manifest.json
+  original já usava, sem pasta icons/ nova).
 */
-const CACHE_VERSION = 'v62';
+const CACHE_VERSION = 'v64';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
   './index.html',
   './manifest.json',
+  './icon-192.png',
+  './icon-512.png',
+  './icon-512-maskable.png',
+  './favicon-32.png',
   'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
   // O worker do pdf.js — sem ele em cache, ler qualquer PDF (inclusive um já
