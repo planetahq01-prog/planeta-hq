@@ -5,9 +5,6 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, minimum-scale=1, user-scalable=no, viewport-fit=cover">
 <meta name="theme-color" content="#0d0c12">
 <link rel="manifest" href="./manifest.json">
-<link rel="icon" href="./favicon-32.png" sizes="32x32" type="image/png">
-<link rel="icon" href="./icon-192.png" sizes="192x192" type="image/png">
-<link rel="apple-touch-icon" href="./icon-192.png">
 <title>Planeta HQ</title>
 
 <!-- Fontes -->
@@ -722,152 +719,6 @@ body.theme-transitioning .tab.active{
   color:var(--paper-dim);font-size:14px;line-height:1.65;margin:0 0 22px;
 }
 .welcome-card .btn-primary{margin-top:0;}
-/* ---- Pop-up "conteúdo novo" (pasta/subpasta adicionada) ----
-   Estrutura: #view-new-folder (fundo) > .new-folder-card (só segura a
-   "aura" brilhante ao redor, via ::before) > .new-folder-inner (o cartão
-   em si, com overflow:hidden pra cortar a capa/faixa/confete nos cantos
-   arredondados — por isso a aura precisa morar num elemento DE FORA
-   desse, senão o próprio overflow:hidden cortaria o brilho). */
-#view-new-folder{
-  position:fixed;inset:0;z-index:1150;
-  display:flex;align-items:center;justify-content:center;
-  padding:24px;
-  background:radial-gradient(560px 460px at 50% 30%, rgba(255,120,140,.16), transparent 70%), rgba(8,7,12,.78);
-  -webkit-backdrop-filter:blur(4px);backdrop-filter:blur(4px);
-  animation:welcome-fade-in .3s ease;
-}
-#view-new-folder.hidden{display:none;}
-.new-folder-card{
-  position:relative;width:100%;max-width:340px;
-  border-radius:var(--radius-lg);
-  animation:welcome-pop-in .4s cubic-bezier(.2,.9,.3,1.2);
-}
-.new-folder-card.card-swap{animation:new-folder-swap-in .32s cubic-bezier(.2,.9,.3,1.2);}
-@keyframes new-folder-swap-in{
-  from{opacity:0;transform:scale(.96) translateY(8px);}
-  to{opacity:1;transform:scale(1) translateY(0);}
-}
-/* Aura pulsante e com leve troca de matiz (accent -> gold -> accent),
-   dando a sensação de "coisa viva, chegando na hora" — sem depender de
-   nenhum recurso CSS moderno arriscado, só gradiente + blur + opacidade
-   animados, que qualquer navegador de celular atual já suporta bem. */
-.new-folder-card::before{
-  content:'';position:absolute;inset:-4px;border-radius:calc(var(--radius-lg) + 4px);
-  background:linear-gradient(120deg, var(--accent), var(--gold), var(--accent));
-  background-size:220% 220%;
-  filter:blur(18px);opacity:.45;z-index:-1;
-  animation:new-folder-glow-pulse 2.6s ease-in-out infinite, new-folder-glow-shift 7s linear infinite;
-}
-@keyframes new-folder-glow-pulse{0%,100%{opacity:.32;}50%{opacity:.68;}}
-@keyframes new-folder-glow-shift{0%{background-position:0% 50%;}100%{background-position:220% 50%;}}
-.new-folder-inner{
-  position:relative;background:var(--ink-soft);border:1px solid var(--ink-border);
-  border-radius:var(--radius-lg);overflow:hidden;box-shadow:0 24px 60px -20px rgba(0,0,0,.85);
-}
-.new-folder-close{
-  position:absolute;top:10px;right:10px;z-index:6;
-  background:rgba(13,12,18,.6);border-color:rgba(255,255,255,.14);
-}
-.new-folder-cover-wrap{
-  position:relative;width:100%;aspect-ratio:3/4;max-height:280px;
-  background:var(--ink-elevated);overflow:hidden;
-}
-.new-folder-cover-img-slot{position:absolute;inset:0;}
-.new-folder-cover-wrap img{
-  width:100%;height:100%;object-fit:cover;display:block;
-  opacity:0;transform:scale(1.06);
-  transition:opacity .4s ease, transform .6s cubic-bezier(.2,.8,.3,1);
-}
-.new-folder-cover-wrap img.loaded{opacity:1;transform:scale(1);}
-.new-folder-cover-wrap .cover-placeholder-icon{
-  position:absolute;inset:0;display:flex;align-items:center;justify-content:center;color:var(--text-muted);
-}
-.new-folder-cover-wrap .cover-placeholder-icon svg{width:56px;height:56px;opacity:.5;}
-.new-folder-cover-wrap::after{
-  content:'';position:absolute;left:0;right:0;bottom:0;height:62%;
-  background:linear-gradient(to top, var(--ink-soft) 4%, rgba(23,21,31,0) 100%);
-  pointer-events:none;z-index:1;
-}
-/* Faixa diagonal "NOVO" no canto — o clássico selo de "item novo",
-   reconhecível na hora. Só entra em cena de verdade (animação) quando a
-   classe .shine-play é alternada pelo JS a cada exibição (ver
-   restartCssAnim), senão fica parada fora da tela (left:-60%) — assim ela
-   "varre" a capa de novo toda vez que troca de item na fila, não só na
-   primeiríssima vez. */
-.new-folder-ribbon{
-  position:absolute;top:16px;left:-42px;width:160px;z-index:3;
-  background:linear-gradient(135deg,var(--accent),var(--accent-dark));
-  color:#fff;font-family:var(--font-display);font-size:13px;letter-spacing:2px;
-  text-align:center;padding:5px 0;transform:rotate(-45deg);
-  box-shadow:0 6px 16px -4px rgba(0,0,0,.55);
-}
-.new-folder-cover-wrap.shine-play::before{
-  content:'';position:absolute;top:0;left:-60%;width:45%;height:100%;
-  background:linear-gradient(75deg, transparent, rgba(255,255,255,.4), transparent);
-  transform:skewX(-18deg);z-index:2;pointer-events:none;
-  animation:new-folder-shine 1.5s ease .45s 1;
-}
-@keyframes new-folder-shine{
-  from{left:-60%;}
-  to{left:135%;}
-}
-/* Confete: gerado no JS (posições/cores/atrasos aleatórios a cada
-   exibição — ver spawnConfetti), pra nunca parecer sempre igual. */
-.new-folder-kicker-wrap{position:relative;}
-.new-folder-confetti{
-  position:absolute;left:50%;top:6px;width:1px;height:1px;
-  pointer-events:none;overflow:visible;z-index:0;
-}
-.new-folder-confetti span{
-  position:absolute;top:0;left:0;
-  width:6px;height:6px;border-radius:50%;
-  opacity:0;
-  animation:new-folder-confetti-burst .95s ease-out forwards;
-}
-.new-folder-confetti span.square{border-radius:2px;}
-@keyframes new-folder-confetti-burst{
-  0%{opacity:1;transform:translate(-50%,-50%) scale(1) rotate(0deg);}
-  100%{opacity:0;transform:translate(var(--dx),var(--dy)) scale(.3) rotate(200deg);}
-}
-.new-folder-body{padding:16px 22px 22px;text-align:center;}
-.new-folder-kicker{
-  position:relative;z-index:1;font-size:12px;font-weight:800;letter-spacing:.6px;
-  text-transform:uppercase;color:var(--gold);display:flex;align-items:center;justify-content:center;gap:6px;
-}
-.new-folder-kicker .spark{display:inline-block;animation:new-folder-twinkle 1.7s ease-in-out infinite;}
-.new-folder-kicker .spark:nth-child(3){animation-delay:.5s;}
-@keyframes new-folder-twinkle{0%,100%{opacity:.35;transform:scale(.75);}50%{opacity:1;transform:scale(1.2);}}
-.new-folder-name{
-  font-family:var(--font-display);font-size:24px;font-weight:400;letter-spacing:.3px;
-  color:var(--paper);margin:12px 0 4px;line-height:1.22;overflow-wrap:break-word;
-  text-shadow:0 0 22px rgba(255,77,94,.4);
-}
-.new-folder-path{
-  display:flex;align-items:center;justify-content:center;gap:5px;
-  font-size:12px;color:var(--text-muted);margin-bottom:20px;
-}
-.new-folder-path svg{width:12px;height:12px;flex-shrink:0;opacity:.7;}
-.new-folder-name + .new-folder-path.hidden{margin-bottom:0;}
-.new-folder-actions{display:flex;flex-direction:column;gap:8px;margin-top:20px;}
-.new-folder-cta{
-  position:relative;overflow:hidden;display:flex;align-items:center;justify-content:center;gap:8px;
-  background:linear-gradient(135deg,var(--accent),var(--accent-dark));color:#fff;border:none;
-  padding:15px 20px;border-radius:999px;font-weight:800;font-size:15px;letter-spacing:.2px;
-  box-shadow:0 14px 28px -10px rgba(255,77,94,.65);transition:transform .12s ease, filter .12s ease;
-}
-.new-folder-cta:active{transform:scale(.97);filter:brightness(.92);}
-.new-folder-cta svg{width:18px;height:18px;flex-shrink:0;}
-.new-folder-cta::after{
-  content:'';position:absolute;top:0;left:-70%;width:50%;height:100%;
-  background:linear-gradient(75deg, transparent, rgba(255,255,255,.5), transparent);
-  transform:skewX(-18deg);
-  animation:new-folder-shine 2.6s ease-in-out .9s infinite;
-}
-.new-folder-ghost{
-  background:none;border:none;color:var(--text-muted);font-size:13px;font-weight:600;
-  padding:8px;text-decoration:underline;text-underline-offset:3px;
-}
-.new-folder-queue-hint{font-size:11px;color:var(--text-muted);margin-top:14px;}
 .debug-panel-head{display:flex;align-items:center;gap:10px;}
 .debug-panel-head strong{flex:1;font-size:16px;}
 #debug-panel-text{
@@ -876,6 +727,16 @@ body.theme-transitioning .tab.active{
 }
 </style>
 </head><body>
+  <div id="access-gate" class="hidden" style="position:fixed;inset:0;z-index:9999;background:#0a0e1a;display:flex;align-items:center;justify-content:center;padding:24px;">
+    <div style="max-width:360px;width:100%;text-align:center;color:#eef1ff;font-family:inherit;">
+      <h2 style="margin:0 0 8px;font-size:1.3rem;">Acesso ao Planeta HQ</h2>
+      <p style="margin:0 0 20px;color:#9aa3c7;font-size:0.9rem;">Digite o código de acesso que você recebeu por e-mail após a compra.</p>
+      <input id="access-gate-input" type="text" placeholder="XXXX-XXXX" autocapitalize="characters" autocomplete="off"
+        style="width:100%;box-sizing:border-box;padding:14px;font-size:1.1rem;text-align:center;letter-spacing:2px;border-radius:10px;border:1px solid #2a3050;background:#131a33;color:#fff;margin-bottom:12px;">
+      <button id="access-gate-submit" style="width:100%;padding:14px;border:none;border-radius:10px;background:#4c6fff;color:#fff;font-weight:600;font-size:1rem;cursor:pointer;">Entrar</button>
+      <p id="access-gate-status" style="min-height:20px;margin-top:12px;font-size:0.85rem;color:#ff9c8c;"></p>
+    </div>
+  </div>
 <div id="app">
 
   <!-- ===================== TELA DE CONFIGURAÇÃO INICIAL ===================== -->
@@ -885,15 +746,11 @@ body.theme-transitioning .tab.active{
       <p>Conecte a pasta do Google Drive onde estão suas HQs (PDF, CBZ) para montar sua biblioteca. Arquivos CBR não são exibidos, pois o app ainda não consegue lê-los.</p>
 
       <div class="field">
-        <label>Chave de API do Google (só se NÃO usar proxy)</label>
-        <input type="text" id="in-apikey" placeholder="AIzaSy...">
-      </div>
-      <div class="field">
         <label>ID da pasta raiz no Drive</label>
         <input type="text" id="in-folderid" placeholder="1AbCdEfGhIjKlMnOpQrSt...">
       </div>
       <div class="field">
-        <label>URL do proxy (recomendado — corrige "Failed to fetch"/403 e evita expor sua chave de API)</label>
+        <label>URL do Worker proxy (obrigatório)</label>
         <input type="text" id="in-proxyurl" placeholder="https://seu-worker.workers.dev">
       </div>
       <button class="btn-primary" id="btn-save-config">Salvar e abrir biblioteca</button>
@@ -902,11 +759,11 @@ body.theme-transitioning .tab.active{
         <summary>Como conseguir isso?</summary>
         <ol>
           <li>No <code>Google Cloud Console</code>, crie um projeto e ative a <code>Google Drive API</code>.</li>
-          <li>Em "Credenciais", crie uma <code>Chave de API</code> e (recomendado) restrinja-a à Drive API.</li>
+          <li>Em "Credenciais", crie uma <code>Chave de API</code> e restrinja-a à Drive API. Essa chave NÃO é digitada aqui: ela fica guardada como segredo (<code>DRIVE_API_KEY</code>) dentro do Worker proxy, nunca no app.</li>
           <li>No Google Drive, clique com o botão direito na pasta raiz das HQs → <code>Compartilhar</code> → mude para <code>"Qualquer pessoa com o link" → "Leitor"</code>. Isso é necessário para o app ler os arquivos sem exigir login de cada usuário.</li>
           <li>Abra a pasta no navegador; o ID é o trecho da URL depois de <code>/folders/</code>.</li>
-          <li>Publique o Cloudflare Worker (<code>worker.js</code>, que acompanha este app) e cole a URL dele em "URL do proxy". Com o proxy configurado, a chave de API fica guardada só no próprio Worker (como "secret") — o app não precisa mais dela, e o campo acima pode ficar em branco. Sem proxy, o app fala direto com o Google e a chave precisa ir no campo acima, visível a quem olhar o código-fonte do app.</li>
-          <li>Cole os valores acima. Eles ficam salvos só neste dispositivo (não são enviados a nenhum servidor além do próprio Google e, se você configurar, do seu proxy).</li>
+          <li>Se ao abrir uma HQ der erro <code>Failed to fetch</code>, o navegador está bloqueando o download do conteúdo do arquivo por CORS (isso acontece com PDF/CBR mas não com a listagem, que é só metadado). Cole ali a URL de um Cloudflare Worker proxy — veja o texto abaixo do formulário para o código pronto.</li>
+          <li>Cole os valores acima. Eles ficam salvos só neste dispositivo. Toda consulta ao Google Drive passa pelo seu Worker proxy, que é quem guarda a chave de API.</li>
         </ol>
       </details>
     </div>
@@ -937,37 +794,6 @@ body.theme-transitioning .tab.active{
       <div class="wordmark">PLANETA <span>HQ</span></div>
       <p>Bem vindo ao Planeta HQ!<br><br>Aqui você vai poder desfrutar dos quadrinhos e mangás mais amados da cultura pop, reviver a nostalgia das revistas de vídeo-game e muito mais! Tenha uma boa leitura ⭐</p>
       <button class="btn-primary" id="btn-welcome-close">Fechar</button>
-    </div>
-  </div>
-
-  <!-- ===================== CONTEÚDO NOVO (pop-up de pasta/subpasta adicionada) =====================
-       Ver detectAndQueueNewContent/showNextNewFolderPopup no JS. Some sozinho
-       ao trocar de pasta/atualizar quando não há nada de novo. -->
-  <div id="view-new-folder" class="hidden">
-    <div class="new-folder-card">
-      <div class="new-folder-inner">
-        <button class="icon-btn small new-folder-close" id="btn-new-folder-close" aria-label="Fechar"></button>
-        <div class="new-folder-cover-wrap" id="new-folder-cover-wrap">
-          <div class="new-folder-ribbon">Novo</div>
-          <div class="new-folder-cover-img-slot" id="new-folder-cover-img-slot"></div>
-        </div>
-        <div class="new-folder-body">
-          <div class="new-folder-kicker-wrap">
-            <div class="new-folder-confetti" id="new-folder-confetti"></div>
-            <div class="new-folder-kicker"><span class="spark">✦</span> Novo conteúdo adicionado <span class="spark">✦</span></div>
-          </div>
-          <div class="new-folder-name" id="new-folder-name">—</div>
-          <div class="new-folder-path hidden" id="new-folder-path"></div>
-          <div class="new-folder-actions">
-            <button class="new-folder-cta" id="btn-new-folder-read">
-              <span>Ler agora</span>
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 6 15 12 9 18"/></svg>
-            </button>
-            <button class="new-folder-ghost" id="btn-new-folder-later">Ver depois</button>
-          </div>
-          <div class="new-folder-queue-hint hidden" id="new-folder-queue-hint"></div>
-        </div>
-      </div>
     </div>
   </div>
 
@@ -1167,7 +993,7 @@ window.__rangeStats = {}; // fileId -> {count, totalMs}
   window.fetch = function(input, init){
     const url = typeof input === 'string' ? input : (input && input.url) || '';
     const isProxyCall = CONFIG && CONFIG.proxyUrl && url.indexOf(CONFIG.proxyUrl.split('?')[0]) === 0;
-    if(!isProxyCall) return originalFetch(input, init);
+    if(!isProxyCall || url.indexOf('drive_list=1') !== -1) return originalFetch(input, init);
     const idMatch = /[?&]id=([^&]+)/.exec(url);
     const fid = idMatch ? decodeURIComponent(idMatch[1]) : '(sem id)';
     const t0 = performance.now();
@@ -1185,25 +1011,34 @@ window.__rangeStats = {}; // fileId -> {count, totalMs}
    --------------------------------------------------------------------- */
 const CONFIG_KEY = 'planetahq_config';
 const READER_PREFS_KEY = 'planetahq_reader_prefs';
+const ACCESS_CODE_KEY = 'planetahq_access_code';
+const DEVICE_ID_KEY = 'planetahq_device_id';
 let CONFIG = null;
+let ACCESS_CODE = null;
+
+// Identifica ESTE aparelho/instalação (não a pessoa) — é o que o Worker usa
+// pra contar quantos aparelhos diferentes já usaram um mesmo código de
+// acesso. Gerado uma vez e guardado; se o armazenamento for limpo, um novo
+// ID é criado (conta como "aparelho novo" de novo, é uma limitação aceita).
+function getDeviceId(){
+  let id = localStorage.getItem(DEVICE_ID_KEY);
+  if(!id){
+    id = (crypto.randomUUID ? crypto.randomUUID() : `${Date.now()}-${Math.random().toString(36).slice(2)}`);
+    try{ localStorage.setItem(DEVICE_ID_KEY, id); }catch(e){}
+  }
+  return id;
+}
 
 // Configuração padrão embutida no app: quem abrir o app (link/instalação)
 // pela primeira vez entra direto na biblioteca compartilhada, sem precisar
 // preencher a tela de configuração manualmente. Isso não afeta quem já
 // tinha uma configuração diferente salva no próprio aparelho — o valor
 // salvo em localStorage sempre tem prioridade (ver boot()).
-//
-// apiKey fica vazia de propósito: a chave de API do Google não mora mais
-// no código do app (ela ficava visível no código-fonte pra qualquer
-// pessoa que abrisse o app, mesmo sem o link ser compartilhado — bastava
-// ver o código). Agora ela é um secret configurado só no Worker do proxy
-// (env.GOOGLE_API_KEY, ver worker.js) — o navegador nunca recebe nem
-// manda essa chave. O campo abaixo só existe/é usado no modo avançado
-// "sem proxy" (ver driveMediaUrl e driveFilesList), pra quem preferir
-// falar direto com o Google Drive usando a própria chave, assumindo o
-// mesmo risco de exposição que existia antes.
+// A chave de API do Google Drive NÃO fica mais aqui nem em nenhum lugar do
+// app: ela é um segredo (DRIVE_API_KEY) guardado no Worker proxy, que faz
+// todas as chamadas ao Drive. O ID da pasta e a URL do proxy não são
+// segredos (a pasta já é pública por link).
 const DEFAULT_CONFIG = {
-  apiKey: '',
   rootFolderId: '11JGPcNE-t4R4G8NaefyATXW3cWeu2n8Y',
   proxyUrl: 'https://proxy1.planetahq01.workers.dev/'
 };
@@ -1509,21 +1344,12 @@ setInterval(flushFolderOkCache, 1500);
 const DRIVE_MAX_CONCURRENT = 10;
 let driveActiveRequests = 0;
 const driveWaitQueue = [];
-function driveAcquireSlot(priority){
+function driveAcquireSlot(){
   if(driveActiveRequests < DRIVE_MAX_CONCURRENT){
     driveActiveRequests++;
     return Promise.resolve();
   }
-  // Prioridade: usada por ações que a pessoa está esperando NA HORA (ex.:
-  // busca) — em vez de entrar no fim da fila atrás de uma varredura de
-  // fundo (que pode ter dezenas de pastas enfileiradas), essas furam pra
-  // frente e pegam a próxima vaga livre primeiro. Sem isso, digitar uma
-  // busca enquanto a Home revalida em segundo plano podia ficar "quase
-  // infinito" esperando atrás de toda a varredura.
-  return new Promise(resolve=>{
-    if(priority) driveWaitQueue.unshift(resolve);
-    else driveWaitQueue.push(resolve);
-  });
+  return new Promise(resolve=>driveWaitQueue.push(resolve));
 }
 function driveReleaseSlot(){
   const next = driveWaitQueue.shift();
@@ -1559,10 +1385,10 @@ let driveFoldersVisited = 0;
 // preenchido durante crawlLibrarySections só pra diagnóstico — ver ali.
 const crawlFolderLabels = {};
 
-async function driveFetchJson(url, priority){
+async function driveFetchJson(url){
   const MAX_ATTEMPTS = 6;
   for(let attempt=1; attempt<=MAX_ATTEMPTS; attempt++){
-    await driveAcquireSlot(priority);
+    await driveAcquireSlot();
     let res, errBody, networkErr;
     const reqCtrl = new AbortController();
     try{
@@ -1601,9 +1427,25 @@ async function driveFetchJson(url, priority){
       await sleep(backoff);
       continue;
     }
+    if(res.status === 401){
+      let deniedReason = null;
+      try{ deniedReason = JSON.parse(errBody).error || null; }catch(e){}
+      try{ localStorage.removeItem(ACCESS_CODE_KEY); }catch(e){}
+      ACCESS_CODE = null;
+      await requireAccessCode(deniedReason);
+      continue; // código novo confirmado — repete esta mesma chamada
+    }
     console.error('Drive API error', res.status, errBody);
     throw new Error(`Drive respondeu ${res.status}. ${String(errBody).slice(0,200)}`);
   }
+}
+
+// Toda listagem/busca no Drive passa pelo Worker proxy (modo drive_list),
+// que acrescenta a chave de API do lado do servidor.
+function driveListUrl(q, pageToken){
+  const params = new URLSearchParams({drive_list: '1', q, code: ACCESS_CODE || '', device: getDeviceId()});
+  if(pageToken) params.set('pageToken', pageToken);
+  return `${CONFIG.proxyUrl}?${params.toString()}`;
 }
 
 const folderCacheInFlight = {};
@@ -1618,89 +1460,32 @@ async function driveListFolder(folderId){
   return promise;
 }
 
-// Tag "[pop-up-att]": marca uma pasta OU HQ pra ganhar pop-up de "conteúdo
-// novo" PRÓPRIO mesmo quando não é o topo de uma leva nova (ex.: um
-// capítulo novo isolado dentro de uma coleção que já existia, ou um volume
-// específico que você quer destacar dentro de uma leva grande de pastas
-// novas). Ver detectAndQueueNewContent, mais abaixo.
-// A tag nunca aparece em lugar nenhum do app: é removida do nome bem aqui,
-// no único lugar por onde passa toda pasta/HQ vinda do Drive (listagem de
-// pasta E busca, já que ambas usam driveFilesList -> resolveShortcuts) —
-// então todo o resto do app (cards, breadcrumb, leitor, pop-up, busca) só
-// enxerga o nome já limpo, e a própria busca não consegue "achar" nada pelo
-// texto da tag.
-const POPUP_ATT_TAG_TEST_RE = /\[pop-up-att\]/i;
-const POPUP_ATT_TAG_STRIP_RE = /\s*\[pop-up-att\]\s*/gi;
-function stripPopupAttTag(rawName){
-  return String(rawName || '')
-    .replace(POPUP_ATT_TAG_STRIP_RE, ' ')
-    .replace(/\s+/g, ' ')
-    .replace(/\s+\./g, '.')
-    .trim();
-}
-
 function resolveShortcuts(rawFiles){
   return (rawFiles || []).map(f=>{
-    const hasPopupTag = POPUP_ATT_TAG_TEST_RE.test(f.name || '');
-    const cleanName = hasPopupTag ? stripPopupAttTag(f.name) : f.name;
     if(f.mimeType === 'application/vnd.google-apps.shortcut' && f.shortcutDetails){
       return {
         id: f.shortcutDetails.targetId,
-        name: cleanName,
+        name: f.name,
         mimeType: f.shortcutDetails.targetMimeType,
         size: f.size,
         modifiedTime: f.modifiedTime,
-        thumbnailLink: f.thumbnailLink,
-        _popupAtt: hasPopupTag
+        thumbnailLink: f.thumbnailLink
       };
     }
-    return {...f, name: cleanName, _popupAtt: hasPopupTag};
+    return f;
   });
-}
-
-// Faz uma chamada (paginada) a "files.list" do Drive, com os mesmos
-// parâmetros sempre — só muda a cláusula "q" de quem chama (listar uma
-// pasta ou buscar por nome). Centralizado aqui por dois motivos: evita
-// manter dois pedaços de código quase idênticos, e é o único lugar que
-// decide COMO mandar a chave de API:
-//   - Com proxy configurado (o normal): manda pro Worker em
-//     "?drive_list=1&...", SEM a chave — quem preenche a chave de verdade
-//     antes de repassar pro Google é o Worker (env.GOOGLE_API_KEY), que
-//     nunca fica visível no navegador. Ver worker.js.
-//   - Sem proxy (modo avançado, exige preencher CONFIG.apiKey na tela de
-//     configuração): fala direto com o Google, com a chave na URL — mesmo
-//     risco de exposição que o app tinha antes, assumido conscientemente
-//     por quem optar por não usar proxy.
-async function driveFilesList(q, priority){
-  let files = [];
-  let pageToken = null;
-  do{
-    const params = new URLSearchParams({
-      q,
-      fields: 'nextPageToken, files(id,name,mimeType,size,modifiedTime,shortcutDetails,thumbnailLink)',
-      pageSize: '1000',
-      supportsAllDrives: 'true',
-      includeItemsFromAllDrives: 'true'
-    });
-    if(pageToken) params.set('pageToken', pageToken);
-    let requestUrl;
-    if(CONFIG.proxyUrl){
-      requestUrl = `${CONFIG.proxyUrl}?drive_list=1&${params.toString()}`;
-    } else {
-      params.set('key', CONFIG.apiKey);
-      requestUrl = `https://www.googleapis.com/drive/v3/files?${params.toString()}`;
-    }
-    const data = await driveFetchJson(requestUrl, priority);
-    files = files.concat(resolveShortcuts(data.files));
-    pageToken = data.nextPageToken || null;
-  } while(pageToken);
-  return files;
 }
 
 async function driveListFolderUncached(folderId){
   driveInFlightFolders.set(folderId, Date.now());
   try{
-    const files = await driveFilesList(`'${folderId}' in parents and trashed = false`);
+    let files = [];
+    let pageToken = null;
+    do{
+      const data = await driveFetchJson(driveListUrl(`'${folderId}' in parents and trashed = false`, pageToken));
+      files = files.concat(resolveShortcuts(data.files));
+      pageToken = data.nextPageToken || null;
+    } while(pageToken);
 
     const rawFolders = files
       .filter(f=>f.mimeType === 'application/vnd.google-apps.folder')
@@ -1744,14 +1529,7 @@ async function folderHasQualifyingContent(folderId){
 }
 
 function driveMediaUrl(fileId){
-  // Com proxy: manda só o "id" — sem "key" nenhuma. É o Worker quem tem a
-  // chave de verdade (env.GOOGLE_API_KEY) e a usa por trás, sem nunca
-  // expô-la ao navegador. Sem proxy (modo avançado): fala direto com o
-  // Google, e aí sim precisa da chave que a pessoa preencheu na tela de
-  // configuração (com o mesmo risco de exposição de antes).
-  return CONFIG.proxyUrl
-    ? `${CONFIG.proxyUrl}?id=${encodeURIComponent(fileId)}`
-    : `https://www.googleapis.com/drive/v3/files/${fileId}?alt=media&key=${CONFIG.apiKey}`;
+  return `${CONFIG.proxyUrl}?id=${encodeURIComponent(fileId)}&code=${encodeURIComponent(ACCESS_CODE || '')}&device=${encodeURIComponent(getDeviceId())}`;
 }
 
 async function driveFetchBlob(fileId, onProgress, knownSize, signal){
@@ -2722,18 +2500,7 @@ async function runInitialLoad(){
     }catch(e){
       logErr('[PlanetaHQ] Falha no carregamento rápido (pasta raiz)', e);
     }
-    // v60: antes chamava renderHomeSections() SEM forceRefresh — isso
-    // pintava a tela com o cache local (correto, é rápido) mas a "revalidação
-    // de verdade" descrita no comentário acima nunca acontecia de fato: sem
-    // forceRefresh, getLibrarySections só busca no Drive se o cache
-    // (HOME_CACHE_MAX_AGE, 6h) já tiver vencido. Resultado: fechar e reabrir
-    // o app não trazia HQ nova nenhuma antes de 6h passarem — só limpar os
-    // dados do app ou reinstalar (que apaga esse cache) resolvia. Agora
-    // passa true: a tela continua abrindo instantânea com o cache (isso não
-    // muda), mas a busca no Drive em segundo plano passa a acontecer sempre,
-    // então uma HQ adicionada enquanto o app estava fechado aparece assim
-    // que ele reabre, sem esperar as 6h nem precisar tocar em "Atualizar".
-    renderHomeSections(true).catch(e=>logErr('[PlanetaHQ] Falha ao revalidar a Home em segundo plano', e));
+    renderHomeSections().catch(e=>logErr('[PlanetaHQ] Falha ao revalidar a Home em segundo plano', e));
     maybeShowWelcome();
     return;
   }
@@ -2866,6 +2633,12 @@ async function loadConfig(){
   if(raw){
     try{
       CONFIG = JSON.parse(raw);
+      // Migração: versões antigas guardavam a chave de API no aparelho.
+      // Apaga-a de lá e garante que exista um proxy (agora obrigatório).
+      let changed = false;
+      if('apiKey' in CONFIG){ delete CONFIG.apiKey; changed = true; }
+      if(!CONFIG.proxyUrl){ CONFIG.proxyUrl = DEFAULT_CONFIG.proxyUrl.replace(/\/+$/,''); changed = true; }
+      if(changed){ try{ localStorage.setItem(CONFIG_KEY, JSON.stringify(CONFIG)); }catch(e){} }
       return true;
     }catch(e){
       // Configuração corrompida (ex.: gravação incompleta) travava o boot
@@ -2877,9 +2650,79 @@ async function loadConfig(){
   }
   return false;
 }
-function saveConfig(apiKey, folderId, proxyUrl){
-  CONFIG = {apiKey, rootFolderId: folderId, proxyUrl: (proxyUrl||'').replace(/\/+$/,'')};
+function saveConfig(folderId, proxyUrl){
+  CONFIG = {rootFolderId: folderId, proxyUrl: (proxyUrl||'').replace(/\/+$/,'')};
   localStorage.setItem(CONFIG_KEY, JSON.stringify(CONFIG));
+}
+
+function normalizeAccessCode(raw){
+  return String(raw || '').toUpperCase().replace(/[^A-Z0-9]/g, '');
+}
+
+// Mostra a tela de bloqueio (código de acesso) e só resolve a Promise quando
+// um código válido for confirmado pelo Worker. Enquanto isso, o resto do
+// boot() fica pausado — nada da biblioteca é montado.
+function requireAccessCode(initialMessage){
+  return new Promise((resolve)=>{
+    const overlay = $('#access-gate');
+    const input = $('#access-gate-input');
+    const btn = $('#access-gate-submit');
+    const status = $('#access-gate-status');
+    overlay.classList.remove('hidden');
+    input.value = '';
+    status.textContent = initialMessage || '';
+    input.focus();
+
+    async function trySubmit(){
+      const code = normalizeAccessCode(input.value);
+      if(code.length < 6){ status.textContent = 'Digite o código completo enviado por e-mail.'; return; }
+      btn.disabled = true;
+      status.textContent = 'Verificando...';
+      try{
+        const res = await fetch(`${CONFIG.proxyUrl}?auth_check=1&code=${encodeURIComponent(code)}&device=${encodeURIComponent(getDeviceId())}`, {cache:'no-store'});
+        const data = await res.json();
+        if(data.valid){
+          ACCESS_CODE = code;
+          try{ localStorage.setItem(ACCESS_CODE_KEY, code); }catch(e){}
+          overlay.classList.add('hidden');
+          resolve();
+        } else {
+          status.textContent = data.reason || 'Código inválido. Confira o e-mail da compra e tente de novo.';
+        }
+      } catch(e){
+        status.textContent = 'Falha ao verificar. Confira sua conexão e tente de novo.';
+      } finally {
+        btn.disabled = false;
+      }
+    }
+    btn.onclick = trySubmit;
+    input.onkeydown = (e)=>{ if(e.key === 'Enter') trySubmit(); };
+  });
+}
+
+// Roda uma vez no boot: usa o código já salvo neste aparelho (se ainda for
+// aceito pelo Worker) ou pede um novo. É o único ponto que decide se a
+// biblioteca chega a abrir.
+async function ensureAccessCode(){
+  const saved = normalizeAccessCode(localStorage.getItem(ACCESS_CODE_KEY) || '');
+  let denyReason = null;
+  if(saved){
+    try{
+      const res = await fetch(`${CONFIG.proxyUrl}?auth_check=1&code=${encodeURIComponent(saved)}&device=${encodeURIComponent(getDeviceId())}`, {cache:'no-store'});
+      const data = await res.json();
+      if(data.valid){ ACCESS_CODE = saved; return; }
+      denyReason = data.reason || null;
+    }catch(e){
+      // Sem rede pra confirmar: usa o código salvo mesmo assim (melhor
+      // deixar entrar do que travar o app por causa da checagem) — se ele
+      // não for mais válido de verdade, o próprio pedido ao Drive vai
+      // falhar com 401 e reabrir esta tela.
+      ACCESS_CODE = saved;
+      return;
+    }
+    try{ localStorage.removeItem(ACCESS_CODE_KEY); }catch(e){}
+  }
+  await requireAccessCode(denyReason);
 }
 
 /* ---------------------------------------------------------------------
@@ -2968,7 +2811,7 @@ function restoreHomeScrollOnReturn(){
   const wrap = $('#home-sections');
   // A Home antiga ainda está no DOM (só ficou escondida): mostra na hora,
   // já na posição certa, em vez de deixar passar um instante no topo.
-  if(wrap && wrap.querySelector(HOME_SECTION_SEL) && !isSearchActive()) wrap.classList.remove('hidden');
+  if(wrap && wrap.querySelector(HOME_SECTION_SEL)) wrap.classList.remove('hidden');
   applyHomeRestore(snap);
   // Reaplica algumas vezes enquanto o layout assenta (repintura, capas...).
   [50, 150, 350, 800, 1600].forEach(ms=>setTimeout(()=>{
@@ -3257,10 +3100,10 @@ async function resolveCoverFallbackImpl(f){
   // as capas carregarem instantâneas pra quem nunca abriu essa HQ antes.
   if(CONFIG.proxyUrl){
     try{
-      const checkRes = await fetch(`${CONFIG.proxyUrl}?cover_check=1&id=${encodeURIComponent(f.id)}`);
+      const checkRes = await fetch(`${CONFIG.proxyUrl}?cover_check=1&id=${encodeURIComponent(f.id)}&code=${encodeURIComponent(ACCESS_CODE || '')}&device=${encodeURIComponent(getDeviceId())}`);
       const checkData = await checkRes.json();
       if(checkData && checkData.cached){
-        const r2Url = `${CONFIG.proxyUrl}?cover=1&id=${encodeURIComponent(f.id)}`;
+        const r2Url = `${CONFIG.proxyUrl}?cover=1&id=${encodeURIComponent(f.id)}&code=${encodeURIComponent(ACCESS_CODE || '')}&device=${encodeURIComponent(getDeviceId())}`;
         cacheResolvedCover(f.id, r2Url);
         return r2Url;
       }
@@ -3334,7 +3177,7 @@ async function uploadCoverToR2(fileId, dataUrl){
   if(!CONFIG.proxyUrl || !dataUrl) return;
   try{
     const blob = await (await fetch(dataUrl)).blob();
-    await fetch(`${CONFIG.proxyUrl}?cover_put=1&id=${encodeURIComponent(fileId)}`, {
+    await fetch(`${CONFIG.proxyUrl}?cover_put=1&id=${encodeURIComponent(fileId)}&code=${encodeURIComponent(ACCESS_CODE || '')}&device=${encodeURIComponent(getDeviceId())}`, {
       method: 'PUT',
       headers: {'Content-Type': blob.type || 'image/jpeg'},
       body: blob
@@ -3793,10 +3636,15 @@ function normalizeStr(s){
 async function driveSearchByName(term){
   // Pede pro próprio Google Drive procurar pelo nome — uma chamada (ou
   // poucas, se paginar), independente de quantas pastas a biblioteca tem.
-  // priority=true: a pessoa está esperando isso na tela AGORA, então fura
-  // a fila em vez de esperar atrás de uma varredura de fundo da Home.
   const escaped = term.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-  return await driveFilesList(`name contains '${escaped}' and trashed = false`, true);
+  let files = [];
+  let pageToken = null;
+  do{
+    const data = await driveFetchJson(driveListUrl(`name contains '${escaped}' and trashed = false`, pageToken));
+    files = files.concat(resolveShortcuts(data.files));
+    pageToken = data.nextPageToken || null;
+  } while(pageToken);
+  return files;
 }
 
 async function searchLibrary(normTerm, rawTerm, token, isStale){
@@ -3842,16 +3690,6 @@ function openFolderFromSearch(f){
   enterFolder(f.id, f.name).then(navSyncAfterBack);
 }
 
-// Verdadeiro enquanto há um termo digitado na busca. Usado pra impedir que
-// a Home reapareça por baixo/atrás dos resultados de busca quando uma
-// revalidação de fundo (ex.: a que roda sozinha ao abrir o app) termina
-// DEPOIS que a pessoa já começou a buscar — sem essa checagem, a Home e os
-// resultados de busca "grudavam" na tela ao mesmo tempo.
-function isSearchActive(){
-  const input = $('#search-input');
-  return !!(input && input.value.trim());
-}
-
 let searchToken = 0;
 let searchDebounceTimer = null;$('#search-input').addEventListener('input', e=>{
   const term = e.target.value.trim();
@@ -3877,7 +3715,7 @@ async function runSearch(term){
   }catch(e){
     if(myToken !== searchToken) return;
     console.error('[PlanetaHQ] Falha na busca', e);
-    grid.innerHTML = `<div class="empty-state">${ICONS.search}<h3>Não foi possível buscar</h3>Verifique sua conexão ou a chave de API e tente de novo.</div>`;
+    grid.innerHTML = `<div class="empty-state">${ICONS.search}<h3>Não foi possível buscar</h3>Verifique sua conexão e tente de novo.</div>`;
     return;
   }
   if(myToken !== searchToken) return;
@@ -4911,7 +4749,7 @@ async function crawlLibrarySections(token, isStale, errorState){
     await runLimited(toVisit, 6, sub=>walk(sub.id, [...path, sub.name]));
   }
   await walk(CONFIG.rootFolderId, []);
-  if(isStale(token)) return {comics: [], folders: [], aranhaFolders: [], xmenFolders: [], mangaFolders: [], batmanFolders: [], salvatFolders: [], hulkFolders: [], lanternaFolders: [], ironmanFolders: [], supermanFolders: [], universoAbsolutoFolders: [], mulherMaravilhaFolders: [], doomsdayFolders: [], thanosFolders: [], darkseidFolders: [], quartetoFolders: [], folderParentId: {}, hadError:false, errorMessage:null};
+  if(isStale(token)) return {comics: [], folders: [], aranhaFolders: [], xmenFolders: [], mangaFolders: [], batmanFolders: [], salvatFolders: [], hulkFolders: [], lanternaFolders: [], ironmanFolders: [], supermanFolders: [], universoAbsolutoFolders: [], mulherMaravilhaFolders: [], doomsdayFolders: [], thanosFolders: [], darkseidFolders: [], quartetoFolders: [], hadError:false, errorMessage:null};
 
   // Antes: a seção "Coleção Homem-Aranha" juntava, de QUALQUER lugar da
   // biblioteca, toda pasta cujo nome contivesse "aranha" ou "spider" (com
@@ -5026,319 +4864,8 @@ async function crawlLibrarySections(token, isStale, errorState){
   const quartetoFolders = await childrenOfNamedFolder(['colecao quarteto fantastico']);
 
   return {comics, folders: allFolders, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders,
-    // Pasta-mãe de cada pasta encontrada (id -> id da mãe), convertido de Map
-    // pra objeto simples. Usado só pelo pop-up de "conteúdo novo" (ver
-    // detectAndQueueNewContent), pra saber se uma pasta nova é o TOPO de uma
-    // adição (mostra pop-up) ou só uma subpasta de dentro de algo que já vai
-    // ganhar o próprio pop-up (não duplica).
-    folderParentId: Object.fromEntries(folderParentId),
     hadError: !!(errorState && errorState.hadError),
     errorMessage: errorState && errorState.lastError ? errorState.lastError.message : null};
-}
-
-/* ---------------------------------------------------------------------
-   6.65) POP-UP "CONTEÚDO NOVO" (pasta/subpasta adicionada no Drive)
-   Toda vez que uma varredura da biblioteca termina 100% limpa (ver
-   getLibrarySections/finalizeHomeSectionResult acima — nunca roda em cima
-   de uma varredura com erro parcial ou cancelada, pelo mesmo motivo que o
-   cache normal não é sobrescrito nesses casos), comparamos a lista de
-   pastas encontrada agora com a lista da ÚLTIMA varredura limpa (guardada
-   em KNOWN_FOLDERS_KEY, reaproveitando o mesmo mecanismo de
-   readHomeCache/writeHomeCache do resto da Home — sem gaveta nova no
-   IndexedDB). Toda pasta com um ID que não estava na lista anterior é
-   "nova"; e como o ID de uma pasta no Drive nunca muda (renomear ou mover
-   não gera ID novo), isso nunca confunde uma pasta renomeada com uma
-   pasta nova de verdade.
-
-   Detalhe importante: se você adiciona uma coleção inteira nova (ex.:
-   "Dragon Ball Completo" com 20 subpastas de volumes dentro), as 21
-   pastas (a coleção + os 20 volumes) entram TODAS como "novas" nessa
-   comparação — mas só queremos UM pop-up, o da pasta de cima. Por isso
-   filtramos pra só sobrar quem é "topo": uma pasta nova só vira pop-up se
-   a pasta-mãe dela NÃO for, ela também, uma pasta nova desta mesma leva
-   (ver folderParentId, devolvido por crawlLibrarySections). Uma subpasta
-   nova dentro de uma pasta que JÁ existia antes (ex.: você só adicionou
-   "Volume 21" dentro de uma coleção que já estava lá) continua gerando
-   pop-up normalmente, porque nesse caso ela É o topo da adição.
-
-   Logo na primeira vez que essa gaveta é criada (instalação nova do app,
-   ou primeira varredura depois desta atualização) não existe "lista
-   anterior" nenhuma pra comparar — nesse caso só gravamos a base, sem
-   pop-up nenhum (senão a biblioteca inteira apareceria como "nova" de
-   uma vez só, na primeira varredura depois de instalar este recurso). */
-const KNOWN_FOLDERS_KEY = 'planetahq_known_folders_v1';
-// Mesma ideia do KNOWN_FOLDERS_KEY, mas pra HQs soltas — precisa de uma
-// gaveta própria porque, antes desta versão, HQs nunca eram comparadas
-// (só pastas geravam pop-up). Key nova de propósito: assim, na primeira
-// varredura depois desta atualização, não existe "lista anterior" de
-// comics pra comparar, e nenhuma HQ da biblioteca inteira aparece de
-// vez como "nova" só por causa da funcionalidade ter acabado de nascer —
-// mesma proteção que KNOWN_FOLDERS_KEY já tinha pra pastas.
-const KNOWN_COMICS_KEY = 'planetahq_known_comics_v1';
-// Fila de candidatos a pop-up cuja capa AINDA não estava pronta no R2 na
-// última vez que foram conferidos. Fica salva (sobrevive a fechar o app)
-// e é reconferida do zero a cada varredura nova: assim que a capa aparecer
-// no R2 — em qualquer varredura futura, mesmo dias depois —, o pop-up
-// aparece normalmente; até lá, o item nunca é esquecido nem duplicado.
-const PENDING_POPUP_KEY = 'planetahq_pending_popups_v1';
-// Proteção contra fila enorme numa reorganização grande da biblioteca de
-// uma vez só (ex.: você moveu dezenas de pastas no Drive no mesmo dia) —
-// mostra as primeiras, o resto continua pendente e aparece normalmente
-// depois (não se perde, só espera a próxima vez).
-const NEW_FOLDER_POPUP_MAX = 12;
-
-// Confere no R2 (via Worker) se a capa de um arquivo já está pronta lá.
-async function isCoverCachedInR2(fileId){
-  if(!CONFIG.proxyUrl || !fileId) return false;
-  try{
-    const res = await fetch(`${CONFIG.proxyUrl}?cover_check=1&id=${encodeURIComponent(fileId)}`);
-    const data = await res.json();
-    return !!(data && data.cached);
-  }catch(e){ return false; }
-}
-
-// Só os campos realmente necessários pra reconstruir o pop-up mais tarde —
-// inclusive numa sessão futura, depois de fechar e reabrir o app (quando
-// crawlFolderLabels já não existe mais) —, por isso o caminho (popupPath) é
-// calculado e guardado JÁ PRONTO no momento da primeira detecção.
-function toPendingPopupRecord(item, kind, popupPath){
-  return {
-    _kind: kind,
-    id: item.id,
-    name: item.name,
-    _parentId: item._parentId,
-    _popupPath: popupPath || ''
-  };
-}
-
-async function detectAndQueueNewContent(allFoldersNow, folderParentId, allComicsNow){
-  try{
-    const [prevFoldersRec, prevComicsRec, pendingRec] = await Promise.all([
-      readHomeCache(KNOWN_FOLDERS_KEY, 'ids'),
-      readHomeCache(KNOWN_COMICS_KEY, 'ids'),
-      readHomeCache(PENDING_POPUP_KEY, 'items')
-    ]);
-    await Promise.all([
-      writeHomeCache(KNOWN_FOLDERS_KEY, 'ids', allFoldersNow.map(f=>f.id)),
-      writeHomeCache(KNOWN_COMICS_KEY, 'ids', allComicsNow.map(f=>f.id))
-    ]);
-
-    let pending = (pendingRec && pendingRec.items) || [];
-
-    // Só procura NOVIDADE (comparando com a varredura anterior) se pelo
-    // menos uma das duas gavetas de base já existia — nenhuma delas ainda
-    // ter base (instalação nova, ou primeiríssima varredura depois desta
-    // atualização) só grava a base, sem tratar a biblioteca inteira como
-    // "nova".
-    if(prevFoldersRec || prevComicsRec){
-      const prevFolderIds = new Set(prevFoldersRec ? prevFoldersRec.ids : []);
-      const prevComicIds = new Set(prevComicsRec ? prevComicsRec.ids : []);
-      const newFolders = prevFoldersRec ? allFoldersNow.filter(f=>!prevFolderIds.has(f.id)) : [];
-      const newComics = prevComicsRec ? allComicsNow.filter(f=>!prevComicIds.has(f.id)) : [];
-
-      if(newFolders.length || newComics.length){
-        // 1) Pastas do TOPO de uma adição nova — comportamento de sempre,
-        // sem precisar de tag: uma pasta nova só vira pop-up sozinha se a
-        // pasta-mãe dela não for, ela também, nova nesta mesma leva.
-        const newIdsSet = new Set(newFolders.map(f=>f.id));
-        const topMost = newFolders.filter(f=>{
-          let pid = folderParentId[f.id];
-          while(pid){
-            if(newIdsSet.has(pid)) return false;
-            pid = folderParentId[pid];
-          }
-          return true;
-        });
-        // 2) Tag "[pop-up-att]": pasta ou HQ nova marcada ganha pop-up
-        // PRÓPRIO mesmo sendo subpasta não-topo ou HQ solta numa pasta que
-        // já existia — os dois casos que o topMost sozinho não cobre.
-        const taggedFolders = newFolders.filter(f=>f._popupAtt);
-        const taggedComics = newComics.filter(f=>f._popupAtt);
-        const seenFolderIds = new Set(topMost.map(f=>f.id));
-        const candidateFolders = topMost.slice();
-        taggedFolders.forEach(f=>{
-          if(!seenFolderIds.has(f.id)){ seenFolderIds.add(f.id); candidateFolders.push(f); }
-        });
-
-        // Cada candidato novo vira um registro pendente, com o caminho já
-        // calculado agora (enquanto crawlFolderLabels ainda tem a
-        // informação fresca desta varredura) — a checagem de capa em si
-        // roda mais abaixo, junto com os pendentes de sessões anteriores.
-        candidateFolders.forEach(f=>{
-          const label = crawlFolderLabels[f.id];
-          const parts = label ? label.split(' / ') : [];
-          pending.push(toPendingPopupRecord(f, 'folder', parts.slice(0, -1).join(' › ')));
-        });
-        taggedComics.forEach(f=>{
-          pending.push(toPendingPopupRecord(f, 'comic', (f._path || []).join(' › ')));
-        });
-      }
-    }
-
-    if(!pending.length){
-      if(pendingRec) await writeHomeCache(PENDING_POPUP_KEY, 'items', []);
-      return;
-    }
-
-    // Reconfere TODOS os pendentes (os de agora + os de varreduras/sessões
-    // anteriores que ainda não tinham capa pronta) contra o R2. Quem já
-    // tem capa agora entra na fila de pop-up e sai da lista de pendentes;
-    // quem ainda não tem continua pendente pra próxima vez — sem limite de
-    // tentativas, sem nunca ser esquecido.
-    const results = await Promise.all(pending.map(async rec=>{
-      let coverFileId = rec.id;
-      if(rec._kind === 'folder'){
-        const coverFile = await resolveFolderCoverFile(rec.id).catch(()=>null);
-        coverFileId = coverFile && coverFile.id;
-      }
-      const ready = coverFileId ? await isCoverCachedInR2(coverFileId) : false;
-      return {rec, ready};
-    }));
-
-    const stillPending = results.filter(r=>!r.ready).map(r=>r.rec);
-    const nowReady = results.filter(r=>r.ready).map(r=>r.rec);
-    // Só mostra até NEW_FOLDER_POPUP_MAX de uma vez — o excedente volta pra
-    // lista de pendentes (já com a capa pronta) e aparece assim que a fila
-    // atual esvaziar, numa próxima varredura.
-    const toQueue = nowReady.slice(0, NEW_FOLDER_POPUP_MAX);
-    const overflow = nowReady.slice(NEW_FOLDER_POPUP_MAX);
-
-    await writeHomeCache(PENDING_POPUP_KEY, 'items', [...stillPending, ...overflow]);
-    if(toQueue.length) queueNewFolderPopups(toQueue);
-  }catch(e){
-    logErr('[PlanetaHQ] Falha ao detectar conteúdo novo para o pop-up', e);
-  }
-}
-
-let newFolderQueue = [];
-let newFolderPopupShowing = false;
-
-function queueNewFolderPopups(folders){
-  newFolderQueue = newFolderQueue.concat(folders);
-  if(!newFolderPopupShowing) showNextNewFolderPopup();
-}
-
-// Mesma capa mostrada nos cards de pasta normais (override manual, senão o
-// primeiro arquivo de dentro dela — ver resolveFolderCoverFile), só que
-// sem exigir que a pasta já esteja com a miniatura pré-aquecida em
-// memória: se precisar, busca na hora (é só esta pasta, não a biblioteca
-// inteira, então não pesa).
-// Confete: uma dúzia de pontinhos que nascem no centro do "kicker" e
-// voam em direções/distâncias/cores aleatórias, sumindo no fim — puro
-// CSS pra animação, só a posição/cor/atraso de cada um vem do JS, pra
-// nunca parecer o mesmo "efeitinho engessado" duas vezes seguidas.
-const CONFETTI_COLORS = ['var(--accent)','var(--gold)','#7CFC9A','#6FC3FF'];
-function spawnConfetti(container){
-  container.innerHTML = '';
-  const count = 12;
-  for(let i=0;i<count;i++){
-    const dot = document.createElement('span');
-    const angle = (Math.PI*2/count)*i + (Math.random()*0.5 - 0.25);
-    const dist = 46 + Math.random()*34;
-    dot.style.setProperty('--dx', `${Math.cos(angle)*dist}px`);
-    dot.style.setProperty('--dy', `${Math.sin(angle)*dist - 10}px`);
-    dot.style.background = CONFETTI_COLORS[i % CONFETTI_COLORS.length];
-    dot.style.animationDelay = `${Math.random()*120}ms`;
-    if(i % 3 === 0) dot.classList.add('square');
-    container.appendChild(dot);
-  }
-}
-// Reinicia uma animação CSS ligada a uma classe (remove -> força reflow
-// -> adiciona de novo). Usado pro brilho que "varre" a capa toda vez que
-// o pop-up troca de pasta na fila, não só da primeira vez que aparece.
-function restartCssAnim(elm, cls){
-  elm.classList.remove(cls);
-  void elm.offsetWidth;
-  elm.classList.add(cls);
-}
-
-async function getFolderCoverSrcForPopup(folderObj){
-  const override = getFolderCoverOverride(folderObj.name);
-  if(override) return override;
-  const immediate = getImmediateFolderCoverSrc(folderObj);
-  if(immediate) return immediate;
-  const file = await resolveFolderCoverFile(folderObj.id);
-  if(!file) return null;
-  return await resolveCoverSrc(file);
-}
-
-async function showNextNewFolderPopup(){
-  if(!newFolderQueue.length){ newFolderPopupShowing = false; return; }
-  newFolderPopupShowing = true;
-  const item = newFolderQueue.shift();
-  const isComic = item._kind === 'comic';
-  const view = $('#view-new-folder');
-  const card = view.querySelector('.new-folder-card');
-  const coverWrap = $('#new-folder-cover-wrap');
-  const coverSlot = $('#new-folder-cover-img-slot');
-  const nameEl = $('#new-folder-name');
-  const pathEl = $('#new-folder-path');
-  const hintEl = $('#new-folder-queue-hint');
-  const confettiEl = $('#new-folder-confetti');
-
-  // HQ: nome sem extensão, igual em qualquer outro card do app. Pasta: nome
-  // já vem limpo (sem extensão nem tag — ver resolveShortcuts).
-  const displayName = isComic ? item.name.replace(/\.(pdf|cbz|cbr)$/i,'') : item.name;
-  nameEl.textContent = displayName;
-  // Caminho (breadcrumb até a pasta-mãe): já vem pronto desde a detecção
-  // (ver toPendingPopupRecord) — precisa ser assim porque, quando o item
-  // ficou pendente esperando a capa aparecer no R2, o pop-up pode acabar
-  // aparecendo só numa sessão futura, depois de fechar e reabrir o app,
-  // quando crawlFolderLabels (que só existe durante UMA varredura) já não
-  // tem mais essa informação.
-  const parentPath = item._popupPath || '';
-  if(parentPath){
-    pathEl.innerHTML = `${ICONS.folder}<span>${escapeHtml(parentPath)}</span>`;
-  } else {
-    pathEl.innerHTML = '';
-  }
-  pathEl.classList.toggle('hidden', !parentPath);
-  const restCount = newFolderQueue.length;
-  hintEl.textContent = restCount ? `+ ${restCount} ${restCount>1?'novidades':'novidade'} depois desta` : '';
-  hintEl.classList.toggle('hidden', !restCount);
-
-  coverSlot.innerHTML = `<div class="cover-placeholder-icon">${isComic ? ICONS.page : ICONS.folder}</div>`;
-  view.classList.remove('hidden');
-  // Reinicia a animação de entrada do card, o brilho na capa e o confete a
-  // cada troca (mesmo com o overlay já visível, quando a fila tem mais de
-  // um item) — sem isso, o navegador só roda a animação CSS na primeira
-  // vez que a classe aparece.
-  restartCssAnim(card, 'card-swap');
-  restartCssAnim(coverWrap, 'shine-play');
-  spawnConfetti(confettiEl);
-
-  $('#btn-new-folder-read').onclick = ()=>{
-    dismissNewFolderPopup();
-    if(isComic){
-      openReader(item, undefined, item._parentId);
-    } else {
-      $('#search-input').value = '';
-      state.path = [{id: CONFIG.rootFolderId, name:'Biblioteca'}];
-      enterFolder(item.id, item.name).then(navSyncAfterBack);
-    }
-  };
-  $('#btn-new-folder-close').onclick = dismissNewFolderPopup;
-  $('#btn-new-folder-later').onclick = dismissNewFolderPopup;
-
-  try{
-    const src = isComic ? await resolveCoverSrc(item) : await getFolderCoverSrcForPopup(item);
-    // Se enquanto a capa carregava a pessoa já fechou ou já avançou pra
-    // outro item da fila, não troca mais nada aqui.
-    if(src && !view.classList.contains('hidden') && nameEl.textContent === displayName){
-      const img = buildCoverNode(src);
-      coverSlot.innerHTML = '';
-      coverSlot.appendChild(img);
-    }
-  }catch(e){ /* fica com o ícone padrão mesmo — nada quebra por causa disso */ }
-}
-
-function dismissNewFolderPopup(){
-  $('#view-new-folder').classList.add('hidden');
-  if(newFolderQueue.length){
-    setTimeout(showNextNewFolderPopup, 260); // pequena pausa: sensação de transição, não de troca brusca
-  } else {
-    newFolderPopupShowing = false;
-  }
 }
 
 function buildCarouselCard(item, opts){
@@ -5699,14 +5226,7 @@ async function getLibrarySections(forceRefresh){
     // (mesmo que vazia de verdade) tem permissão de gravar.
     const wasAborted = token !== librarySectionsToken;
     const skipWrite = errorState.hadError || wasAborted;
-    if(!skipWrite){
-      revalidateFolderCovers(); // sem await: não atrasa a resposta, roda em segundo plano
-      // Idem: compara a lista de pastas desta varredura (100% limpa, sem
-      // erro parcial) com a da varredura anterior, e enfileira o pop-up de
-      // "conteúdo novo" pra quem for detectado. Também sem await — a
-      // resolução da capa faz pedidos de rede e não pode atrasar a Home.
-      detectAndQueueNewContent(raw.folders, raw.folderParentId, raw.comics).catch(e=>logErr('[PlanetaHQ] Falha ao detectar conteúdo novo', e));
-    }
+    if(!skipWrite) revalidateFolderCovers(); // sem await: não atrasa a resposta, roda em segundo plano
     const [aranhaFolders, xmenFolders, mangaFolders, comics, allFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders] = await Promise.all([
       finalizeHomeSectionResult(ARANHA_CACHE_KEY, 'folders', raw.aranhaFolders, skipWrite),
       finalizeHomeSectionResult(XMEN_CACHE_KEY, 'folders', raw.xmenFolders, skipWrite),
@@ -6378,7 +5898,7 @@ function paintHomeSections(wrap, data){
     // mesmo problema sem avisar nada. Agora mostramos qual dos dois casos
     // é, com um jeito de tentar de novo sem precisar procurar o botão lá
     // em cima.
-    if(!isSearchActive()) wrap.classList.remove('hidden');
+    wrap.classList.remove('hidden');
     if(hadError){
       wrap.innerHTML = `<div class="empty-state">${ICONS.warning}<h3>Não foi possível carregar a biblioteca</h3>
         Houve uma falha ao buscar os dados do Google Drive${errorMessage ? ': ' + escapeHtml(errorMessage) : '.'}
@@ -6391,7 +5911,7 @@ function paintHomeSections(wrap, data){
     }
     return;
   }
-  if(!isSearchActive()) wrap.classList.remove('hidden');
+  wrap.classList.remove('hidden');
   // Voltando de uma subpasta: toda vez que a Home é repintada durante a
   // janela de restauração, recoloca a posição de onde a pessoa estava.
   if(homeRestoreWindow && Date.now() < homeRestoreWindow.until) applyHomeRestore(homeRestoreWindow.snap);
@@ -6448,7 +5968,7 @@ async function renderHomeSections(forceRefresh, onProgress){
   if(isStale(myToken)) return;
 
   if(cachedAranha || cachedXMen || cachedManga || cachedComics || cachedBatman || cachedSalvat || cachedHulk || cachedLanterna || cachedIronman || cachedSuperman || cachedUniversoAbsoluto || cachedMulherMaravilha || cachedDoomsday || cachedThanos || cachedDarkseid || cachedQuarteto){
-    if(!isSearchActive()) wrap.classList.remove('hidden');
+    wrap.classList.remove('hidden');
     const fastData = {
       continueItems: continueItemsFast,
       aranhaFolders: cachedAranha ? cachedAranha.folders : [],
@@ -6472,7 +5992,7 @@ async function renderHomeSections(forceRefresh, onProgress){
     lastPaintedHomeSignature = homeSectionsSignature(fastData);
   } else {
     wrap.innerHTML = `<div class="home-section"><div class="home-section-title">Carregando seções…</div></div>`;
-    if(!isSearchActive()) wrap.classList.remove('hidden');
+    wrap.classList.remove('hidden');
     lastPaintedHomeSignature = null;
   }
 
@@ -6633,7 +6153,7 @@ $('#btn-refresh').onclick = async ()=>{
   if(current && current.id === CONFIG.rootFolderId) renderHomeSections(true);
 };
 $('#btn-settings').onclick = ()=>{
-  if(confirm('Apagar a configuração da biblioteca (chave de API e pasta)? Seus downloads offline serão mantidos.')){
+  if(confirm('Apagar a configuração da biblioteca (pasta e proxy)? Seus downloads offline serão mantidos.')){
     localStorage.removeItem(CONFIG_KEY);
     location.reload();
   }
@@ -6776,7 +6296,6 @@ Object.entries({
   'btn-refresh': ICONS.refresh,
   'btn-debug': ICONS.bug,
   'btn-debug-close': ICONS.close,
-  'btn-new-folder-close': ICONS.close,
   'btn-settings': ICONS.settings,
   'btn-back': ICONS.chevLeft,
   'btn-close-reader': ICONS.close,
@@ -6794,17 +6313,10 @@ loadLibraryPrefs();
 syncLibraryFilterUI();
 
 $('#btn-save-config').onclick = async ()=>{
-  const apiKey = $('#in-apikey').value.trim();
   const folderId = $('#in-folderid').value.trim();
   const proxyUrl = $('#in-proxyurl').value.trim();
-  // A chave de API só é obrigatória no modo "sem proxy" (fala direto com
-  // o Google). Com proxy configurado, quem guarda a chave é o Worker
-  // (env.GOOGLE_API_KEY) — o app não precisa de nenhuma aqui.
-  if(!folderId || (!proxyUrl && !apiKey)){
-    toast(proxyUrl ? 'Preencha o ID da pasta' : 'Preencha o ID da pasta e a chave de API (ou configure um proxy)');
-    return;
-  }
-  saveConfig(apiKey, folderId, proxyUrl);
+  if(!folderId || !proxyUrl){ toast('Preencha os dois campos obrigatórios'); return; }
+  saveConfig(folderId, proxyUrl);
   await boot();
 };
 
@@ -6823,14 +6335,15 @@ async function boot(){
     // continua podendo fazer isso depois, via engrenagem > apagar
     // configuração (aí sim volta a pedir os campos manualmente).
     try{
-      saveConfig(DEFAULT_CONFIG.apiKey, DEFAULT_CONFIG.rootFolderId, DEFAULT_CONFIG.proxyUrl);
+      saveConfig(DEFAULT_CONFIG.rootFolderId, DEFAULT_CONFIG.proxyUrl);
     }catch(e){
       // localStorage indisponível (ex.: navegação privada restrita) — segue
       // com a config só na memória desta sessão, em vez de travar o boot.
-      CONFIG = {apiKey: DEFAULT_CONFIG.apiKey, rootFolderId: DEFAULT_CONFIG.rootFolderId, proxyUrl: DEFAULT_CONFIG.proxyUrl};
+      CONFIG = {rootFolderId: DEFAULT_CONFIG.rootFolderId, proxyUrl: DEFAULT_CONFIG.proxyUrl.replace(/\/+$/,'')};
     }
     hasConfig = true;
   }
+  await ensureAccessCode();
   $('#view-setup').classList.add('hidden');
   await coverWarmupPromise;
   await runInitialLoad();

@@ -343,60 +343,33 @@
   arrasto deixa a lista rolar pra próxima/anterior página.
 */
 /*
-  v59: index.html e worker.js mudaram — a chave de API do Google
-  (CONFIG.apiKey) parou de ser embutida no código do app e de ser mandada
-  pelo navegador em toda chamada ao Drive (listagem de pastas/busca por
-  nome, além do que já passava pelo proxy). Ela agora mora só como secret
-  do Worker (env.GOOGLE_API_KEY) — o app manda pro Worker só o que
-  precisa (pasta/nome pra listar, id do arquivo pra baixar), sem chave
-  nenhuma, e é o Worker quem completa a chave antes de falar com o
-  Google. O modo "sem proxy" continua existindo como opção avançada
-  (exige preencher a chave manualmente na tela de configuração, com o
-  mesmo risco de exposição de antes). worker.js também passou a exigir a
-  chave real (não mais qualquer texto) nos endpoints administrativos
-  (list_cache, purge_logos, forget, warm), que só você aciona manualmente
-  — o app nunca chama esses.
+  v59: index.html mudou — a chave de API do Google Drive saiu do app. Toda
+  listagem/busca/download no Drive agora passa pelo Worker proxy, que guarda
+  a chave como segredo (DRIVE_API_KEY). O app também apaga a chave antiga que
+  estava salva no aparelho (localStorage). Este arquivo não mudou de
+  comportamento — só a versão sobe pra os aparelhos buscarem o index.html novo.
 */
 /*
-  v60: index.html mudou — no boot() (caminho rápido, quando já existe cache
-  local), a revalidação da Home em segundo plano passou a rodar com
-  forceRefresh=true. Antes ela chamava renderHomeSections() sem esse
-  parâmetro: a tela pintava rápido com o cache (isso não mudou), mas a busca
-  de verdade no Drive só rodava se o cache de 6h já tivesse vencido — então
-  fechar e reabrir o app não trazia HQ nova nenhuma antes das 6h, e só
-  limpar os dados do app (ou reinstalar) resolvia. Subindo a versão pra
-  forçar os aparelhos a buscarem o index.html novo.
+  v60: index.html mudou de novo — agora existe uma tela de bloqueio pedindo
+  um código de acesso (enviado por e-mail após a compra no ggcheckout).
+  Sem código válido, o Worker recusa listagem/download. Este arquivo em si
+  não mudou de comportamento — só a versão sobe pra os aparelhos buscarem
+  o index.html novo.
 */
 /*
-  v61: index.html mudou — novo pop-up "Conteúdo novo adicionado ⭐" (ver
-  detectAndQueueNewFolders/showNextNewFolderPopup): toda vez que uma
-  varredura da biblioteca termina limpa (ao abrir o app ou clicar em
-  "Atualizar"), compara as pastas encontradas com as da varredura anterior;
-  quem for pasta/subpasta nova aparece num cartão central com capa, nome e
-  botão "Ler agora" que leva direto pra dentro dela. Subindo a versão pra
-  forçar os aparelhos a buscarem o index.html novo.
+  v61: index.html mudou de novo — cada aparelho agora manda um ID próprio
+  junto com o código de acesso, e o Worker limita quantos aparelhos
+  diferentes um mesmo código pode ativar (evita que um código comprado seja
+  divulgado e usado por qualquer quantidade de gente). Este arquivo em si
+  não mudou de comportamento — só a versão sobe pra os aparelhos buscarem
+  o index.html novo.
 */
-/*
-  v62: index.html mudou — o pop-up "Conteúdo novo adicionado" ficou bem
-  mais estiloso: aura brilhante pulsante ao redor do card, faixa "Novo" na
-  capa, brilho passando pela capa e pelo botão, confete colorido ao
-  aparecer e estrelinhas piscando no textinho de cima. Subindo a versão pra
-  forçar os aparelhos a buscarem o index.html novo.
-  v64: ícone do app trocado pelo logo de verdade do Planeta HQ (arquivos
-  achatados na raiz — icon-192.png/icon-512.png/icon-512-maskable.png/
-  favicon-32.png — pra bater exatamente com os nomes que o manifest.json
-  original já usava, sem pasta icons/ nova).
-*/
-const CACHE_VERSION = 'v64';
+const CACHE_VERSION = 'v61';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
   './index.html',
   './manifest.json',
-  './icon-192.png',
-  './icon-512.png',
-  './icon-512-maskable.png',
-  './favicon-32.png',
   'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
   // O worker do pdf.js — sem ele em cache, ler qualquer PDF (inclusive um já
