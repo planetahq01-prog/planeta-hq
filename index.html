@@ -737,6 +737,25 @@ body.theme-transitioning .tab.active{
       <p id="access-gate-status" style="min-height:20px;margin-top:12px;font-size:0.85rem;color:#ff9c8c;"></p>
     </div>
   </div>
+
+  <div id="settings-menu" class="hidden" style="position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.55);display:flex;align-items:flex-end;justify-content:center;">
+    <div style="background:#131a33;color:#eef1ff;width:100%;max-width:420px;border-radius:16px 16px 0 0;padding:20px;font-family:inherit;">
+      <button id="settings-menu-devices" style="display:block;width:100%;text-align:left;padding:14px 4px;background:none;border:none;color:#eef1ff;font-size:1rem;cursor:pointer;border-bottom:1px solid #2a3050;">📱 Seus aparelhos conectados</button>
+      <button id="settings-menu-reset" style="display:block;width:100%;text-align:left;padding:14px 4px;background:none;border:none;color:#ff9c8c;font-size:1rem;cursor:pointer;">🗑️ Apagar configuração da biblioteca</button>
+      <button id="settings-menu-close" style="display:block;width:100%;text-align:center;padding:14px 4px;margin-top:8px;background:none;border:none;color:#9aa3c7;font-size:0.9rem;cursor:pointer;">Cancelar</button>
+    </div>
+  </div>
+
+  <div id="devices-modal" class="hidden" style="position:fixed;inset:0;z-index:9998;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;padding:24px;">
+    <div style="background:#131a33;color:#eef1ff;width:100%;max-width:420px;border-radius:16px;padding:20px;font-family:inherit;max-height:80vh;overflow-y:auto;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+        <h2 style="margin:0;font-size:1.15rem;">Seus aparelhos conectados</h2>
+        <button id="devices-modal-close" style="background:none;border:none;color:#9aa3c7;font-size:1.4rem;cursor:pointer;line-height:1;">×</button>
+      </div>
+      <p id="devices-modal-sub" style="margin:6px 0 16px;color:#9aa3c7;font-size:0.85rem;"></p>
+      <div id="devices-modal-list"></div>
+    </div>
+  </div>
 <div id="app">
 
   <!-- ===================== TELA DE CONFIGURAÇÃO INICIAL ===================== -->
@@ -6153,11 +6172,87 @@ $('#btn-refresh').onclick = async ()=>{
   if(current && current.id === CONFIG.rootFolderId) renderHomeSections(true);
 };
 $('#btn-settings').onclick = ()=>{
+  $('#settings-menu').classList.remove('hidden');
+};
+$('#settings-menu-close').onclick = ()=>{ $('#settings-menu').classList.add('hidden'); };
+$('#settings-menu').onclick = (e)=>{ if(e.target.id === 'settings-menu') $('#settings-menu').classList.add('hidden'); };
+$('#settings-menu-reset').onclick = ()=>{
+  $('#settings-menu').classList.add('hidden');
   if(confirm('Apagar a configuração da biblioteca (pasta e proxy)? Seus downloads offline serão mantidos.')){
     localStorage.removeItem(CONFIG_KEY);
     location.reload();
   }
 };
+$('#settings-menu-devices').onclick = ()=>{
+  $('#settings-menu').classList.add('hidden');
+  openDevicesModal();
+};
+$('#devices-modal-close').onclick = ()=>{ $('#devices-modal').classList.add('hidden'); };
+$('#devices-modal').onclick = (e)=>{ if(e.target.id === 'devices-modal') $('#devices-modal').classList.add('hidden'); };
+
+function formatDeviceDate(ts){
+  if(!ts) return 'há muito tempo';
+  const diffMs = Date.now() - ts;
+  const mins = Math.round(diffMs/60000);
+  if(mins < 1) return 'agora mesmo';
+  if(mins < 60) return `há ${mins} min`;
+  const hours = Math.round(mins/60);
+  if(hours < 24) return `há ${hours}h`;
+  const days = Math.round(hours/24);
+  if(days < 30) return `há ${days} dia${days>1?'s':''}`;
+  return new Date(ts).toLocaleDateString('pt-BR');
+}
+
+async function openDevicesModal(){
+  const modal = $('#devices-modal');
+  const list = $('#devices-modal-list');
+  const sub = $('#devices-modal-sub');
+  modal.classList.remove('hidden');
+  list.innerHTML = '<p style="color:#9aa3c7;">Carregando...</p>';
+  sub.textContent = '';
+  try{
+    const res = await fetch(`${CONFIG.proxyUrl}?list_devices=1&code=${encodeURIComponent(ACCESS_CODE || '')}&device=${encodeURIComponent(getDeviceId())}`, {cache:'no-store'});
+    const data = await res.json();
+    if(!res.ok || data.error){
+      list.innerHTML = `<p style="color:#ff9c8c;">${escapeHtml(data.error || 'Não consegui carregar.')}</p>`;
+      return;
+    }
+    sub.textContent = `${data.devices.length} de ${data.max} vagas em uso. Seu código de acesso funciona em até ${data.max} aparelhos ao mesmo tempo.`;
+    if(data.devices.length === 0){
+      list.innerHTML = '<p style="color:#9aa3c7;">Nenhum aparelho registrado ainda.</p>';
+      return;
+    }
+    list.innerHTML = '';
+    data.devices.forEach((d)=>{
+      const row = document.createElement('div');
+      row.style.cssText = 'display:flex;align-items:center;justify-content:space-between;gap:10px;padding:12px 0;border-bottom:1px solid #2a3050;';
+      const label = document.createElement('div');
+      label.innerHTML = `<div style="font-weight:600;">${d.isThis ? '📍 Este aparelho' : '📱 Aparelho'}</div><div style="font-size:0.8rem;color:#9aa3c7;">Usado pela última vez ${formatDeviceDate(d.lastUsed)}</div>`;
+      row.appendChild(label);
+      if(!d.isThis){
+        const btn = document.createElement('button');
+        btn.textContent = 'Remover';
+        btn.style.cssText = 'background:none;border:1px solid #ff9c8c;color:#ff9c8c;border-radius:8px;padding:8px 12px;font-size:0.85rem;cursor:pointer;flex-shrink:0;';
+        btn.onclick = async ()=>{
+          if(!confirm('Remover este aparelho? Ele vai precisar digitar o código de novo pra voltar a acessar.')) return;
+          btn.disabled = true;
+          btn.textContent = 'Removendo...';
+          try{
+            await fetch(`${CONFIG.proxyUrl}?remove_device=1&code=${encodeURIComponent(ACCESS_CODE || '')}&remove_id=${encodeURIComponent(d.id)}`, {cache:'no-store'});
+            openDevicesModal();
+          }catch(e){
+            btn.disabled = false;
+            btn.textContent = 'Remover';
+          }
+        };
+        row.appendChild(btn);
+      }
+      list.appendChild(row);
+    });
+  }catch(e){
+    list.innerHTML = '<p style="color:#ff9c8c;">Falha ao carregar. Confira sua conexão.</p>';
+  }
+}
 // As funções de "aquecer capas" que existiam aqui (collectAllComicsForCoverWarm,
 // collectHomeSectionComics, runCoverWarmer, e os dois botões que as
 // disparavam) foram removidas: viraram a ferramenta separada

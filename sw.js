@@ -364,7 +364,15 @@
   não mudou de comportamento — só a versão sobe pra os aparelhos buscarem
   o index.html novo.
 */
-const CACHE_VERSION = 'v61';
+/*
+  v62: index.html mudou de novo — limite de aparelhos por código subiu pra
+  4, a evicção do aparelho mais antigo virou automática (LRU), e tem uma
+  tela nova em Configurações → "Seus aparelhos conectados", onde dá pra ver
+  e remover aparelhos manualmente. Este arquivo em si não mudou de
+  comportamento — só a versão sobe pra os aparelhos buscarem o index.html
+  novo.
+*/
+const CACHE_VERSION = 'v62';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
