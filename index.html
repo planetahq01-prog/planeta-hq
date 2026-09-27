@@ -2845,7 +2845,7 @@ async function ensureAccessCode(){
         15000, 'Tempo esgotado ao verificar o código de acesso.'
       );
       const data = await res.json();
-      if(data.valid){ ACCESS_CODE = saved; return; }
+      if(data.valid){ ACCESS_CODE = saved; accessCodeVerifiedAt = Date.now(); return; }
       denyReason = data.reason || null;
     }catch(e){
       // Sem rede pra confirmar (ou tempo esgotado): usa o código salvo
@@ -2860,13 +2860,28 @@ async function ensureAccessCode(){
   await requireAccessCode(denyReason);
 }
 
-// Usado só nos caminhos de capa (resolveCoverFallbackImpl), que já são a
-// exceção — não em toda imagem, pra não gastar uma chamada extra à toa.
+// Usado nos caminhos de capa (checkCoverInR2, resolveCoverFallbackImpl).
 // Coalescida pelo mesmo motivo do requireAccessCode: várias capas podem
 // chegar aqui ao mesmo tempo, e não faz sentido disparar uma checagem por
 // capa quando uma só, compartilhada, resolve todas.
+//
+// BUG CORRIGIDO (capas do R2 voltando a demorar/travar, agora até PIOR
+// que antes): desde que checkCoverInR2 passou a rodar pra CADA capa da
+// tela (não só no fallback raro de antes), esta função também passou a
+// ser chamada pra cada capa — e sem nenhuma memória de "já confirmei
+// isso há pouco", CADA chamada disparava uma ida-e-volta de rede de
+// verdade (auth_check) antes mesmo de perguntar pro R2 se a capa existia.
+// Com dezenas de capas na Home e um teto de simultâneas (COVER_MAX_CONCURRENT),
+// essas idas-e-voltas se empilhavam uma atrás da outra — mais lento que a
+// versão antiga, que não tinha rodada de rede nenhuma antes do
+// thumbnailLink. accessCodeVerifiedAt guarda quando a última confirmação
+// bem-sucedida aconteceu; dentro do prazo (ACCESS_CODE_RECHECK_MS),
+// ensureFreshAccessCode nem chega a tocar a rede — só devolve na hora.
 let freshAccessCodeInFlight = null;
+let accessCodeVerifiedAt = 0;
+const ACCESS_CODE_RECHECK_MS = 5 * 60 * 1000; // 5 minutos
 function ensureFreshAccessCode(){
+  if(Date.now() - accessCodeVerifiedAt < ACCESS_CODE_RECHECK_MS) return Promise.resolve();
   if(freshAccessCodeInFlight) return freshAccessCodeInFlight;
   freshAccessCodeInFlight = ensureFreshAccessCodeImpl().finally(()=>{
     freshAccessCodeInFlight = null;
@@ -2886,13 +2901,14 @@ async function ensureFreshAccessCodeImpl(){
       15000, 'Tempo esgotado ao verificar o código de acesso.'
     );
     const data = await res.json();
-    if(data.valid) return;
+    if(data.valid){ accessCodeVerifiedAt = Date.now(); return; }
   }catch(e){
     return; // sem rede (ou tempo esgotado): segue com o código atual, igual ensureAccessCode faz
   }
   try{ localStorage.removeItem(ACCESS_CODE_KEY); }catch(e){}
   ACCESS_CODE = null;
   await requireAccessCode();
+  accessCodeVerifiedAt = Date.now();
 }
 
 /* ---------------------------------------------------------------------

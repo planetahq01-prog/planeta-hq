@@ -552,7 +552,21 @@
   rápido ou desistir logo). Este arquivo em si não mudou de comportamento
   — só a versão sobe pra os aparelhos buscarem o index.html novo.
 */
-const CACHE_VERSION = 'v78';
+/*
+  v79: index.html mudou — correção em cima da própria correção da v78.
+  checkCoverInR2 (nova na v78, roda pra CADA capa) chamava
+  ensureFreshAccessCode() antes de perguntar pro R2, e essa função não
+  tinha nenhuma memória de "já confirmei isso há pouco" — cada chamada
+  disparava uma ida-e-volta de rede de verdade (auth_check). Com dezenas
+  de capas na Home, isso empilhava uma rodada de rede extra ANTES de cada
+  cover_check, deixando tudo mais lento que a versão anterior à v78, não
+  mais rápido. Agora ensureFreshAccessCode só toca a rede se a última
+  confirmação bem-sucedida foi há mais de 5 minutos (accessCodeVerifiedAt)
+  — dentro desse prazo, devolve na hora sem nenhuma chamada de rede. Este
+  arquivo em si não mudou de comportamento — só a versão sobe pra os
+  aparelhos buscarem o index.html novo.
+*/
+const CACHE_VERSION = 'v79';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
