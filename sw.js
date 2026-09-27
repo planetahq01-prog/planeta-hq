@@ -396,7 +396,17 @@
   novo à toa. Este arquivo em si não mudou de comportamento — só a versão
   sobe pra os aparelhos buscarem o index.html novo.
 */
-const CACHE_VERSION = 'v65';
+/*
+  v66: index.html mudou de novo — corrigido outro motivo das capinhas
+  ficando em branco: quando várias capas descobriam ao mesmo tempo que o
+  código de acesso precisava ser renovado, cada uma abria "sua própria"
+  tela de código por cima da mesma, e todas menos a última ficavam
+  esperando pra sempre (mesmo depois de digitar o código certo). Agora
+  chamadas concorrentes compartilham a mesma tela/verificação. Este
+  arquivo em si não mudou de comportamento — só a versão sobe pra os
+  aparelhos buscarem o index.html novo.
+*/
+const CACHE_VERSION = 'v66';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [

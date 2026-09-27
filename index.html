@@ -2659,7 +2659,24 @@ function normalizeAccessCode(raw){
 // Mostra a tela de bloqueio (código de acesso) e só resolve a Promise quando
 // um código válido for confirmado pelo Worker. Enquanto isso, o resto do
 // boot() fica pausado — nada da biblioteca é montado.
+//
+// Coalescência: se várias coisas pedirem o código ao mesmo tempo (comum —
+// várias capas podem descobrir juntas que o código venceu, ao carregar em
+// paralelo), CADA chamada reatribuía o onclick do mesmo botão físico na
+// tela, brigando pela mesma referência — só a ÚLTIMA chamada ficava
+// realmente ligada ao botão, e todas as promessas anteriores ficavam
+// pendentes pra sempre (mesmo depois da pessoa digitar o código certo).
+// Por isso, chamadas concorrentes agora reaproveitam a MESMA tela/promessa
+// em vez de abrir uma disputando com a outra.
+let accessCodeGateInFlight = null;
 function requireAccessCode(initialMessage){
+  if(accessCodeGateInFlight) return accessCodeGateInFlight;
+  accessCodeGateInFlight = requireAccessCodeImpl(initialMessage).finally(()=>{
+    accessCodeGateInFlight = null;
+  });
+  return accessCodeGateInFlight;
+}
+function requireAccessCodeImpl(initialMessage){
   return new Promise((resolve)=>{
     const overlay = $('#access-gate');
     const input = $('#access-gate-input');
@@ -2722,16 +2739,20 @@ async function ensureAccessCode(){
   await requireAccessCode(denyReason);
 }
 
-// Confere (de novo, silenciosamente) se ACCESS_CODE ainda é aceito pelo
-// Worker bem no instante em que vamos usá-lo — sem isso, se o aparelho
-// tivesse perdido a vaga entre o boot e agora (evicção por outro aparelho
-// usando o mesmo código, ver MAX_DEVICES_PER_CODE no worker.js), qualquer
-// URL de capa montada com esse código ficaria inválida pra sempre: como
-// <img> não tem o mesmo retry automático que driveFetchJson tem pra JSON,
-// a capa simplesmente ficava em branco, sem nenhum aviso. Usado só nos
-// caminhos de capa (resolveCoverFallbackImpl), que já são a exceção —
-// não em toda imagem, pra não gastar uma chamada extra à toa.
-async function ensureFreshAccessCode(){
+// Usado só nos caminhos de capa (resolveCoverFallbackImpl), que já são a
+// exceção — não em toda imagem, pra não gastar uma chamada extra à toa.
+// Coalescida pelo mesmo motivo do requireAccessCode: várias capas podem
+// chegar aqui ao mesmo tempo, e não faz sentido disparar uma checagem por
+// capa quando uma só, compartilhada, resolve todas.
+let freshAccessCodeInFlight = null;
+function ensureFreshAccessCode(){
+  if(freshAccessCodeInFlight) return freshAccessCodeInFlight;
+  freshAccessCodeInFlight = ensureFreshAccessCodeImpl().finally(()=>{
+    freshAccessCodeInFlight = null;
+  });
+  return freshAccessCodeInFlight;
+}
+async function ensureFreshAccessCodeImpl(){
   try{
     const res = await fetch(`${CONFIG.proxyUrl}?auth_check=1&code=${encodeURIComponent(ACCESS_CODE || '')}&device=${encodeURIComponent(getDeviceId())}&type=${encodeURIComponent(getDeviceType())}`, {cache:'no-store'});
     const data = await res.json();
