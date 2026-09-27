@@ -2119,10 +2119,24 @@ function scheduleCoverTask(task){ coverQueue.push(task); pumpCoverQueue(); }
 //  2) enquanto o leitor está aberto, nenhuma capa pesada roda (as em
 //     andamento são pausadas e voltam pra fila) e, enquanto há download
 //     em andamento, roda no máximo 1 por vez — HQ tem prioridade.
-const NETWORK_COVER_MAX_CONCURRENT = 3;
+const NETWORK_COVER_MAX_CONCURRENT = 5;
 let networkCoverActiveCount = 0;
 const networkCoverQueueTasks = [];
 const networkCoverRunning = new Set();
+// BUG CORRIGIDO (capas que travavam pra sempre, só na Home): o timeout de
+// COVER_TASK_TIMEOUT_MS acima só protege quem JÁ ganhou uma das vagas e
+// começou a rodar de verdade. Uma tarefa que fica só ESPERANDO aqui na
+// array (porque as vagas — poucas de propósito — estão todas ocupadas)
+// não tinha limite de tempo NENHUM: com a Home pedindo capa de vários
+// carrosséis ao mesmo tempo, é fácil ter bem mais que
+// NETWORK_COVER_MAX_CONCURRENT capas pesadas competindo de uma vez, e as
+// que ficavam de fora da vaga esperavam pra sempre — escondidas, sem
+// nunca desistir e sem nunca avisar o card pra mostrar o ícone de "sem
+// capa". Entrar na pasta específica depois "consertava" na hora só
+// porque ali a concorrência é muito menor, então a vaga aparece rápido.
+// Este teto garante que TODA capa, cedo ou tarde, desiste de vez (e o
+// card mostra o ícone) em vez de ficar presa pra sempre.
+const NETWORK_COVER_QUEUE_WAIT_TIMEOUT_MS = 25000;
 
 function networkCoverLimit(){
   const readerEl = document.getElementById('view-reader');
@@ -2136,6 +2150,10 @@ function networkCoverLimit(){
 function pumpNetworkCoverQueue(){
   while(networkCoverActiveCount < networkCoverLimit() && networkCoverQueueTasks.length){
     const entry = networkCoverQueueTasks.shift();
+    // Ganhou a vaga agora: o prazo de ESPERA não vale mais — dali em
+    // diante quem protege esta tarefa é o timeout de execução
+    // (COVER_TASK_TIMEOUT_MS, logo abaixo, via AbortController).
+    if(entry.waitTimer){ clearTimeout(entry.waitTimer); entry.waitTimer = null; }
     entry.ctrl = new AbortController();
     entry.requeue = false;
     entry.timedOut = false;
@@ -2150,6 +2168,7 @@ function pumpNetworkCoverQueue(){
     Promise.race([Promise.resolve().then(()=>entry.task(entry.ctrl.signal)), aborted])
       .then(entry.resolve, (err)=>{
         if(entry.requeue && err && err.name === 'AbortError'){
+          armNetworkCoverWaitTimer(entry); // volta a valer um prazo de espera, já que ela sai da vaga agora
           networkCoverQueueTasks.unshift(entry); // pausada por uma HQ abrindo — recomeça depois
         } else {
           entry.reject(err);
@@ -2163,9 +2182,26 @@ function pumpNetworkCoverQueue(){
       });
   }
 }
+// Prazo de espera pela vaga (ver NETWORK_COVER_QUEUE_WAIT_TIMEOUT_MS acima).
+// Só desarma sozinho quando a tarefa É REMOVIDA da array por
+// pumpNetworkCoverQueue (ganhou a vaga) — se disparar antes disso, a
+// tarefa nem chegou a rodar, então é seguro simplesmente tirá-la da fila
+// e desistir (o card que pediu essa capa cai no catch dele e mostra o
+// ícone de "sem capa" em vez de ficar esperando pra sempre).
+function armNetworkCoverWaitTimer(entry){
+  entry.waitTimer = setTimeout(()=>{
+    const idx = networkCoverQueueTasks.indexOf(entry);
+    if(idx !== -1){
+      networkCoverQueueTasks.splice(idx, 1);
+      entry.reject(new Error('tempo esgotado esperando vaga na fila de capas'));
+    }
+  }, NETWORK_COVER_QUEUE_WAIT_TIMEOUT_MS);
+}
 function networkCoverQueue(task){
   return new Promise((resolve, reject)=>{
-    networkCoverQueueTasks.push({task, resolve, reject});
+    const entry = {task, resolve, reject};
+    armNetworkCoverWaitTimer(entry);
+    networkCoverQueueTasks.push(entry);
     pumpNetworkCoverQueue();
   });
 }
@@ -3121,6 +3157,7 @@ function renderFolderCard(f, opts){
   if(immediateSrc){
     const img = buildCoverNode(immediateSrc);
     img.classList.add('loaded'); // sem fade: já está pronta desde o primeiro frame
+    wireImmediateFolderCoverRetry(img, f);
     cover.appendChild(img);
     card.classList.add('has-cover','cover-immediate');
   } else {
@@ -3579,6 +3616,54 @@ function buildCoverNode(src, f){
   }
   img.src = src;
   return img;
+}
+
+// BUG CORRIGIDO (capas de PASTA que ficavam brancas pra sempre, só nos
+// carrosséis da Home e no grid da biblioteca — nunca dentro da própria
+// pasta): o caminho de "capa imediata" (getImmediateFolderCoverSrc, usado
+// em renderFolderCard/buildCarouselCard) pinta a <img> direto com um valor
+// JÁ RESOLVIDO antes — às vezes numa sessão anterior — sem passar pelo
+// buildCoverNode(src, f) normal. Por isso ele nunca ganhava a rede de
+// segurança de onerror/timeout que existe logo acima (só é ligada quando
+// `f` é passado). Se aquele valor salvo parar de funcionar — o caso mais
+// comum é uma URL de capa do R2 com um código de acesso que já rotacionou
+// desde que foi guardada, mas também vale pra um thumbnailLink do Drive
+// que expirou — a <img> nunca chega a soltar 'load' nem 'error': fica
+// muda pra sempre, sem cair em nenhum fallback. Isso explica por que só
+// pastas eram afetadas (HQs sempre passam o arquivo certo pro
+// buildCoverNode normal, então já tinham essa proteção) e por que entrar
+// na pasta "consertava" na hora: ali a capa de cada HQ passa pelo caminho
+// normal, que se autocorrige e regrava um valor fresco no cache — some só
+// depois, na próxima vez que a MESMA pasta for pintada de novo.
+function wireImmediateFolderCoverRetry(img, folderObj){
+  let settled = false;
+  const retry = async ()=>{
+    if(settled) return;
+    settled = true;
+    logWarn('[PlanetaHQ] capa imediata de pasta não carregou, gerando de novo —', folderObj.name);
+    let coverFile = null, freshSrc = null;
+    try{
+      const override = getFolderCoverOverride(folderObj.name);
+      if(override){
+        freshSrc = override;
+      } else {
+        coverFile = folderCoverFileMemoryCache.get(folderObj.id) || await resolveFolderCoverFile(folderObj.id);
+        if(coverFile){
+          // Descarta o valor guardado (RAM e IndexedDB) — sem isso,
+          // resolveCoverSrc só devolveria de volta o mesmo valor stale.
+          coverMemoryCache.delete(coverFile.id);
+          try{ await idbDelete('covers', coverFile.id); }catch(e){}
+          freshSrc = await resolveCoverSrc(coverFile, {persistOffline:true});
+        }
+      }
+    }catch(e){}
+    if(!img.isConnected) return; // a pessoa já saiu dessa tela
+    if(freshSrc) img.replaceWith(buildCoverNode(freshSrc, coverFile));
+    else img.remove();
+  };
+  img.addEventListener('load', ()=>{ settled = true; }, {once:true});
+  img.addEventListener('error', retry, {once:true});
+  setTimeout(retry, 15000); // mesmo prazo do buildCoverNode normal, acima
 }
 
 async function attachCoverToEl(placeholder, f){
@@ -5169,6 +5254,7 @@ function buildCarouselCard(item, opts){
   if(immediateSrc){
     const img = buildCoverNode(immediateSrc, isFolder ? null : item);
     img.classList.add('loaded');
+    if(isFolder) wireImmediateFolderCoverRetry(img, item);
     cover.appendChild(img);
     hasImmediateCover = true;
   } else {
