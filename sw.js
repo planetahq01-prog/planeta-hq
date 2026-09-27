@@ -451,7 +451,18 @@
   tela de computador): mostra duas páginas coladas, cada uma 100% visível
   (nunca cortada), mesmo que sobre espaço vazio na tela.
 */
-const CACHE_VERSION = 'v70';
+/*
+  v71: index.html mudou — novo modo de leitura "Rolagem (Computador)":
+  igual à Rolagem normal, mas a HQ fica numa faixa central de ~4:3 em vez
+  de esticar pela largura toda da janela, e as setas de cima/baixo do
+  teclado rolam a página.
+*/
+/*
+  v72: index.html mudou — a Página Dupla agora tem uma transição de
+  "página virando" (leve giro 3D) ao avançar/voltar, pra ficar mais
+  imersivo.
+*/
+const CACHE_VERSION = 'v72';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
