@@ -361,6 +361,15 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
   touch-action:pan-x pan-y;
 }
 .zoom-wrap img{max-width:100%;max-height:100%;object-fit:contain;user-select:none;-webkit-user-drag:none;display:block;}
+/* Modo "Página Dupla" — pensado pra tela de computador: as duas páginas
+   ficam coladas uma na outra, cada uma 100% visível (nunca cortada), mesmo
+   que sobre espaço vazio em volta. Por isso cada img usa object-fit:contain
+   dentro de uma metade da largura, em vez de esticar pra preencher a tela. */
+.double-wrap{width:100%;height:100%;display:flex;align-items:center;justify-content:center;}
+.double-wrap.hidden{display:none;}
+.double-page{max-width:50%;max-height:100%;object-fit:contain;user-select:none;-webkit-user-drag:none;display:block;}
+.double-page.hidden{display:none;}
+.double-page.solo{max-width:100%;}
 .reader-nav{
   position:absolute;top:0;bottom:0;width:35%;background:none;border:none;
   display:flex;align-items:center;color:rgba(255,255,255,.28);
@@ -890,6 +899,10 @@ body.theme-transitioning .tab.active{
     <!-- Modo paginado -->
     <div class="reader-stage" id="reader-stage">
       <div class="zoom-wrap" id="zoom-wrap"><img id="reader-img" style="display:none"></div>
+      <div class="double-wrap hidden" id="double-wrap">
+        <img id="reader-img-a" class="double-page">
+        <img id="reader-img-b" class="double-page">
+      </div>
       <button class="reader-nav left" id="nav-prev"></button>
       <button class="reader-nav right" id="nav-next"></button>
     </div>
@@ -913,7 +926,9 @@ body.theme-transitioning .tab.active{
         <div class="segmented" id="mode-segmented">
           <button data-mode="scroll" class="active">Rolagem</button>
           <button data-mode="paginate">Página</button>
+          <button data-mode="double">Página Dupla</button>
         </div>
+        <span id="double-mode-hint" class="hidden" style="font-size:11px;color:var(--text-muted);">Pensado pra tela de computador — no celular as páginas ficam pequenas.</span>
       </div>
       <div class="rs-row" id="fit-row">
         <span>Ajuste da página</span>
@@ -1121,7 +1136,7 @@ function loadReaderPrefs(){
     const raw = localStorage.getItem(READER_PREFS_KEY);
     if(raw){
       const p = JSON.parse(raw);
-      state.reader.mode = p.mode === 'paginate' ? 'paginate' : 'scroll';
+      state.reader.mode = (p.mode === 'paginate' || p.mode === 'double') ? p.mode : 'scroll';
       state.reader.fit = p.fit === 'height' ? 'height' : 'width';
       return;
     }
@@ -4199,6 +4214,8 @@ async function openReader(fileMeta, forceLocal, parentId){
   state.reader.doc = null;
   img.src = '';
   img.style.display = 'none';
+  $('#reader-img-a').src = '';
+  $('#reader-img-b').src = '';
   $('#reader-scroll').innerHTML = '';
   $('#reader-scroll').classList.add('hidden');
   $('#reader-stage').classList.add('hidden');
@@ -4285,9 +4302,18 @@ async function rebuildReaderView(){
     $('#reader-scroll').classList.remove('hidden');
     $('#page-slider').classList.add('hidden');
     await buildScrollReader(doc);
+  } else if(state.reader.mode === 'double'){
+    $('#reader-scroll').classList.add('hidden');
+    $('#reader-stage').classList.remove('hidden');
+    $('#zoom-wrap').classList.add('hidden');
+    $('#double-wrap').classList.remove('hidden');
+    $('#page-slider').classList.add('hidden');
+    showDoublePage(state.reader.pageIndex || 0);
   } else {
     $('#reader-scroll').classList.add('hidden');
     $('#reader-stage').classList.remove('hidden');
+    $('#double-wrap').classList.add('hidden');
+    $('#zoom-wrap').classList.remove('hidden');
     $('#page-slider').classList.remove('hidden');
     $('#page-slider').max = doc.pageCount;
     $('#reader-img').style.display = 'block';
@@ -4312,8 +4338,36 @@ async function showPage(i){
   if(i+1 < doc.pageCount) doc.getPage(i+1).catch(()=>{});
   if(i-1 >= 0) doc.getPage(i-1).catch(()=>{});
 }
-function nextPage(){ showPage(state.reader.pageIndex+1); }
-function prevPage(){ showPage(state.reader.pageIndex-1); }
+// Modo "Página Dupla": sempre mostra um par colado (0+1, 2+3, ...). Se a
+// HQ tiver número ímpar de páginas, a última aparece sozinha (não dá pra
+// inventar uma página em branco pra completar o par).
+async function showDoublePage(i){
+  const doc = state.reader.doc;
+  if(!doc) return;
+  i = Math.max(0, Math.min(i, doc.pageCount-1));
+  if(i % 2 === 1) i -= 1; // normaliza pro início do par
+  state.reader.pageIndex = i;
+  const hasSecond = i+1 < doc.pageCount;
+  const imgA = $('#reader-img-a'), imgB = $('#reader-img-b');
+  imgA.classList.toggle('solo', !hasSecond);
+  imgB.classList.toggle('hidden', !hasSecond);
+  doc.getPage(i).then(url=>{ imgA.src = url; });
+  if(hasSecond) doc.getPage(i+1).then(url=>{ imgB.src = url; });
+  else imgB.src = '';
+  $('#page-count').textContent = hasSecond ? `${i+1}-${i+2} / ${doc.pageCount}` : `${i+1} / ${doc.pageCount}`;
+  saveProgress(state.reader.fileMeta, i, doc.pageCount);
+  // Adianta o próximo par em segundo plano, igual já era feito no modo de página única.
+  if(i+2 < doc.pageCount) doc.getPage(i+2).catch(()=>{});
+  if(i+3 < doc.pageCount) doc.getPage(i+3).catch(()=>{});
+}
+function nextPage(){
+  if(state.reader.mode==='double') showDoublePage(state.reader.pageIndex+2);
+  else showPage(state.reader.pageIndex+1);
+}
+function prevPage(){
+  if(state.reader.mode==='double') showDoublePage(state.reader.pageIndex-2);
+  else showPage(state.reader.pageIndex-1);
+}
 
 function applyFitAndZoom(){
   const img = $('#reader-img');
@@ -4687,8 +4741,9 @@ $('#btn-download-reader').onclick = async ()=>{
   updateDownloadButtonReader();
 };
 
-$('#nav-prev').onclick = ()=>{ if(getPinchState($('#reader-img')).scale<=1.01) prevPage(); };
-$('#nav-next').onclick = ()=>{ if(getPinchState($('#reader-img')).scale<=1.01) nextPage(); };
+$('#nav-prev').onclick = ()=>{ if(state.reader.mode==='double' || getPinchState($('#reader-img')).scale<=1.01) prevPage(); };
+$('#nav-next').onclick = ()=>{ if(state.reader.mode==='double' || getPinchState($('#reader-img')).scale<=1.01) nextPage(); };
+$('#double-wrap').addEventListener('click', ()=>{ toggleReaderChrome(); });
 $('#btn-prev-chapter').onclick = ()=>openAdjacentComic(-1);
 $('#btn-next-chapter').onclick = ()=>openAdjacentComic(1);
 $('#btn-close-reader').onclick = ()=>{ closeReader(); navSyncAfterBack(); };
@@ -4750,7 +4805,8 @@ document.querySelectorAll('#mode-segmented button').forEach(btn=>{
     btn.classList.add('active');
     state.reader.mode = btn.dataset.mode;
     persistReaderPrefs();
-    $('#fit-row').classList.toggle('hidden', state.reader.mode==='scroll');
+    $('#fit-row').classList.toggle('hidden', state.reader.mode!=='paginate');
+    $('#double-mode-hint').classList.toggle('hidden', state.reader.mode!=='double');
     if(state.reader.doc) rebuildReaderView();
   };
 });
@@ -4760,14 +4816,15 @@ document.querySelectorAll('#fit-segmented button').forEach(btn=>{
     btn.classList.add('active');
     state.reader.fit = btn.dataset.fit;
     persistReaderPrefs();
-    if(state.reader.mode!=='scroll') applyFitAndZoom();
+    if(state.reader.mode==='paginate') applyFitAndZoom();
   };
 });
 
 function syncReaderSettingsUI(){
   document.querySelectorAll('#mode-segmented button').forEach(b=>b.classList.toggle('active', b.dataset.mode===state.reader.mode));
   document.querySelectorAll('#fit-segmented button').forEach(b=>b.classList.toggle('active', b.dataset.fit===state.reader.fit));
-  $('#fit-row').classList.toggle('hidden', state.reader.mode==='scroll');
+  $('#fit-row').classList.toggle('hidden', state.reader.mode!=='paginate');
+  $('#double-mode-hint').classList.toggle('hidden', state.reader.mode!=='double');
 }/* ---------------------------------------------------------------------
    9) HOME — seções em carrossel estilo Tomato
    --------------------------------------------------------------------- */

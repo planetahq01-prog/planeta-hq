@@ -446,7 +446,12 @@
   navegador do computador. Subindo a versão pra os aparelhos buscarem o
   index.html novo.
 */
-const CACHE_VERSION = 'v69';
+/*
+  v70: index.html mudou — novo modo de leitura "Página Dupla" (pensado pra
+  tela de computador): mostra duas páginas coladas, cada uma 100% visível
+  (nunca cortada), mesmo que sobre espaço vazio na tela.
+*/
+const CACHE_VERSION = 'v70';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
