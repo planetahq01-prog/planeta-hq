@@ -462,7 +462,14 @@
   "página virando" (leve giro 3D) ao avançar/voltar, pra ficar mais
   imersivo.
 */
-const CACHE_VERSION = 'v72';
+/*
+  v73: index.html mudou — corrigido erro "NotReadableError" ao abrir PDFs
+  grandes (baixados ou já em memória como Blob): antes o app lia o arquivo
+  inteiro de uma vez (source.arrayBuffer()), o que falha em PDFs grandes
+  em alguns aparelhos com menos RAM. Agora usa uma URL de objeto e deixa o
+  pdf.js ler por pedacinhos, igual já fazia com PDF vindo direto da rede.
+*/
+const CACHE_VERSION = 'v73';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [

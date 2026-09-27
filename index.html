@@ -1832,8 +1832,33 @@ async function openComicCBR(blob){
 const PDF_STREAM_TIMEOUT_MS = 12000;
 async function loadPdfWithFallback(source, onProgress, knownSize, fileId, signal){
   if(typeof source !== 'string'){
-    const loadingTask = pdfjsLib.getDocument({data: await source.arrayBuffer()});
-    return await loadingTask.promise;
+    // Antes: 'await source.arrayBuffer()' lia o Blob inteiro de uma vez na
+    // memória. Em PDFs grandes (ex.: os convertidos em altíssima resolução
+    // de scan) isso pode estourar um limite do Chromium/WebView pra leitura
+    // de um único arquivo e falhar com "NotReadableError" ("The requested
+    // file could not be read..."), principalmente em aparelhos com menos
+    // RAM — é por isso que só o PDF falhava e o CBR (bem menor, já
+    // comprimido) abria normal. Criando uma URL de objeto e deixando o
+    // pdf.js ler por pedacinhos (igual já faz com PDF vindo direto da
+    // rede, mais abaixo) evita carregar o arquivo inteiro de uma vez.
+    const objectUrl = URL.createObjectURL(source);
+    try{
+      const loadingTask = pdfjsLib.getDocument({
+        url: objectUrl,
+        rangeChunkSize: 1 << 18,
+        cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
+        cMapPacked: true
+      });
+      const pdf = await loadingTask.promise;
+      // Guardado no próprio doc pra ser revogado em openComicPDF() quando o
+      // leitor for fechado (dispose()) — revogar cedo demais quebraria a
+      // leitura das páginas seguintes.
+      pdf._planetaHqObjectUrl = objectUrl;
+      return pdf;
+    }catch(e){
+      URL.revokeObjectURL(objectUrl);
+      throw e;
+    }
   }
   const loadingTask = pdfjsLib.getDocument({
     url: source,
@@ -1968,6 +1993,7 @@ async function openComicPDF(source, onProgress, knownSize, fileId, signal){
       }
       cache.disposeAll();
       pdf.destroy();
+      if(pdf._planetaHqObjectUrl) URL.revokeObjectURL(pdf._planetaHqObjectUrl);
     }
   };
 }
