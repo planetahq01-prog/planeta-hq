@@ -372,7 +372,31 @@
   comportamento — só a versão sobe pra os aparelhos buscarem o index.html
   novo.
 */
-const CACHE_VERSION = 'v62';
+/*
+  v63: index.html mudou de novo — removido o botão/painel de diagnóstico
+  (o inseto), o link "Abrir aquecedor de capas" mudou de lugar (agora fica
+  dentro de Configurações), e a tela "Seus aparelhos conectados" passou a
+  mostrar 💻 pra computador e 📱 pra celular/tablet. Este arquivo em si não
+  mudou de comportamento — só a versão sobe pra os aparelhos buscarem o
+  index.html novo.
+*/
+/*
+  v64: index.html mudou de novo — o link "Abrir aquecedor de capas" saiu
+  totalmente do app (a ferramenta continua existindo à parte, só não fica
+  mais acessível daqui de dentro). O botão de Configurações agora abre
+  direto a tela "Seus aparelhos conectados", sem menu intermediário. Este
+  arquivo em si não mudou de comportamento — só a versão sobe pra os
+  aparelhos buscarem o index.html novo.
+*/
+/*
+  v65: index.html mudou de novo — corrigido o bug das capinhas ficando em
+  branco pra sempre (a geração de capa podia usar um código de acesso já
+  vencido, sem tentar de novo). Também corrigido: a listagem de pastas
+  reutilizava a URL antiga ao renovar o código, fazendo pedir o código de
+  novo à toa. Este arquivo em si não mudou de comportamento — só a versão
+  sobe pra os aparelhos buscarem o index.html novo.
+*/
+const CACHE_VERSION = 'v65';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
