@@ -531,7 +531,28 @@
   comportamento — só a versão sobe pra os aparelhos buscarem o index.html
   novo.
 */
-const CACHE_VERSION = 'v77';
+/*
+  v78: index.html mudou — a causa raiz (não só mais uma rodada de
+  retentativa) da demora/travamento em capas que JÁ estavam prontas no R2,
+  principalmente na Home. resolveCoverSrc, quando o Drive devolvia um
+  thumbnailLink na listagem (o caso comum), usava ele DIRETO — sem checar
+  se já existia uma capa pronta e rápida no R2. Só depois desse
+  thumbnailLink falhar OU travar por 15s (timeout de segurança do
+  buildCoverNode) é que o fallback finalmente consultava o R2. Só que o
+  thumbnailLink do Drive é conhecido por ser lento ou travar sem soltar
+  erro nenhum nesse tipo de acesso (API key, sem OAuth/sessão logada — ver
+  issuetracker.google.com/issues/229184403 e /issues/188567656) — daí a
+  demora em capas que já estavam 100% prontas no R2 o tempo todo. Isso
+  também explicava por que "Atualizar" ou fechar/reabrir o app resolvia na
+  hora: a primeira resolução (lenta) já tinha salvo o valor do R2 em
+  memória/IndexedDB, então a segunda vez nem chegava a tentar o
+  thumbnailLink de novo. Agora o R2 é consultado ANTES do thumbnailLink
+  (nova função checkCoverInR2, com timeout próprio de 4s — bem mais curto,
+  já que isso roda antes de mostrar qualquer coisa, então precisa ser
+  rápido ou desistir logo). Este arquivo em si não mudou de comportamento
+  — só a versão sobe pra os aparelhos buscarem o index.html novo.
+*/
+const CACHE_VERSION = 'v78';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [

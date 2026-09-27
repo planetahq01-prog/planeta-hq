@@ -3198,6 +3198,35 @@ function renderComicCard(f){
   return card;
 }
 
+// Consulta rápida se já existe uma capa pronta no cache compartilhado (R2)
+// pra este arquivo — não gera nada, não baixa a HQ, só pergunta. Extraído
+// como função própria porque agora é chamado de dois lugares: aqui embaixo
+// (resolveCoverFallbackImpl, como já era) e também no topo de
+// resolveCoverSrc (ver comentário lá) — antes esse mesmo bloco de código
+// só rodava DEPOIS do thumbnailLink do Drive falhar ou travar 15s.
+// Timeout próprio, bem mais curto que os outros pontos da capa
+// (COVER_TASK_TIMEOUT_MS etc.): isso agora roda ANTES de decidir mostrar
+// qualquer coisa pra pessoa, então precisa ser rápido — se o Worker
+// estiver fora do ar ou muito lento, é melhor desistir logo e cair no
+// caminho de sempre (thumbnailLink/geração) do que atrasar a primeira
+// pintura da capa por causa disso.
+const COVER_CHECK_TIMEOUT_MS = 4000;
+async function checkCoverInR2(fileId){
+  if(!CONFIG.proxyUrl) return null;
+  try{
+    await ensureFreshAccessCode();
+    const checkRes = await withStallTimeout(
+      fetch(`${CONFIG.proxyUrl}?cover_check=1&id=${encodeURIComponent(fileId)}&code=${encodeURIComponent(ACCESS_CODE || '')}&device=${encodeURIComponent(getDeviceId())}&type=${encodeURIComponent(getDeviceType())}`),
+      COVER_CHECK_TIMEOUT_MS, 'Tempo esgotado ao consultar a capa em cache.'
+    );
+    const checkData = await checkRes.json();
+    if(checkData && checkData.cached){
+      return `${CONFIG.proxyUrl}?cover=1&id=${encodeURIComponent(fileId)}&code=${encodeURIComponent(ACCESS_CODE || '')}&device=${encodeURIComponent(getDeviceId())}&type=${encodeURIComponent(getDeviceType())}`;
+    }
+  }catch(e){ /* se isso falhar (ou estourar o tempo), segue pro caminho normal */ }
+  return null;
+}
+
 async function resolveCoverSrc(f, opts){
   opts = opts || {};
   if(coverMemoryCache.has(f.id)){
@@ -3214,6 +3243,34 @@ async function resolveCoverSrc(f, opts){
       return cached.dataUrl;
     }
   }
+
+  // BUG CORRIGIDO (capas já cacheadas no R2 demorando/travando pra
+  // carregar, principalmente na Home): antes, quando o Drive devolvia um
+  // thumbnailLink na listagem (o caso comum), a gente usava ele DIRETO —
+  // sem checar se já existia uma capa pronta e rápida no R2. Só depois que
+  // esse thumbnailLink falhava OU travava por 15s (timeout de segurança
+  // do buildCoverNode, mais abaixo) é que o fallback finalmente consultava
+  // o R2. Só que o thumbnailLink do Drive é conhecido por ser lento ou
+  // travar sem soltar erro nenhum nesse tipo de acesso — API key, sem
+  // OAuth/sessão logada (ver issuetracker.google.com/issues/229184403 e
+  // /issues/188567656) — daí a demora/travamento em capas que já estavam
+  // 100% prontas no R2 o tempo todo. Isso também explica por que
+  // "Atualizar" ou fechar/reabrir o app resolvia na hora: a PRIMEIRA
+  // resolução (lenta) já tinha salvo o valor do R2 em memória/IndexedDB
+  // (cacheResolvedCover, dentro de checkCoverInR2/resolveCoverFallbackImpl),
+  // então a segunda vez nem chegava a tentar o thumbnailLink de novo — caía
+  // direto no cache, no topo desta função. Agora, se houver proxy
+  // configurado, o R2 é consultado ANTES do thumbnailLink: é uma pergunta
+  // rápida e confiável ao seu próprio Worker, sem depender da
+  // instabilidade do Drive.
+  if(CONFIG.proxyUrl){
+    const r2Url = await checkCoverInR2(f.id);
+    if(r2Url){
+      cacheResolvedCover(f.id, r2Url);
+      return r2Url;
+    }
+  }
+
   // Antes a gente pré-carregava a miniatura numa Image() escondida só
   // pra confirmar que ela existia, e SÓ DEPOIS criava a <img> de verdade
   // (que baixava a mesma miniatura de novo). Isso custava uma rodada
@@ -3265,31 +3322,24 @@ async function resolveCoverFallbackImpl(f){
     }catch(err){ logErr('[PlanetaHQ] capa: falha ao gerar a partir do download local —', f.name, err); }
   }
 
-  // A partir daqui, tudo que segue monta URLs com ACCESS_CODE (cover_check,
-  // cover, e a geração via driveMediaUrl) — confere/renova ele agora, uma
-  // única vez, pra nenhuma dessas URLs nascer com um código já vencido.
+  // A partir daqui, tudo que segue monta URLs com ACCESS_CODE (a geração
+  // via driveMediaUrl) — confere/renova ele agora, uma única vez, pra
+  // nenhuma dessas URLs nascer com um código já vencido. (checkCoverInR2,
+  // chamada logo abaixo, também confere/renova por conta própria — chamar
+  // de novo aqui não tem custo real, ensureFreshAccessCode só faz alguma
+  // coisa quando o código realmente está perto de vencer.)
   await ensureFreshAccessCode();
 
   // Antes de gerar do zero (pesado — pode exigir abrir o PDF/CBZ), confere
-  // se ALGUÉM já gerou essa capa antes e ela está salva no R2 — nesse
-  // caso é só usar a URL direto, sem processar nada aqui. É isso que faz
-  // as capas carregarem instantâneas pra quem nunca abriu essa HQ antes.
-  if(CONFIG.proxyUrl){
-    try{
-      // Mesmo timeout dos outros pontos acima: sem ele, uma conexão
-      // travada aqui deixava a capa desta HQ (e só desta, já que
-      // resolveCoverFallback já é por-arquivo) pendurada pra sempre.
-      const checkRes = await withStallTimeout(
-        fetch(`${CONFIG.proxyUrl}?cover_check=1&id=${encodeURIComponent(f.id)}&code=${encodeURIComponent(ACCESS_CODE || '')}&device=${encodeURIComponent(getDeviceId())}&type=${encodeURIComponent(getDeviceType())}`),
-        15000, 'Tempo esgotado ao consultar a capa em cache.'
-      );
-      const checkData = await checkRes.json();
-      if(checkData && checkData.cached){
-        const r2Url = `${CONFIG.proxyUrl}?cover=1&id=${encodeURIComponent(f.id)}&code=${encodeURIComponent(ACCESS_CODE || '')}&device=${encodeURIComponent(getDeviceId())}&type=${encodeURIComponent(getDeviceType())}`;
-        cacheResolvedCover(f.id, r2Url);
-        return r2Url;
-      }
-    }catch(e){ /* se isso falhar (ou estourar o tempo), segue pro caminho normal abaixo */ }
+  // de novo se já tem uma capa pronta no R2 — normalmente resolveCoverSrc
+  // já fez essa mesma pergunta antes de chegar aqui (ver comentário lá),
+  // mas resolveCoverFallback também é chamado direto por outros caminhos
+  // (ex.: quando o thumbnailLink falha de verdade, ou por HQs sem
+  // thumbnailLink nenhum), então essa checagem continua valendo aqui.
+  const r2Url = await checkCoverInR2(f.id);
+  if(r2Url){
+    cacheResolvedCover(f.id, r2Url);
+    return r2Url;
   }
 
   const ext = f._ext || guessExt(f);
