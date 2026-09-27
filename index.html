@@ -2785,11 +2785,9 @@ async function ensureAccessCode(){
     try{
       // withStallTimeout: sem isso, uma conexão travada (comum ao reabrir
       // o app com a internet ainda se restabelecendo) deixava este
-      // "await fetch" pendurado pra sempre — e como TODA capa da tela
-      // depende, cedo ou tarde, de confirmar o código (ver
-      // ensureFreshAccessCode), essa única trava travava a tela inteira
-      // de capas junto. Tratado igual "sem rede" (catch abaixo): entra
-      // com o código salvo mesmo assim.
+      // "await fetch" pendurado pra sempre, travando o boot inteiro do
+      // app. Tratado igual "sem rede" (catch abaixo): entra com o código
+      // salvo mesmo assim.
       const res = await withStallTimeout(
         fetch(`${CONFIG.proxyUrl}?auth_check=1&code=${encodeURIComponent(saved)}&device=${encodeURIComponent(getDeviceId())}&type=${encodeURIComponent(getDeviceType())}`, {cache:'no-store'}),
         15000, 'Tempo esgotado ao verificar o código de acesso.'
@@ -2810,40 +2808,19 @@ async function ensureAccessCode(){
   await requireAccessCode(denyReason);
 }
 
-// Usado só nos caminhos de capa (resolveCoverFallbackImpl), que já são a
-// exceção — não em toda imagem, pra não gastar uma chamada extra à toa.
-// Coalescida pelo mesmo motivo do requireAccessCode: várias capas podem
-// chegar aqui ao mesmo tempo, e não faz sentido disparar uma checagem por
-// capa quando uma só, compartilhada, resolve todas.
-let freshAccessCodeInFlight = null;
-function ensureFreshAccessCode(){
-  if(freshAccessCodeInFlight) return freshAccessCodeInFlight;
-  freshAccessCodeInFlight = ensureFreshAccessCodeImpl().finally(()=>{
-    freshAccessCodeInFlight = null;
-  });
-  return freshAccessCodeInFlight;
-}
-async function ensureFreshAccessCodeImpl(){
-  try{
-    // Mesmo motivo do timeout em ensureAccessCode acima — só que aqui o
-    // risco é ainda maior: esta chamada é COMPARTILHADA por todas as
-    // capas da tela ao mesmo tempo (ver freshAccessCodeInFlight), então
-    // travar aqui sem nenhum limite de tempo travava a biblioteca INTEIRA
-    // de capas junto, para sempre — provavelmente a causa principal das
-    // capas ficando "em branco".
-    const res = await withStallTimeout(
-      fetch(`${CONFIG.proxyUrl}?auth_check=1&code=${encodeURIComponent(ACCESS_CODE || '')}&device=${encodeURIComponent(getDeviceId())}&type=${encodeURIComponent(getDeviceType())}`, {cache:'no-store'}),
-      15000, 'Tempo esgotado ao verificar o código de acesso.'
-    );
-    const data = await res.json();
-    if(data.valid) return;
-  }catch(e){
-    return; // sem rede (ou tempo esgotado): segue com o código atual, igual ensureAccessCode faz
-  }
-  try{ localStorage.removeItem(ACCESS_CODE_KEY); }catch(e){}
-  ACCESS_CODE = null;
-  await requireAccessCode();
-}
+// Usado a existir só nos caminhos de capa (resolveCoverFallbackImpl):
+// removido de vez (era ensureFreshAccessCode/ensureFreshAccessCodeImpl).
+// Motivo: o código já é confirmado UMA vez no boot (ver ensureAccessCode
+// acima) antes mesmo de a biblioteca abrir — reconferir de novo aqui, por
+// capa (mesmo coalescido, mesmo com um intervalo mínimo entre checagens),
+// só acrescentava uma viagem de ida-e-volta a mais que o app nunca
+// precisou fazer antes de existir o código de acesso, sem proteger contra
+// nada que já não esteja coberto: o próprio Worker valida o código em
+// TODA chamada real (cover_check/cover/cover_put/conteúdo), então um
+// código revogado no meio da sessão continua sendo bloqueado — só não
+// ganha mais mais esta tentativa "educada" de pedir um código novo antes
+// de falhar (isso já acontece pelo caminho da listagem — ver o 401 em
+// driveFetchJson).
 
 /* ---------------------------------------------------------------------
    Posição da Home ao entrar numa subpasta e voltar
@@ -3214,10 +3191,12 @@ async function resolveCoverFallbackImpl(f){
     }catch(err){ logErr('[PlanetaHQ] capa: falha ao gerar a partir do download local —', f.name, err); }
   }
 
-  // A partir daqui, tudo que segue monta URLs com ACCESS_CODE (cover_check,
-  // cover, e a geração via driveMediaUrl) — confere/renova ele agora, uma
-  // única vez, pra nenhuma dessas URLs nascer com um código já vencido.
-  await ensureFreshAccessCode();
+  // Antes as URLs de cover_check/cover/driveMediaUrl passavam primeiro por
+  // ensureFreshAccessCode() aqui — removido (ver comentário lá em cima,
+  // perto de ensureAccessCode): o código já foi confirmado uma vez no
+  // boot, e o Worker valida de novo em toda chamada real de qualquer
+  // jeito, então essa reconferência por capa só custava uma ida-e-volta a
+  // mais sem proteger contra nada de novo.
 
   // Antes de gerar do zero (pesado — pode exigir abrir o PDF/CBZ), confere
   // se ALGUÉM já gerou essa capa antes e ela está salva no R2 — nesse
@@ -3556,31 +3535,36 @@ function buildCoverNode(src, f){
     };
     img.onerror = ()=> triggerFallback('thumbnailLink do Drive falhou, tentando gerar');
     // Rede de segurança: se a <img> nem carregar nem soltar erro nenhum
-    // (o mesmo tipo de conexão travada que motivou os timeouts em
-    // ensureFreshAccessCode/cover_check logo acima — sem isso, era mais
-    // um jeito da capa ficar em branco pra sempre, sem nenhum aviso pro
-    // resto do código), depois de 15s desiste de esperar e tenta gerar a
-    // capa do zero.
+    // (o mesmo tipo de conexão travada que motivou o timeout do
+    // cover_check logo acima — sem isso, era mais um jeito da capa ficar
+    // em branco pra sempre, sem nenhum aviso pro resto do código), depois
+    // de 15s desiste de esperar e tenta gerar a capa do zero.
     setTimeout(()=>{ if(!settled) triggerFallback('imagem travada sem carregar nem falhar, tentando gerar'); }, 15000);
   }
   img.src = src;
   return img;
 }
 
+// Até 3 tentativas extras (além da primeira), com espaço crescente entre
+// elas — antes era só UMA retentativa fixa em 2s, e isso não bastava
+// quando a instabilidade de rede durava mais que isso (bem comum em wi-fi
+// fraco ou dado móvel intermitente, que é exatamente o cenário mais
+// citado pelas pessoas com esse problema). Com isso, uma capa só desiste
+// de vez depois de quase 15s tentando, span que cobre a grande maioria
+// dos soluços passageiros sem precisar de "Atualizar" nem reabrir o app.
+const COVER_RETRY_DELAYS_MS = [1500, 4000, 9000];
 async function attachCoverToEl(placeholder, f){
   let src = await resolveCoverSrc(f);
-  if(!src && placeholder.isConnected){
+  for(let i=0; !src && placeholder.isConnected && i<COVER_RETRY_DELAYS_MS.length; i++){
     // O IntersectionObserver só dispara isto UMA vez por card (ver
     // coverObserver.unobserve logo depois de disparar, mais abaixo) —
-    // então, sem uma segunda tentativa aqui, uma falha passageira (rede
-    // instável, Drive/Worker demorando um instante a mais, etc.) deixava
-    // a capa em branco até a pessoa sair e voltar pra esta tela ou
-    // apertar "Atualizar". Espera um instante, libera a "quarentena" de
-    // coverFailUntil só pra ESTE arquivo (ela existe pra não bater na
-    // rede repetidamente com uma HQ genuinamente quebrada, não pra
-    // impedir ESTA segunda tentativa deliberada) e tenta de novo antes de
-    // desistir de vez.
-    await sleep(2000);
+    // então, sem retentativas aqui, uma instabilidade de rede deixava a
+    // capa em branco até a pessoa sair e voltar pra esta tela ou apertar
+    // "Atualizar". A cada volta, libera a "quarentena" de coverFailUntil
+    // só pra ESTE arquivo (ela existe pra não bater na rede repetidamente
+    // com uma HQ genuinamente quebrada, não pra impedir estas tentativas
+    // deliberadas) e tenta de novo antes de desistir de vez.
+    await sleep(COVER_RETRY_DELAYS_MS[i]);
     if(!placeholder.isConnected) return; // a pessoa já saiu dessa tela
     coverFailUntil.delete(f.id);
     src = await resolveCoverSrc(f);

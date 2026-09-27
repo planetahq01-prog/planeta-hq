@@ -469,7 +469,47 @@
   em alguns aparelhos com menos RAM. Agora usa uma URL de objeto e deixa o
   pdf.js ler por pedacinhos, igual já fazia com PDF vindo direto da rede.
 */
-const CACHE_VERSION = 'v73';
+/*
+  v74: index.html mudou — terceira rodada na saga das capas em branco.
+  A correção da v68 dava só UMA retentativa, 2s depois da primeira falha —
+  mas em wi-fi fraco ou dado móvel instável (o cenário mais comum de quem
+  relata isso), a instabilidade às vezes dura mais que isso, e a capa
+  desistia de vez até a pessoa apertar "Atualizar" ou reabrir o app. Agora
+  são até 3 retentativas, com espaço crescente entre elas (1.5s, 4s, 9s) —
+  quase 15s de janela total antes de desistir de verdade, o que cobre a
+  grande maioria das instabilidades passageiras sem precisar de nenhuma
+  ação manual. Este arquivo em si não mudou de comportamento — só a
+  versão sobe pra os aparelhos buscarem o index.html novo.
+*/
+/*
+  v75: index.html mudou — a causa mais provável de as capas terem ficado
+  mais frágeis DEPOIS do código de acesso entrar no app: toda capa que
+  precisava ser gerada do zero fazia sua PRÓPRIA chamada de rede extra só
+  pra confirmar que o código ainda era válido (ensureFreshAccessCode),
+  antes mesmo de chegar perto de checar/gerar a capa em si — uma viagem de
+  ida-e-volta a mais, por capa, que o app nunca precisou fazer antes desse
+  recurso existir. Numa tela com várias capas chegando em momentos
+  diferentes (rolando a biblioteca, por exemplo), isso virava várias
+  chamadas de rede extras seguidas, cada uma um novo jeito de falhar numa
+  conexão ruim. Agora essa checagem só roda de verdade no máximo 1 vez a
+  cada 5 minutos — o resto do tempo, a capa pula direto pra checar/gerar
+  normalmente, sem esse passo a mais. Este arquivo em si não mudou de
+  comportamento — só a versão sobe pra os aparelhos buscarem o index.html
+  novo.
+*/
+/*
+  v76: index.html mudou — removida de vez a checagem extra de código de
+  acesso que rodava a cada capa gerada do zero (ensureFreshAccessCode, que
+  a v75 já tinha limitado a 1x/5min). Ela era redundante: o código já é
+  confirmado uma vez no boot do app (ensureAccessCode), e o Worker valida
+  de novo em toda chamada real de qualquer jeito — então essa reconferência
+  por capa só custava uma ida-e-volta extra sem proteger contra nada de
+  novo. Agora a geração de capa vai direto pra cover_check/cover, do
+  jeito que era antes do código de acesso existir. Este arquivo em si não
+  mudou de comportamento — só a versão sobe pra os aparelhos buscarem o
+  index.html novo.
+*/
+const CACHE_VERSION = 'v76';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
