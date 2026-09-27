@@ -2693,7 +2693,10 @@ function requireAccessCodeImpl(initialMessage){
       btn.disabled = true;
       status.textContent = 'Verificando...';
       try{
-        const res = await fetch(`${CONFIG.proxyUrl}?auth_check=1&code=${encodeURIComponent(code)}&device=${encodeURIComponent(getDeviceId())}&type=${encodeURIComponent(getDeviceType())}`, {cache:'no-store'});
+        const res = await withStallTimeout(
+          fetch(`${CONFIG.proxyUrl}?auth_check=1&code=${encodeURIComponent(code)}&device=${encodeURIComponent(getDeviceId())}&type=${encodeURIComponent(getDeviceType())}`, {cache:'no-store'}),
+          15000, 'Tempo esgotado ao verificar o código.'
+        );
         const data = await res.json();
         if(data.valid){
           ACCESS_CODE = code;
@@ -2722,15 +2725,25 @@ async function ensureAccessCode(){
   let denyReason = null;
   if(saved){
     try{
-      const res = await fetch(`${CONFIG.proxyUrl}?auth_check=1&code=${encodeURIComponent(saved)}&device=${encodeURIComponent(getDeviceId())}&type=${encodeURIComponent(getDeviceType())}`, {cache:'no-store'});
+      // withStallTimeout: sem isso, uma conexão travada (comum ao reabrir
+      // o app com a internet ainda se restabelecendo) deixava este
+      // "await fetch" pendurado pra sempre — e como TODA capa da tela
+      // depende, cedo ou tarde, de confirmar o código (ver
+      // ensureFreshAccessCode), essa única trava travava a tela inteira
+      // de capas junto. Tratado igual "sem rede" (catch abaixo): entra
+      // com o código salvo mesmo assim.
+      const res = await withStallTimeout(
+        fetch(`${CONFIG.proxyUrl}?auth_check=1&code=${encodeURIComponent(saved)}&device=${encodeURIComponent(getDeviceId())}&type=${encodeURIComponent(getDeviceType())}`, {cache:'no-store'}),
+        15000, 'Tempo esgotado ao verificar o código de acesso.'
+      );
       const data = await res.json();
       if(data.valid){ ACCESS_CODE = saved; return; }
       denyReason = data.reason || null;
     }catch(e){
-      // Sem rede pra confirmar: usa o código salvo mesmo assim (melhor
-      // deixar entrar do que travar o app por causa da checagem) — se ele
-      // não for mais válido de verdade, o próprio pedido ao Drive vai
-      // falhar com 401 e reabrir esta tela.
+      // Sem rede pra confirmar (ou tempo esgotado): usa o código salvo
+      // mesmo assim (melhor deixar entrar do que travar o app por causa
+      // da checagem) — se ele não for mais válido de verdade, o próprio
+      // pedido ao Drive vai falhar com 401 e reabrir esta tela.
       ACCESS_CODE = saved;
       return;
     }
@@ -2754,11 +2767,20 @@ function ensureFreshAccessCode(){
 }
 async function ensureFreshAccessCodeImpl(){
   try{
-    const res = await fetch(`${CONFIG.proxyUrl}?auth_check=1&code=${encodeURIComponent(ACCESS_CODE || '')}&device=${encodeURIComponent(getDeviceId())}&type=${encodeURIComponent(getDeviceType())}`, {cache:'no-store'});
+    // Mesmo motivo do timeout em ensureAccessCode acima — só que aqui o
+    // risco é ainda maior: esta chamada é COMPARTILHADA por todas as
+    // capas da tela ao mesmo tempo (ver freshAccessCodeInFlight), então
+    // travar aqui sem nenhum limite de tempo travava a biblioteca INTEIRA
+    // de capas junto, para sempre — provavelmente a causa principal das
+    // capas ficando "em branco".
+    const res = await withStallTimeout(
+      fetch(`${CONFIG.proxyUrl}?auth_check=1&code=${encodeURIComponent(ACCESS_CODE || '')}&device=${encodeURIComponent(getDeviceId())}&type=${encodeURIComponent(getDeviceType())}`, {cache:'no-store'}),
+      15000, 'Tempo esgotado ao verificar o código de acesso.'
+    );
     const data = await res.json();
     if(data.valid) return;
   }catch(e){
-    return; // sem rede: segue com o código atual, igual ensureAccessCode faz
+    return; // sem rede (ou tempo esgotado): segue com o código atual, igual ensureAccessCode faz
   }
   try{ localStorage.removeItem(ACCESS_CODE_KEY); }catch(e){}
   ACCESS_CODE = null;
@@ -3145,14 +3167,20 @@ async function resolveCoverFallbackImpl(f){
   // as capas carregarem instantâneas pra quem nunca abriu essa HQ antes.
   if(CONFIG.proxyUrl){
     try{
-      const checkRes = await fetch(`${CONFIG.proxyUrl}?cover_check=1&id=${encodeURIComponent(f.id)}&code=${encodeURIComponent(ACCESS_CODE || '')}&device=${encodeURIComponent(getDeviceId())}&type=${encodeURIComponent(getDeviceType())}`);
+      // Mesmo timeout dos outros pontos acima: sem ele, uma conexão
+      // travada aqui deixava a capa desta HQ (e só desta, já que
+      // resolveCoverFallback já é por-arquivo) pendurada pra sempre.
+      const checkRes = await withStallTimeout(
+        fetch(`${CONFIG.proxyUrl}?cover_check=1&id=${encodeURIComponent(f.id)}&code=${encodeURIComponent(ACCESS_CODE || '')}&device=${encodeURIComponent(getDeviceId())}&type=${encodeURIComponent(getDeviceType())}`),
+        15000, 'Tempo esgotado ao consultar a capa em cache.'
+      );
       const checkData = await checkRes.json();
       if(checkData && checkData.cached){
         const r2Url = `${CONFIG.proxyUrl}?cover=1&id=${encodeURIComponent(f.id)}&code=${encodeURIComponent(ACCESS_CODE || '')}&device=${encodeURIComponent(getDeviceId())}&type=${encodeURIComponent(getDeviceType())}`;
         cacheResolvedCover(f.id, r2Url);
         return r2Url;
       }
-    }catch(e){ /* se isso falhar, segue pro caminho normal abaixo */ }
+    }catch(e){ /* se isso falhar (ou estourar o tempo), segue pro caminho normal abaixo */ }
   }
 
   const ext = f._ext || guessExt(f);
@@ -3222,11 +3250,14 @@ async function uploadCoverToR2(fileId, dataUrl){
   if(!CONFIG.proxyUrl || !dataUrl) return;
   try{
     const blob = await (await fetch(dataUrl)).blob();
-    await fetch(`${CONFIG.proxyUrl}?cover_put=1&id=${encodeURIComponent(fileId)}&code=${encodeURIComponent(ACCESS_CODE || '')}&device=${encodeURIComponent(getDeviceId())}&type=${encodeURIComponent(getDeviceType())}`, {
-      method: 'PUT',
-      headers: {'Content-Type': blob.type || 'image/jpeg'},
-      body: blob
-    });
+    await withStallTimeout(
+      fetch(`${CONFIG.proxyUrl}?cover_put=1&id=${encodeURIComponent(fileId)}&code=${encodeURIComponent(ACCESS_CODE || '')}&device=${encodeURIComponent(getDeviceId())}&type=${encodeURIComponent(getDeviceType())}`, {
+        method: 'PUT',
+        headers: {'Content-Type': blob.type || 'image/jpeg'},
+        body: blob
+      }),
+      20000, 'Tempo esgotado ao salvar a capa no cache compartilhado.'
+    );
   }catch(e){}
 }
 
@@ -3453,15 +3484,26 @@ async function cacheCoverFromDoc(fileId, doc){
 function buildCoverNode(src, f){
   const img = el('img','cover');
   img.decoding = 'async'; img.alt = '';
-  img.onload = ()=> img.classList.add('loaded');
+  let settled = false;
+  img.onload = ()=>{ settled = true; img.classList.add('loaded'); };
   if(f){
-    img.onerror = async ()=>{
+    const triggerFallback = async (why)=>{
+      if(settled) return;
+      settled = true;
       img.onerror = null;
-      logWarn('[PlanetaHQ] capa: thumbnailLink do Drive falhou, tentando gerar —', f.name);
+      logWarn(`[PlanetaHQ] capa: ${why} —`, f.name);
       const fallback = await resolveCoverFallback(f);
       if(fallback) img.src = fallback;
       else img.remove();
     };
+    img.onerror = ()=> triggerFallback('thumbnailLink do Drive falhou, tentando gerar');
+    // Rede de segurança: se a <img> nem carregar nem soltar erro nenhum
+    // (o mesmo tipo de conexão travada que motivou os timeouts em
+    // ensureFreshAccessCode/cover_check logo acima — sem isso, era mais
+    // um jeito da capa ficar em branco pra sempre, sem nenhum aviso pro
+    // resto do código), depois de 15s desiste de esperar e tenta gerar a
+    // capa do zero.
+    setTimeout(()=>{ if(!settled) triggerFallback('imagem travada sem carregar nem falhar, tentando gerar'); }, 15000);
   }
   img.src = src;
   return img;

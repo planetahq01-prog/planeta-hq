@@ -406,7 +406,25 @@
   arquivo em si não mudou de comportamento — só a versão sobe pra os
   aparelhos buscarem o index.html novo.
 */
-const CACHE_VERSION = 'v66';
+/*
+  v67: index.html mudou — corrigida a causa mais provável das capas
+  ficando em branco pra sempre, principalmente da segunda vez que o app é
+  aberto em diante: as chamadas de rede do código de acesso e da checagem
+  de capa em cache (auth_check, cover_check, cover_put) não tinham NENHUM
+  tempo-limite, diferente da listagem de pastas (que já tinha 15s com
+  repetição automática). Se uma dessas travava — comum ao reabrir o app
+  com a internet ainda se restabelecendo, ou a conexão ainda "acordando"
+  depois de um tempo em segundo plano — ela ficava pendurada pra sempre, e
+  como a verificação do código é COMPARTILHADA por todas as capas da tela
+  ao mesmo tempo, essa única trava travava a biblioteca inteira de capas
+  junto. Agora todas essas chamadas têm 15-20s de tempo-limite (e a
+  própria <img> da capa também, como rede de segurança extra) — se
+  travarem, o app desiste de esperar e segue tentando gerar/carregar a
+  capa normalmente, em vez de ficar parado pra sempre. Este arquivo em si
+  não mudou de comportamento — só a versão sobe pra os aparelhos buscarem
+  o index.html novo.
+*/
+const CACHE_VERSION = 'v67';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
