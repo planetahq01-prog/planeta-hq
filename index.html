@@ -616,6 +616,11 @@ body.theme-transitioning .tab.active{
   box-shadow:0 8px 20px -10px rgba(0,0,0,.7);
   transition:transform .15s ease;
 }
+/* Sem isso, arrastar o mouse sobre a capa dispara o "arrastar imagem"
+   nativo do navegador (ou seleciona texto), em vez de mover o carrossel
+   via JS — é isso que fazia o arrasto do carrossel não funcionar no
+   navegador do computador (no toque isso nunca foi um problema). */
+.carousel-card, .carousel-card *{user-select:none;-webkit-user-drag:none;}
 @media(hover:hover){ .carousel-card:hover .cc-cover{transform:translateY(-3px);} }
 .carousel-card .cc-cover img{
   position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;
@@ -2126,8 +2131,14 @@ function preemptNetworkCovers(){
 const COVER_MEMORY_CACHE_MAX = 300;
 // Capas pesadas que já falharam: não repetir a tentativa (que pode baixar
 // centenas de MB pela rede) toda vez que a pasta é redesenhada. "Atualizar"
-// zera isto pra permitir nova tentativa.
-const COVER_FAIL_COOLDOWN_MS = 10 * 60 * 1000;
+// zera isto pra permitir nova tentativa — e attachCoverToEl (ver acima)
+// também zera isto pra um arquivo específico, deliberadamente, ao dar a
+// ele uma segunda chance automática logo após a primeira falhar.
+// Encurtado de 10 minutos pra 90s: os 10 minutos originais deixavam uma
+// falha passageira (não uma HQ genuinamente quebrada) em quarentena tempo
+// demais — bastava sair e voltar da pasta pouco depois pra levar a mesma
+// capa em branco de novo, sem nenhuma tentativa nova de verdade.
+const COVER_FAIL_COOLDOWN_MS = 90 * 1000;
 const coverFailUntil = new Map();
 const coverMemoryCache = new Map();
 const _coverMemoryCacheSet = coverMemoryCache.set.bind(coverMemoryCache);
@@ -3510,7 +3521,23 @@ function buildCoverNode(src, f){
 }
 
 async function attachCoverToEl(placeholder, f){
-  const src = await resolveCoverSrc(f);
+  let src = await resolveCoverSrc(f);
+  if(!src && placeholder.isConnected){
+    // O IntersectionObserver só dispara isto UMA vez por card (ver
+    // coverObserver.unobserve logo depois de disparar, mais abaixo) —
+    // então, sem uma segunda tentativa aqui, uma falha passageira (rede
+    // instável, Drive/Worker demorando um instante a mais, etc.) deixava
+    // a capa em branco até a pessoa sair e voltar pra esta tela ou
+    // apertar "Atualizar". Espera um instante, libera a "quarentena" de
+    // coverFailUntil só pra ESTE arquivo (ela existe pra não bater na
+    // rede repetidamente com uma HQ genuinamente quebrada, não pra
+    // impedir ESTA segunda tentativa deliberada) e tenta de novo antes de
+    // desistir de vez.
+    await sleep(2000);
+    if(!placeholder.isConnected) return; // a pessoa já saiu dessa tela
+    coverFailUntil.delete(f.id);
+    src = await resolveCoverSrc(f);
+  }
   if(!src){ placeholder.classList.remove('skeleton'); return; }
   const node = buildCoverNode(src, f);
   if(placeholder.isConnected) placeholder.replaceWith(node);
@@ -5148,13 +5175,23 @@ function attachCarouselDrag(carousel){
   carousel.addEventListener('pointerdown', e=>{
     if(e.pointerType && e.pointerType !== 'mouse') return;
     carouselDragState = {carousel, moved:false, startX: e.clientX, startScroll: carousel.scrollLeft};
-    carousel.classList.add('dragging');
+    // A classe 'dragging' só entra quando o mouse de fato se MOVE (ver
+    // pointermove abaixo) — nunca aqui, no primeiro toque do botão. Ela
+    // desativa pointer-events nos cards (CSS ".carousel.dragging *"), e
+    // se isso já estivesse ativo desde o pointerdown, um clique comum
+    // (pressionar e soltar sem mover o mouse) fazia o navegador "perder"
+    // o card bem na hora de soltar o botão — o clique caía no carrossel
+    // (sem nenhuma ação) em vez de abrir a HQ/pasta. Por isso nada abria
+    // ao clicar com o mouse, mesmo o card estando logo abaixo do cursor.
   });
   carousel.addEventListener('pointermove', e=>{
     if(!carouselDragState || carouselDragState.carousel !== carousel || (e.pointerType && e.pointerType !== 'mouse')) return;
     const dx = e.clientX - carouselDragState.startX;
-    if(Math.abs(dx) > 4) carouselDragState.moved = true;
-    carousel.scrollLeft = carouselDragState.startScroll - dx;
+    if(Math.abs(dx) > 4 && !carouselDragState.moved){
+      carouselDragState.moved = true;
+      carousel.classList.add('dragging');
+    }
+    if(carouselDragState.moved) carousel.scrollLeft = carouselDragState.startScroll - dx;
   });
   carousel.addEventListener('click', e=>{
     if(carouselDragState && carouselDragState.carousel === carousel && carouselDragState.moved){

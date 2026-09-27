@@ -424,7 +424,29 @@
   não mudou de comportamento — só a versão sobe pra os aparelhos buscarem
   o index.html novo.
 */
-const CACHE_VERSION = 'v67';
+/*
+  v68: index.html mudou — segunda correção pras capas em branco (a v67
+  cobriu conexões travadas; esta cobre falhas passageiras de verdade). O
+  card só pedia a capa UMA vez (o IntersectionObserver para de observar o
+  card assim que ele chega perto da tela, com sucesso ou não) — e, se essa
+  tentativa única esbarrasse em qualquer soluço de rede, o arquivo ainda
+  entrava numa "quarentena" de 10 minutos antes de poder tentar de novo.
+  Isso combinado explicava capas específicas ficando em branco enquanto
+  as vizinhas carregavam normalmente, sem jeito de se recuperar sozinhas
+  a não ser apertando "Atualizar" ou saindo/voltando da tela bem depois.
+  Agora: 1) cada capa ganha uma segunda tentativa automática, poucos
+  segundos depois da primeira falhar, furando a quarentena só pra ela
+  mesma; 2) a quarentena em si caiu de 10 minutos pra 90 segundos. Este
+  arquivo em si não mudou de comportamento — só a versão sobe pra os
+  aparelhos buscarem o index.html novo.
+*/
+/*
+  v69: index.html mudou — corrigidos os cliques com mouse não abrindo HQs/
+  pastas nos carrosséis da Home e o arrasto do carrossel não funcionando no
+  navegador do computador. Subindo a versão pra os aparelhos buscarem o
+  index.html novo.
+*/
+const CACHE_VERSION = 'v69';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
