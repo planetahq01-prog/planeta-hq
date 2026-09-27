@@ -509,7 +509,29 @@
   mudou de comportamento — só a versão sobe pra os aparelhos buscarem o
   index.html novo.
 */
-const CACHE_VERSION = 'v76';
+/*
+  v77: index.html mudou — quarta rodada nas capas em branco, e desta vez
+  mirando especificamente nos cards de PASTA (coleções), que é o que
+  aparecia em branco nos últimos prints: attachFolderCoverAsync precisa de
+  uma etapa A MAIS antes mesmo de chegar na capa em si (resolveFolderCoverFile,
+  que lista a pasta pra descobrir qual arquivo usar como capa) — e essa
+  etapa não tinha NENHUMA retentativa, então as retentativas já existentes
+  (desde a v74) na capa em si não ajudavam em nada se fosse essa listagem
+  que falhasse. Agora essa etapa também tenta de novo, com o mesmo
+  espaçamento crescente. Além disso, a fila geral de capas (que cobre toda
+  capa visível na tela, pasta ou HQ) tinha um teto de 20s por tarefa que
+  não cancelava o trabalho de verdade — só "desistia" da vaga e deixava
+  a tarefa seguir rodando escondida, competindo por rede com as novas
+  tarefas que entravam no lugar dela. Com as retentativas novas, uma
+  tarefa legítima passou a poder levar bem mais que 20s, então esse teto
+  virou uma armadilha (soltava a vaga cedo demais, piorando a mesma
+  instabilidade que as retentativas tentam curar) — agora essa fila tem
+  seu próprio teto, bem mais folgado (45s), só como rede de segurança
+  pra tarefa travada de verdade. Este arquivo em si não mudou de
+  comportamento — só a versão sobe pra os aparelhos buscarem o index.html
+  novo.
+*/
+const CACHE_VERSION = 'v77';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
