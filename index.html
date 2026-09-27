@@ -354,7 +354,6 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 .reader-stage{
   flex:1;overflow:hidden;position:relative;
   touch-action:pan-y;
-  perspective:1600px; /* pro efeito de "página virando" do modo Página Dupla ter profundidade 3D */
 }
 .zoom-wrap{
   width:100%;height:100%;overflow:hidden;
@@ -4550,53 +4549,23 @@ async function showPage(i){
 }
 // Modo "Página Dupla": sempre mostra um par colado (0+1, 2+3, ...). Se a
 // HQ tiver número ímpar de páginas, a última aparece sozinha (não dá pra
-// inventar uma página em branco pra completar o par).
-// transitionDir: 'next'/'prev' quando a troca vem de virar página de
-// propósito (nav-prev/next, setas) — aí entra o efeito de página virando.
-// Sem esse argumento (abertura da HQ, troca de modo) a troca é instantânea.
-async function showDoublePage(i, transitionDir){
+// inventar uma página em branco pra completar o par). A troca de par é
+// sempre direta (sem efeito de "página virando" em 3D).
+async function showDoublePage(i, isNav){
   const doc = state.reader.doc;
   if(!doc) return;
   i = Math.max(0, Math.min(i, doc.pageCount-1));
   if(i % 2 === 1) i -= 1; // normaliza pro início do par
-  if(transitionDir && i === state.reader.pageIndex) return; // já está na ponta (não tem mais o que virar)
+  if(isNav && i === state.reader.pageIndex) return; // já está na ponta (não tem mais o que virar)
   state.reader.pageIndex = i;
   const hasSecond = i+1 < doc.pageCount;
   const imgA = $('#reader-img-a'), imgB = $('#reader-img-b');
-  const wrap = $('#double-wrap');
 
-  const applyContent = async ()=>{
-    imgA.classList.toggle('solo', !hasSecond);
-    imgB.classList.toggle('hidden', !hasSecond);
-    imgA.src = await doc.getPage(i);
-    if(hasSecond) imgB.src = await doc.getPage(i+1);
-    else imgB.src = '';
-  };
-
-  if(transitionDir && !state.reader.doubleFlipBusy){
-    // Efeito de "página virando": a HQ gira de leve pro lado como se a
-    // página estivesse virando, some, troca de conteúdo já do outro lado
-    // (virada), e gira de volta revelando a página nova.
-    state.reader.doubleFlipBusy = true;
-    const away = transitionDir === 'next' ? '-78deg' : '78deg';
-    const back = transitionDir === 'next' ? '78deg' : '-78deg';
-    wrap.style.transition = 'transform .16s ease-in, opacity .16s ease-in';
-    wrap.style.transform = `rotateY(${away})`;
-    wrap.style.opacity = '0.15';
-    await sleep(160);
-    await applyContent();
-    wrap.style.transition = 'none';
-    wrap.style.transform = `rotateY(${back})`;
-    void wrap.offsetWidth; // força reflow antes de reverter, senão não anima de volta
-    wrap.style.transition = 'transform .2s ease-out, opacity .2s ease-out';
-    wrap.style.transform = 'rotateY(0deg)';
-    wrap.style.opacity = '1';
-    await sleep(200);
-    wrap.style.transition = '';
-    state.reader.doubleFlipBusy = false;
-  } else {
-    await applyContent();
-  }
+  imgA.classList.toggle('solo', !hasSecond);
+  imgB.classList.toggle('hidden', !hasSecond);
+  imgA.src = await doc.getPage(i);
+  if(hasSecond) imgB.src = await doc.getPage(i+1);
+  else imgB.src = '';
 
   $('#page-count').textContent = hasSecond ? `${i+1}-${i+2} / ${doc.pageCount}` : `${i+1} / ${doc.pageCount}`;
   saveProgress(state.reader.fileMeta, i, doc.pageCount);
@@ -4605,11 +4574,11 @@ async function showDoublePage(i, transitionDir){
   if(i+3 < doc.pageCount) doc.getPage(i+3).catch(()=>{});
 }
 function nextPage(){
-  if(state.reader.mode==='double') showDoublePage(state.reader.pageIndex+2, 'next');
+  if(state.reader.mode==='double') showDoublePage(state.reader.pageIndex+2, true);
   else showPage(state.reader.pageIndex+1);
 }
 function prevPage(){
-  if(state.reader.mode==='double') showDoublePage(state.reader.pageIndex-2, 'prev');
+  if(state.reader.mode==='double') showDoublePage(state.reader.pageIndex-2, true);
   else showPage(state.reader.pageIndex-1);
 }
 

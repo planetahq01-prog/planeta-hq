@@ -566,7 +566,12 @@
   arquivo em si não mudou de comportamento — só a versão sobe pra os
   aparelhos buscarem o index.html novo.
 */
-const CACHE_VERSION = 'v79';
+/*
+  v80: index.html mudou — removida a transição em 3D (o giro rotateY) do
+  modo de leitura "Página Dupla": trocar de par de páginas agora é
+  direto, sem o efeito de página virando.
+*/
+const CACHE_VERSION = 'v80';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
