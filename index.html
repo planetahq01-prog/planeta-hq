@@ -2290,7 +2290,7 @@ function getImmediateFolderCoverSrc(folderObj){
   const file = folderCoverFileMemoryCache.get(folderObj.id);
   if(!file) return null;
   const memo = coverMemoryCache.get(file.id);
-  return (typeof memo === 'string') ? memo : null;
+  return (typeof memo === 'string') ? freshenCoverUrl(memo) : null;
 }
 
 /* ---------------------------------------------------------------------
@@ -3230,6 +3230,21 @@ function renderComicCard(f){
 // caminho de sempre (thumbnailLink/geração) do que atrasar a primeira
 // pintura da capa por causa disso.
 const COVER_CHECK_TIMEOUT_MS = 4000;
+// URL da capa no R2 (via Worker). O código de acesso vai na URL só pra
+// autenticar; o sw.js guarda a imagem por id, ignorando code/device/type.
+function r2CoverUrl(fileId){
+  return `${CONFIG.proxyUrl}?cover=1&id=${encodeURIComponent(fileId)}&code=${encodeURIComponent(ACCESS_CODE || '')}&device=${encodeURIComponent(getDeviceId())}&type=${encodeURIComponent(getDeviceType())}`;
+}
+function isR2CoverUrl(u){
+  return typeof u === 'string' && !!CONFIG.proxyUrl && u.startsWith(CONFIG.proxyUrl + '?cover=1');
+}
+// URL de capa do R2 guardada numa sessão anterior pode ter um código de
+// acesso que já rotacionou — refaz a URL com o código atual.
+function freshenCoverUrl(u){
+  if(!isR2CoverUrl(u)) return u;
+  const m = u.match(/[?&]id=([^&]+)/);
+  return m ? r2CoverUrl(decodeURIComponent(m[1])) : u;
+}
 async function checkCoverInR2(fileId){
   if(!CONFIG.proxyUrl) return null;
   try{
@@ -3239,9 +3254,7 @@ async function checkCoverInR2(fileId){
       COVER_CHECK_TIMEOUT_MS, 'Tempo esgotado ao consultar a capa em cache.'
     );
     const checkData = await checkRes.json();
-    if(checkData && checkData.cached){
-      return `${CONFIG.proxyUrl}?cover=1&id=${encodeURIComponent(fileId)}&code=${encodeURIComponent(ACCESS_CODE || '')}&device=${encodeURIComponent(getDeviceId())}&type=${encodeURIComponent(getDeviceType())}`;
-    }
+    if(checkData && checkData.cached) return r2CoverUrl(fileId);
   }catch(e){ /* se isso falhar (ou estourar o tempo), segue pro caminho normal */ }
   return null;
 }
@@ -3250,7 +3263,7 @@ async function resolveCoverSrc(f, opts){
   opts = opts || {};
   if(coverMemoryCache.has(f.id)){
     const memo = coverMemoryCache.get(f.id);
-    if(memo) return memo;
+    if(memo) return freshenCoverUrl(memo);
     // memo === null: já tentamos gerar nesta sessão e não deu — mas se o
     // Drive agora tiver thumbnailLink (ex.: listagem foi atualizada),
     // ainda vale tentar a via rápida antes de desistir de novo.
@@ -3259,7 +3272,7 @@ async function resolveCoverSrc(f, opts){
     if(cached){
       coverMemoryCache.set(f.id, cached.dataUrl);
       idbSet('covers', {id: f.id, dataUrl: cached.dataUrl, ts: Date.now()}).catch(()=>{}); // marca uso recente (LRU)
-      return cached.dataUrl;
+      return freshenCoverUrl(cached.dataUrl);
     }
   }
 
@@ -3282,13 +3295,14 @@ async function resolveCoverSrc(f, opts){
   // configurado, o R2 é consultado ANTES do thumbnailLink: é uma pergunta
   // rápida e confiável ao seu próprio Worker, sem depender da
   // instabilidade do Drive.
-  if(CONFIG.proxyUrl){
-    const r2Url = await checkCoverInR2(f.id);
-    if(r2Url){
-      cacheResolvedCover(f.id, r2Url);
-      return r2Url;
-    }
-  }
+  // v82: NÃO pergunta mais "tem no R2?" (cover_check) antes de mostrar a
+  // capa — isso custava uma ida-e-volta ao Worker (com checagem de código)
+  // POR capa, antes mesmo de começar a baixar a imagem. Agora devolve a URL
+  // do R2 direto e a própria <img> tenta carregar; se a capa não existir
+  // lá (404) ou falhar, o onerror do buildCoverNode cai no fallback de
+  // sempre (cover_check + geração). O valor só é gravado em memória/
+  // IndexedDB DEPOIS que a imagem carrega de verdade (ver buildCoverNode).
+  if(CONFIG.proxyUrl) return r2CoverUrl(f.id);
 
   // Antes a gente pré-carregava a miniatura numa Image() escondida só
   // pra confirmar que ela existia, e SÓ DEPOIS criava a <img> de verdade
@@ -3662,19 +3676,23 @@ async function cacheCoverFromDoc(fileId, doc){
 function buildCoverNode(src, f){
   const img = el('img','cover');
   img.decoding = 'async'; img.alt = '';
-  let settled = false;
-  img.onload = ()=>{ settled = true; img.classList.add('loaded'); };
+  let settled = false, usingFallback = false;
+  img.onload = ()=>{
+    settled = true; img.classList.add('loaded');
+    if(f && !usingFallback && isR2CoverUrl(src)) cacheResolvedCover(f.id, src);
+  };
   if(f){
     const triggerFallback = async (why)=>{
       if(settled) return;
       settled = true;
+      usingFallback = true;
       img.onerror = null;
       logWarn(`[PlanetaHQ] capa: ${why} —`, f.name);
       const fallback = await resolveCoverFallback(f);
       if(fallback) img.src = fallback;
       else img.remove();
     };
-    img.onerror = ()=> triggerFallback('thumbnailLink do Drive falhou, tentando gerar');
+    img.onerror = ()=> triggerFallback('capa do R2/Drive falhou, tentando gerar');
     // Rede de segurança: se a <img> nem carregar nem soltar erro nenhum
     // (o mesmo tipo de conexão travada que motivou os timeouts em
     // ensureFreshAccessCode/cover_check logo acima — sem isso, era mais

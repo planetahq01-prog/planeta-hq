@@ -579,7 +579,21 @@
   logos (HOME_LOGOS/LOGO_IDS_DIRECT no index.html) entraram na casca do
   app aqui embaixo, pra ficarem instantâneas e disponíveis offline.
 */
-const CACHE_VERSION = 'v81';
+/*
+  v82: index.html e sw.js mudaram — a causa raiz da lentidão das capas. O
+  "resto" das requisições (inclusive as capas do Worker/R2) ia pra rede com
+  `cache: 'no-store'`, então NENHUMA capa ficava guardada no aparelho: toda
+  vez que o app abria, todas eram baixadas de novo, cada uma passando pela
+  checagem de código do Worker. Agora as capas (?cover=1&id=...) têm cache
+  próprio (COVERS_CACHE), servidas na hora quando já vistas, com chave só
+  pelo id da HQ (ignora code/device/type, que mudam). Esse cache NÃO é
+  apagado quando a versão sobe; pra forçar refazer todas as capas, troque
+  COVERS_CACHE por -v2. No index.html, também saiu a consulta cover_check
+  que rodava antes de CADA capa (1 ida-e-volta a menos por capa).
+*/
+const CACHE_VERSION = 'v82';
+// Cache das capas: separado do da casca do app e mantido entre versões.
+const COVERS_CACHE = 'planeta-hq-covers-v1';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
@@ -670,7 +684,7 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys()
       .then((keys) => Promise.all(
-        keys.filter((k) => k !== CACHE_NAME).map((k) => caches.delete(k))
+        keys.filter((k) => k !== CACHE_NAME && k !== COVERS_CACHE).map((k) => caches.delete(k))
       ))
       .then(() => self.clients.claim())
   );
@@ -710,6 +724,32 @@ self.addEventListener('fetch', (event) => {
       })
     );
     return;
+  }
+
+  // Capas do Worker (?cover=1&id=...): cache primeiro, chave só pelo id.
+  // Só guarda resposta ok e do tipo imagem (um 404 nunca fica gravado). Se o
+  // fetch com CORS falhar (Worker sem cabeçalho CORS na imagem), repassa a
+  // requisição original sem cachear — o app segue funcionando, só sem o cache.
+  if (req.method === 'GET') {
+    const u = new URL(req.url);
+    if (u.origin === 'https://proxy1.planetahq01.workers.dev' && u.searchParams.get('cover') === '1' && u.searchParams.get('id')) {
+      const key = new Request(`${u.origin}/?cover=1&id=${encodeURIComponent(u.searchParams.get('id'))}`);
+      event.respondWith((async () => {
+        const cache = await caches.open(COVERS_CACHE);
+        const hit = await cache.match(key);
+        if (hit) return hit;
+        try {
+          const res = await fetch(u.href, { mode: 'cors', cache: 'no-store' });
+          if (res.ok && (res.headers.get('content-type') || '').startsWith('image/')) {
+            cache.put(key, res.clone()).catch(() => {});
+          }
+          return res;
+        } catch (e) {
+          return fetch(req, { cache: 'no-store' });
+        }
+      })());
+      return;
+    }
   }
 
   // Tudo o mais (chamadas à API do Google Drive, conteúdo de HQs, capas,
