@@ -489,6 +489,10 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 .home-section-title .section-logo[data-logo="aranhaespecial"]{height:50px;}
 .home-section-title .section-logo[data-logo="ligasaga"]{height:50px;}
 .home-section-title .section-logo[data-logo="quarteto"]{height:50px;}
+/* Logos das seções "Coleção [Deadpool]", "Coleção [Wolverine]" e "Coleção [Motoqueiro Fantasma]". */
+.home-section-title .section-logo[data-logo="deadpool"]{height:50px;}
+.home-section-title .section-logo[data-logo="wolverine"]{height:50px;}
+.home-section-title .section-logo[data-logo="motoqueiro"]{height:50px;}
 .home-section-title .section-logo.hidden{display:none;}
 .home-section-title .section-logo-text.hidden{display:none;}
 
@@ -5152,7 +5156,7 @@ async function crawlLibrarySections(token, isStale, errorState){
     await runLimited(toVisit, 6, sub=>walk(sub.id, [...path, sub.name]));
   }
   await walk(CONFIG.rootFolderId, []);
-  if(isStale(token)) return {comics: [], folders: [], aranhaFolders: [], xmenFolders: [], mangaFolders: [], batmanFolders: [], salvatFolders: [], hulkFolders: [], lanternaFolders: [], ironmanFolders: [], supermanFolders: [], universoAbsolutoFolders: [], mulherMaravilhaFolders: [], doomsdayFolders: [], thanosFolders: [], darkseidFolders: [], quartetoFolders: [], hadError:false, errorMessage:null};
+  if(isStale(token)) return {comics: [], folders: [], aranhaFolders: [], xmenFolders: [], mangaFolders: [], batmanFolders: [], salvatFolders: [], hulkFolders: [], lanternaFolders: [], ironmanFolders: [], supermanFolders: [], universoAbsolutoFolders: [], mulherMaravilhaFolders: [], doomsdayFolders: [], thanosFolders: [], darkseidFolders: [], quartetoFolders: [], deadpoolFolders: [], wolverineFolders: [], motoqueiroFolders: [], hadError:false, errorMessage:null};
 
   // Antes: a seção "Coleção Homem-Aranha" juntava, de QUALQUER lugar da
   // biblioteca, toda pasta cujo nome contivesse "aranha" ou "spider" (com
@@ -5265,8 +5269,15 @@ async function crawlLibrarySections(token, isStale, errorState){
   // SUBPASTAS dela; as HQs soltas direto na raiz da pasta saem de allComics
   // na hora de pintar (ver comicsDirectlyInNamedFolder), sem chamada extra.
   const quartetoFolders = await childrenOfNamedFolder(['colecao quarteto fantastico']);
+  // Pastas "Coleção: Deadpool", "Coleção: Wolverine" e "Coleção: Motoqueiro
+  // Fantasma" — também seções MISTAS, exatamente como a do Quarteto
+  // Fantástico acima (subpastas aqui; HQs soltas na raiz saem de allComics
+  // na hora de pintar, via comicsDirectlyInNamedFolder).
+  const deadpoolFolders = await childrenOfNamedFolder(['colecao deadpool']);
+  const wolverineFolders = await childrenOfNamedFolder(['colecao wolverine']);
+  const motoqueiroFolders = await childrenOfNamedFolder(['colecao motoqueiro fantasma']);
 
-  return {comics, folders: allFolders, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders,
+  return {comics, folders: allFolders, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders, deadpoolFolders, wolverineFolders, motoqueiroFolders,
     hadError: !!(errorState && errorState.hadError),
     errorMessage: errorState && errorState.lastError ? errorState.lastError.message : null};
 }
@@ -5506,6 +5517,9 @@ const DOOMSDAY_CACHE_KEY = 'planetahq_doomsday_cache_v1';
 const THANOS_CACHE_KEY = 'planetahq_thanos_cache_v1';
 const DARKSEID_CACHE_KEY = 'planetahq_darkseid_cache_v1';
 const QUARTETO_CACHE_KEY = 'planetahq_quarteto_cache_v1';
+const DEADPOOL_CACHE_KEY = 'planetahq_deadpool_cache_v1';
+const WOLVERINE_CACHE_KEY = 'planetahq_wolverine_cache_v1';
+const MOTOQUEIRO_CACHE_KEY = 'planetahq_motoqueiro_cache_v1';
 const HOME_CACHE_MAX_AGE = 6*3600*1000;
 
 async function readHomeCache(key, arrProp){
@@ -5576,7 +5590,7 @@ async function getLibrarySections(forceRefresh){
 
   if(!forceRefresh){
     const now = Date.now();
-    const [cAranha, cXMen, cManga, cComics, cAllFolders, cBatman, cSalvat, cHulk, cLanterna, cIronman, cSuperman, cUniversoAbsoluto, cMulherMaravilha, cDoomsday, cThanos, cDarkseid, cQuarteto] = await Promise.all([
+    const [cAranha, cXMen, cManga, cComics, cAllFolders, cBatman, cSalvat, cHulk, cLanterna, cIronman, cSuperman, cUniversoAbsoluto, cMulherMaravilha, cDoomsday, cThanos, cDarkseid, cQuarteto, cDeadpool, cWolverine, cMotoqueiro] = await Promise.all([
       readHomeCache(ARANHA_CACHE_KEY, 'folders'),
       readHomeCache(XMEN_CACHE_KEY, 'folders'),
       readHomeCache(MANGA_CACHE_KEY, 'folders'),
@@ -5593,10 +5607,13 @@ async function getLibrarySections(forceRefresh){
       readHomeCache(DOOMSDAY_CACHE_KEY, 'folders'),
       readHomeCache(THANOS_CACHE_KEY, 'folders'),
       readHomeCache(DARKSEID_CACHE_KEY, 'folders'),
-      readHomeCache(QUARTETO_CACHE_KEY, 'folders')
+      readHomeCache(QUARTETO_CACHE_KEY, 'folders'),
+      readHomeCache(DEADPOOL_CACHE_KEY, 'folders'),
+      readHomeCache(WOLVERINE_CACHE_KEY, 'folders'),
+      readHomeCache(MOTOQUEIRO_CACHE_KEY, 'folders')
     ]);
     const fresh = c=>c && (now - c.savedAt < HOME_CACHE_MAX_AGE);
-    if(fresh(cAranha) && fresh(cXMen) && fresh(cManga) && fresh(cComics) && fresh(cAllFolders) && fresh(cBatman) && fresh(cSalvat) && fresh(cHulk) && fresh(cLanterna) && fresh(cIronman) && fresh(cSuperman) && fresh(cUniversoAbsoluto) && fresh(cMulherMaravilha) && fresh(cDoomsday) && fresh(cThanos) && fresh(cDarkseid) && fresh(cQuarteto)){
+    if(fresh(cAranha) && fresh(cXMen) && fresh(cManga) && fresh(cComics) && fresh(cAllFolders) && fresh(cBatman) && fresh(cSalvat) && fresh(cHulk) && fresh(cLanterna) && fresh(cIronman) && fresh(cSuperman) && fresh(cUniversoAbsoluto) && fresh(cMulherMaravilha) && fresh(cDoomsday) && fresh(cThanos) && fresh(cDarkseid) && fresh(cQuarteto) && fresh(cDeadpool) && fresh(cWolverine) && fresh(cMotoqueiro)){
       return {
         aranhaFolders: cAranha.folders,
         xmenFolders: cXMen.folders,
@@ -5615,6 +5632,9 @@ async function getLibrarySections(forceRefresh){
         thanosFolders: cThanos.folders,
         darkseidFolders: cDarkseid.folders,
         quartetoFolders: cQuarteto.folders,
+        deadpoolFolders: cDeadpool.folders,
+        wolverineFolders: cWolverine.folders,
+        motoqueiroFolders: cMotoqueiro.folders,
         hadError: false,
         errorMessage: null
       };
@@ -5641,7 +5661,7 @@ async function getLibrarySections(forceRefresh){
     const wasAborted = token !== librarySectionsToken;
     const skipWrite = errorState.hadError || wasAborted;
     if(!skipWrite) revalidateFolderCovers(); // sem await: não atrasa a resposta, roda em segundo plano
-    const [aranhaFolders, xmenFolders, mangaFolders, comics, allFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders] = await Promise.all([
+    const [aranhaFolders, xmenFolders, mangaFolders, comics, allFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders, deadpoolFolders, wolverineFolders, motoqueiroFolders] = await Promise.all([
       finalizeHomeSectionResult(ARANHA_CACHE_KEY, 'folders', raw.aranhaFolders, skipWrite),
       finalizeHomeSectionResult(XMEN_CACHE_KEY, 'folders', raw.xmenFolders, skipWrite),
       finalizeHomeSectionResult(MANGA_CACHE_KEY, 'folders', raw.mangaFolders, skipWrite),
@@ -5658,9 +5678,12 @@ async function getLibrarySections(forceRefresh){
       finalizeHomeSectionResult(DOOMSDAY_CACHE_KEY, 'folders', raw.doomsdayFolders, skipWrite),
       finalizeHomeSectionResult(THANOS_CACHE_KEY, 'folders', raw.thanosFolders, skipWrite),
       finalizeHomeSectionResult(DARKSEID_CACHE_KEY, 'folders', raw.darkseidFolders, skipWrite),
-      finalizeHomeSectionResult(QUARTETO_CACHE_KEY, 'folders', raw.quartetoFolders, skipWrite)
+      finalizeHomeSectionResult(QUARTETO_CACHE_KEY, 'folders', raw.quartetoFolders, skipWrite),
+      finalizeHomeSectionResult(DEADPOOL_CACHE_KEY, 'folders', raw.deadpoolFolders, skipWrite),
+      finalizeHomeSectionResult(WOLVERINE_CACHE_KEY, 'folders', raw.wolverineFolders, skipWrite),
+      finalizeHomeSectionResult(MOTOQUEIRO_CACHE_KEY, 'folders', raw.motoqueiroFolders, skipWrite)
     ]);
-    return { aranhaFolders, xmenFolders, mangaFolders, comics, allFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders,
+    return { aranhaFolders, xmenFolders, mangaFolders, comics, allFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders, deadpoolFolders, wolverineFolders, motoqueiroFolders,
       hadError: errorState.hadError,
       errorMessage: errorState.lastError ? errorState.lastError.message : null };
   })();
@@ -5843,14 +5866,17 @@ const HOME_LOGOS = {
   liga: 'https://i.postimg.cc/50M063xv/Nice-Png-dc-comics-logo-png-832571-(1).png',
   aranhaespecial: 'https://i.postimg.cc/G2MpJDRx/who-was-the-most-nostalgic-spiderman-artwork-used-for-v0-vse6zzup5ih91.png',
   ligasaga: 'https://i.postimg.cc/pL2X7kdz/logo-liga-da-justica-novo.png',
-  quarteto: 'https://i.postimg.cc/cLHGwzCJ/fantastic-four-1985-1992-seeklogo.png'
+  quarteto: 'https://i.postimg.cc/cLHGwzCJ/fantastic-four-1985-1992-seeklogo.png',
+  deadpool: 'https://i.postimg.cc/j59jC0D5/pngaaa-com-153784.png',
+  wolverine: 'https://i.postimg.cc/rpwx7r3J/pngaaa-com-979580.png',
+  motoqueiro: 'https://i.postimg.cc/gkKwd0vg/175900-ghost-rider-download-hd.png'
 };
 
 // Logos que NÃO passam pelo proxy/R2 (o worker.js só conhece as ids antigas
 // acima): vão direto pela URL do postimg.cc, sem gastar uma requisição
 // ao proxy que só ia falhar antes de cair no link direto. Se um dia você
 // adicionar 'avengers' ao mapa de logos do worker.js, é só tirar daqui.
-const LOGO_IDS_DIRECT = new Set(['avengers', 'liga', 'aranhaespecial', 'ligasaga', 'quarteto']);
+const LOGO_IDS_DIRECT = new Set(['avengers', 'liga', 'aranhaespecial', 'ligasaga', 'quarteto', 'deadpool', 'wolverine', 'motoqueiro']);
 
 // Com proxy configurado, a logo vem do cache compartilhado (R2) via
 // worker.js — instantânea pra qualquer pessoa, mesmo na primeira visita
@@ -5945,8 +5971,8 @@ const SHELVES = {
   marvel: {
     key: 'marvel', label: 'Marvel',
     logo: MARVEL_LOGO,
-    sections: ['aranha','especiaisAranha','hulk','ironman','recomendados','doomsday','xmen','quarteto','classicoAvengers','thanos','salvat'],
-    pathKeywords: ['colecao homem aranha','edicoes especiais homem aranha','colecao hulk','colecao homem de ferro','doomsday','x men','xmen','colecao quarteto fantastico','vingadores classico','colecao thanos','graphic novels marvel']
+    sections: ['aranha','especiaisAranha','hulk','ironman','recomendados','doomsday','xmen','wolverine','deadpool','motoqueiro','quarteto','classicoAvengers','thanos','salvat'],
+    pathKeywords: ['colecao homem aranha','edicoes especiais homem aranha','colecao hulk','colecao homem de ferro','doomsday','x men','xmen','colecao wolverine','colecao deadpool','colecao motoqueiro fantasma','colecao quarteto fantastico','vingadores classico','colecao thanos','graphic novels marvel']
   },
   dc: {
     key: 'dc', label: 'DC',
@@ -5981,6 +6007,9 @@ SHELVES.todas.sections = [
   'mulhermaravilha',   // Mulher Maravilha
   'quarteto',          // Quarteto Fantástico
   'xmen',              // X-Men
+  'wolverine',         // Wolverine
+  'deadpool',          // Deadpool
+  'motoqueiro',        // Motoqueiro Fantasma
   'thanos',            // Thanos
   'darkseid',          // Darkseid
   'universoAbsoluto'   // Universo Absoluto
@@ -6012,7 +6041,7 @@ function filterContinueItemsForShelf(items, shelfKey){
 
 function paintHomeSections(wrap, data){
   lastHomeSectionsData = data;
-  const {continueItems, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders, allComics, hadError, errorMessage} = data;
+  const {continueItems, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders, deadpoolFolders, wolverineFolders, motoqueiroFolders, allComics, hadError, errorMessage} = data;
   // "Recomendados" só com HQs da estante atual (Marvel só recomenda Marvel,
   // DC só DC etc.) — ver comicShelfOf. Repintar ao trocar de estante já
   // recalcula isto (switchShelf chama paintHomeSections de novo).
@@ -6281,6 +6310,66 @@ function paintHomeSections(wrap, data){
   );
   if(secQuarteto){ built['quarteto'] = secQuarteto; wireHomeLogoFallback(secQuarteto, 'quarteto'); }
 
+  // "Coleção [Deadpool]" — seção MISTA, igual à do Quarteto Fantástico
+  // acima: subpastas (cards de pasta) seguidas das HQs soltas na raiz da
+  // pasta (cards de edição única, com o botão de baixar no canto).
+  const deadpoolLoose = comicsDirectlyInNamedFolder(allComics, ['colecao deadpool']);
+  const deadpoolLooseIds = new Set(deadpoolLoose.map(c=>c.id));
+  const secDeadpool = buildHomeSection(
+    `Coleção: <span class="section-logo-text hidden" data-logo-text="deadpool">Deadpool</span><img class="section-logo" data-logo="deadpool" src="${logoSrc('deadpool')}" alt="Deadpool" loading="eager" decoding="async">`,
+    (deadpoolFolders || []).concat(deadpoolLoose),
+    (it)=>{
+      if(deadpoolLooseIds.has(it.id)){
+        const card = buildCarouselCard(it, { isFolder:false, dlCorner:true, size: it.size });
+        card.dataset.cardKind = 'edicao';
+        return card;
+      }
+      return buildCarouselCard(it, { isFolder:true });
+    },
+    { kind: SECTION_KINDS.SUBPASTAS }
+  );
+  if(secDeadpool){ built['deadpool'] = secDeadpool; wireHomeLogoFallback(secDeadpool, 'deadpool'); }
+
+  // "Coleção [Wolverine]" — seção MISTA, igual à do Quarteto Fantástico
+  // acima: subpastas (cards de pasta) seguidas das HQs soltas na raiz da
+  // pasta (cards de edição única, com o botão de baixar no canto).
+  const wolverineLoose = comicsDirectlyInNamedFolder(allComics, ['colecao wolverine']);
+  const wolverineLooseIds = new Set(wolverineLoose.map(c=>c.id));
+  const secWolverine = buildHomeSection(
+    `Coleção: <span class="section-logo-text hidden" data-logo-text="wolverine">Wolverine</span><img class="section-logo" data-logo="wolverine" src="${logoSrc('wolverine')}" alt="Wolverine" loading="eager" decoding="async">`,
+    (wolverineFolders || []).concat(wolverineLoose),
+    (it)=>{
+      if(wolverineLooseIds.has(it.id)){
+        const card = buildCarouselCard(it, { isFolder:false, dlCorner:true, size: it.size });
+        card.dataset.cardKind = 'edicao';
+        return card;
+      }
+      return buildCarouselCard(it, { isFolder:true });
+    },
+    { kind: SECTION_KINDS.SUBPASTAS }
+  );
+  if(secWolverine){ built['wolverine'] = secWolverine; wireHomeLogoFallback(secWolverine, 'wolverine'); }
+
+  // "Coleção [Motoqueiro Fantasma]" — seção MISTA, igual à do Quarteto Fantástico
+  // acima: subpastas (cards de pasta) seguidas das HQs soltas na raiz da
+  // pasta (cards de edição única, com o botão de baixar no canto).
+  const motoqueiroLoose = comicsDirectlyInNamedFolder(allComics, ['colecao motoqueiro fantasma']);
+  const motoqueiroLooseIds = new Set(motoqueiroLoose.map(c=>c.id));
+  const secMotoqueiro = buildHomeSection(
+    `Coleção: <span class="section-logo-text hidden" data-logo-text="motoqueiro">Motoqueiro Fantasma</span><img class="section-logo" data-logo="motoqueiro" src="${logoSrc('motoqueiro')}" alt="Motoqueiro Fantasma" loading="eager" decoding="async">`,
+    (motoqueiroFolders || []).concat(motoqueiroLoose),
+    (it)=>{
+      if(motoqueiroLooseIds.has(it.id)){
+        const card = buildCarouselCard(it, { isFolder:false, dlCorner:true, size: it.size });
+        card.dataset.cardKind = 'edicao';
+        return card;
+      }
+      return buildCarouselCard(it, { isFolder:true });
+    },
+    { kind: SECTION_KINDS.SUBPASTAS }
+  );
+  if(secMotoqueiro){ built['motoqueiro'] = secMotoqueiro; wireHomeLogoFallback(secMotoqueiro, 'motoqueiro'); }
+
   const secRec = buildHomeSection('Recomendados', recommended, (it)=>{
     return buildCarouselCard(it, { isFolder:false, size: it.size });
   });
@@ -6335,13 +6424,13 @@ function paintHomeSections(wrap, data){
 // pra comparar "o que já está na tela" com "o que acabou de chegar do
 // Drive" e decidir se vale a pena redesenhar tudo de novo (ver
 // lastPaintedHomeSignature abaixo).
-function homeSectionsSignature({aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders, allComics}){
+function homeSectionsSignature({aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders, deadpoolFolders, wolverineFolders, motoqueiroFolders, allComics}){
   const ids = arr => (arr||[]).map(x=>x.id).join(',');
   // Nas HQs o nome entra na assinatura também: renomear arquivos no Drive
   // (ex.: virar "Capítulo 30") não muda o ID, e sem isso a tela continuava
   // mostrando o nome antigo até uma nova abertura do app.
   const namedIds = arr => (arr||[]).map(x=>x.id+':'+x.name+':'+(x._mangaFolderId||'')).join(',');
-  return [ids(aranhaFolders), ids(xmenFolders), ids(mangaFolders), ids(batmanFolders), ids(salvatFolders), ids(hulkFolders), ids(lanternaFolders), ids(ironmanFolders), ids(supermanFolders), ids(universoAbsolutoFolders), ids(mulherMaravilhaFolders), ids(doomsdayFolders), ids(thanosFolders), ids(darkseidFolders), ids(quartetoFolders), namedIds(allComics)].join('|');
+  return [ids(aranhaFolders), ids(xmenFolders), ids(mangaFolders), ids(batmanFolders), ids(salvatFolders), ids(hulkFolders), ids(lanternaFolders), ids(ironmanFolders), ids(supermanFolders), ids(universoAbsolutoFolders), ids(mulherMaravilhaFolders), ids(doomsdayFolders), ids(thanosFolders), ids(darkseidFolders), ids(quartetoFolders), ids(deadpoolFolders), ids(wolverineFolders), ids(motoqueiroFolders), namedIds(allComics)].join('|');
 }
 let lastPaintedHomeSignature = null;
 
@@ -6360,7 +6449,7 @@ async function renderHomeSections(forceRefresh, onProgress){
   // o cache antes de buscar de novo, e por isso todas as seções sumiam da
   // tela até a busca nova terminar). A busca de verdade (item 2 abaixo)
   // troca pelos dados frescos assim que chegar, sem travar nada.
-  const [cachedAranha, cachedXMen, cachedManga, cachedComics, continueItemsFast, cachedBatman, cachedSalvat, cachedHulk, cachedLanterna, cachedIronman, cachedSuperman, cachedUniversoAbsoluto, cachedMulherMaravilha, cachedDoomsday, cachedThanos, cachedDarkseid, cachedQuarteto] = await Promise.all([
+  const [cachedAranha, cachedXMen, cachedManga, cachedComics, continueItemsFast, cachedBatman, cachedSalvat, cachedHulk, cachedLanterna, cachedIronman, cachedSuperman, cachedUniversoAbsoluto, cachedMulherMaravilha, cachedDoomsday, cachedThanos, cachedDarkseid, cachedQuarteto, cachedDeadpool, cachedWolverine, cachedMotoqueiro] = await Promise.all([
     readHomeCache(ARANHA_CACHE_KEY, 'folders'),
     readHomeCache(XMEN_CACHE_KEY, 'folders'),
     readHomeCache(MANGA_CACHE_KEY, 'folders'),
@@ -6377,11 +6466,14 @@ async function renderHomeSections(forceRefresh, onProgress){
     readHomeCache(DOOMSDAY_CACHE_KEY, 'folders'),
     readHomeCache(THANOS_CACHE_KEY, 'folders'),
     readHomeCache(DARKSEID_CACHE_KEY, 'folders'),
-    readHomeCache(QUARTETO_CACHE_KEY, 'folders')
+    readHomeCache(QUARTETO_CACHE_KEY, 'folders'),
+    readHomeCache(DEADPOOL_CACHE_KEY, 'folders'),
+    readHomeCache(WOLVERINE_CACHE_KEY, 'folders'),
+    readHomeCache(MOTOQUEIRO_CACHE_KEY, 'folders')
   ]);
   if(isStale(myToken)) return;
 
-  if(cachedAranha || cachedXMen || cachedManga || cachedComics || cachedBatman || cachedSalvat || cachedHulk || cachedLanterna || cachedIronman || cachedSuperman || cachedUniversoAbsoluto || cachedMulherMaravilha || cachedDoomsday || cachedThanos || cachedDarkseid || cachedQuarteto){
+  if(cachedAranha || cachedXMen || cachedManga || cachedComics || cachedBatman || cachedSalvat || cachedHulk || cachedLanterna || cachedIronman || cachedSuperman || cachedUniversoAbsoluto || cachedMulherMaravilha || cachedDoomsday || cachedThanos || cachedDarkseid || cachedQuarteto || cachedDeadpool || cachedWolverine || cachedMotoqueiro){
     wrap.classList.remove('hidden');
     const fastData = {
       continueItems: continueItemsFast,
@@ -6400,6 +6492,9 @@ async function renderHomeSections(forceRefresh, onProgress){
       thanosFolders: cachedThanos ? cachedThanos.folders : [],
       darkseidFolders: cachedDarkseid ? cachedDarkseid.folders : [],
       quartetoFolders: cachedQuarteto ? cachedQuarteto.folders : [],
+      deadpoolFolders: cachedDeadpool ? cachedDeadpool.folders : [],
+      wolverineFolders: cachedWolverine ? cachedWolverine.folders : [],
+      motoqueiroFolders: cachedMotoqueiro ? cachedMotoqueiro.folders : [],
       allComics: cachedComics ? cachedComics.comics : []
     };
     paintHomeSections(wrap, fastData);
@@ -6433,7 +6528,10 @@ async function renderHomeSections(forceRefresh, onProgress){
         doomsdayFolders: cachedDoomsday ? cachedDoomsday.folders : [],
         thanosFolders: cachedThanos ? cachedThanos.folders : [],
         darkseidFolders: cachedDarkseid ? cachedDarkseid.folders : [],
-      quartetoFolders: cachedQuarteto ? cachedQuarteto.folders : [],
+        quartetoFolders: cachedQuarteto ? cachedQuarteto.folders : [],
+        deadpoolFolders: cachedDeadpool ? cachedDeadpool.folders : [],
+        wolverineFolders: cachedWolverine ? cachedWolverine.folders : [],
+        motoqueiroFolders: cachedMotoqueiro ? cachedMotoqueiro.folders : [],
         comics: cachedComics ? cachedComics.comics : [],
         hadError: true,
         errorMessage: e && e.message
@@ -6468,6 +6566,9 @@ async function renderHomeSections(forceRefresh, onProgress){
     thanosFolders: sections.thanosFolders,
     darkseidFolders: sections.darkseidFolders,
     quartetoFolders: sections.quartetoFolders,
+    deadpoolFolders: sections.deadpoolFolders,
+    wolverineFolders: sections.wolverineFolders,
+    motoqueiroFolders: sections.motoqueiroFolders,
     allComics: sections.comics,
     hadError: sections.hadError,
     errorMessage: sections.errorMessage

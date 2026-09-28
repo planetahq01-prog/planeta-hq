@@ -571,7 +571,15 @@
   modo de leitura "Página Dupla": trocar de par de páginas agora é
   direto, sem o efeito de página virando.
 */
-const CACHE_VERSION = 'v80';
+/*
+  v81: index.html mudou — três seções novas na Home (todas MISTAS, no mesmo
+  molde de "Coleção: Quarteto Fantástico": subpastas + HQs soltas na raiz
+  da pasta): "Coleção: Deadpool", "Coleção: Wolverine" e "Coleção:
+  Motoqueiro Fantasma", cada uma com a logo no lugar do nome. As três
+  logos (HOME_LOGOS/LOGO_IDS_DIRECT no index.html) entraram na casca do
+  app aqui embaixo, pra ficarem instantâneas e disponíveis offline.
+*/
+const CACHE_VERSION = 'v81';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
 
 const APP_SHELL = [
@@ -614,6 +622,11 @@ const APP_SHELL = [
   'https://i.postimg.cc/G2MpJDRx/who-was-the-most-nostalgic-spiderman-artwork-used-for-v0-vse6zzup5ih91.png',
   'https://i.postimg.cc/pL2X7kdz/logo-liga-da-justica-novo.png',
   'https://i.postimg.cc/cLHGwzCJ/fantastic-four-1985-1992-seeklogo.png',
+  // Logos das seções "Coleção: Deadpool / Wolverine / Motoqueiro Fantasma"
+  // (v81) — precisam bater EXATAMENTE com HOME_LOGOS no index.html.
+  'https://i.postimg.cc/j59jC0D5/pngaaa-com-153784.png',
+  'https://i.postimg.cc/rpwx7r3J/pngaaa-com-979580.png',
+  'https://i.postimg.cc/gkKwd0vg/175900-ghost-rider-download-hd.png',
   // Logos das ESTANTES (v47/v48) — botão/painel/tela de transição do
   // seletor Marvel/DC/Mangás (ver SHELVES no index.html). Precisam bater
   // EXATAMENTE com o `logo` de cada estante lá.
