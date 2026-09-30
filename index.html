@@ -826,6 +826,8 @@ body.theme-transitioning .tab.active{
         <button class="icon-btn" id="btn-shelf" title="Estantes"></button>
         <div class="wordmark">PLANETA <span>HQ</span></div>
         <button class="icon-btn" id="btn-refresh" title="Atualizar pasta"></button>
+        <button class="icon-btn" id="btn-instagram" title="Instagram"></button>
+        <button class="icon-btn" id="btn-whatsapp" title="WhatsApp"></button>
         <button class="icon-btn" id="btn-settings" title="Configurações"></button>
       </div>
       <div class="search-box">
@@ -983,7 +985,9 @@ const ICONS = {
   skipPrev: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="18 4 10 12 18 20"/><polyline points="11 4 3 12 11 20"/></svg>',
   skipNext: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 4 14 12 6 20"/><polyline points="13 4 21 12 13 20"/></svg>',
   star: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><polygon points="12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2"/></svg>',
-  history: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>'
+  history: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><polyline points="12 7 12 12 15.5 14"/></svg>',
+  instagram: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="5"/><circle cx="12" cy="12" r="4.2"/><circle cx="17.3" cy="6.7" r="0.6" fill="currentColor" stroke="none"/></svg>',
+  whatsapp: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3a9 9 0 0 0-7.8 13.5L3 21l4.6-1.2A9 9 0 1 0 12 3z"/><path d="M8.5 8.3c.2-.5.5-.5.8-.5h.5c.2 0 .4 0 .6.4.2.5.6 1.4.7 1.5.1.1.1.3 0 .5-.1.2-.2.3-.3.5-.1.1-.3.3-.1.6.2.4.9 1.4 1.9 1.9.6.3.9.3 1.1.2.2-.1.7-.8.9-1 .2-.2.4-.2.6-.1.2.1 1.5.7 1.7.8.2.1.4.2.4.3 0 .2 0 1-.4 1.4-.4.5-1.6 1-2.4.9-.7-.1-2.4-.6-3.7-1.9-1.5-1.4-2.2-3-2.5-3.6-.2-.6-.2-1.1 0-1.5z" fill="currentColor" stroke="none"/></svg>'
 };
 function escapeHtml(s){
   return String(s).replace(/[&<>"']/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -4932,7 +4936,19 @@ function closeReader(){
   $('#reader-img').src = '';
   $('#reader-scroll').innerHTML = '';
   if(state.currentTab === 'library' && state.path[state.path.length-1] && state.path[state.path.length-1].id === CONFIG.rootFolderId){
-    renderHomeSections();
+    // A Home é reconstruída aqui pra refletir o progresso de leitura recém
+    // salvo (ex.: item novo/atualizado em "Continuar lendo") — mas isso
+    // recria os carrosséis do zero, inclusive os de "edição única", o que
+    // sem isto zerava a posição de rolagem de quem estava navegando por
+    // eles (o "reset" parecia acontecer sozinho alguns segundos depois só
+    // porque renderHomeSections() é assíncrona: a Home antiga, na posição
+    // certa, continua na tela até a nova terminar de montar). Reaproveita
+    // o mesmo mecanismo de guardar/restaurar posição já usado ao voltar de
+    // uma subpasta, pra a posição sobreviver a essa repintura também.
+    captureHomeScroll();
+    renderHomeSections()
+      .then(restoreHomeScrollOnReturn)
+      .catch(e=>{ logErr('[PlanetaHQ] Falha ao atualizar a Home ao fechar o leitor', e); restoreHomeScrollOnReturn(); });
   }
   // Leitor fechado: as capas pesadas que ficaram esperando podem continuar.
   pumpNetworkCoverQueue();
@@ -6685,6 +6701,12 @@ $('#btn-refresh').onclick = async ()=>{
   if(current) renderLibrary(current.id, true);
   if(current && current.id === CONFIG.rootFolderId) renderHomeSections(true);
 };
+$('#btn-instagram').onclick = ()=>{
+  window.open('https://www.instagram.com/planeta_hq33', '_blank', 'noopener');
+};
+$('#btn-whatsapp').onclick = ()=>{
+  window.open('https://wa.me/5588997314614', '_blank', 'noopener');
+};
 $('#btn-settings').onclick = ()=>{
   openDevicesModal();
 };
@@ -6864,6 +6886,8 @@ Object.entries({
   'search-icon-slot': ICONS.search,
   'btn-shelf': ICONS.library,
   'btn-refresh': ICONS.refresh,
+  'btn-instagram': ICONS.instagram,
+  'btn-whatsapp': ICONS.whatsapp,
   'btn-settings': ICONS.settings,
   'btn-back': ICONS.chevLeft,
   'btn-close-reader': ICONS.close,

@@ -591,7 +591,14 @@
   COVERS_CACHE por -v2. No index.html, também saiu a consulta cover_check
   que rodava antes de CADA capa (1 ida-e-volta a menos por capa).
 */
-const CACHE_VERSION = 'v82';
+/*
+  v83: index.html mudou — dois botões novos na topbar, ao lado de
+  Configurações: Instagram (@planeta_hq33) e WhatsApp (55 88 99731-4614),
+  cada um abrindo o link correspondente numa aba nova. Este arquivo em si
+  não mudou de comportamento — só a versão sobe pra os aparelhos buscarem
+  o index.html novo.
+*/
+const CACHE_VERSION = 'v83';
 // Cache das capas: separado do da casca do app e mantido entre versões.
 const COVERS_CACHE = 'planeta-hq-covers-v1';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
