@@ -2332,24 +2332,26 @@ async function openComicCBZ(blob){
 let unrarAssetsPromise = null;
 function ensureRarLib(){
   if(unrarAssetsPromise) return unrarAssetsPromise;
-  const sources = [
-    { mod: 'https://cdn.jsdelivr.net/npm/node-unrar-js@2.0.2/esm/index.esm.js', wasm: 'https://cdn.jsdelivr.net/npm/node-unrar-js@2.0.2/esm/js/unrar.wasm' },
-    { mod: 'https://unpkg.com/node-unrar-js@2.0.2/esm/index.esm.js', wasm: 'https://unpkg.com/node-unrar-js@2.0.2/esm/js/unrar.wasm' }
-  ];
   unrarAssetsPromise = (async()=>{
-    let lastErr;
-    for(const src of sources){
-      try{
-        const [mod, wasmBinary] = await Promise.all([
-          import(/* @vite-ignore */ src.mod),
-          fetch(src.wasm).then(r=>{ if(!r.ok) throw new Error('HTTP '+r.status); return r.arrayBuffer(); })
-        ]);
-        const createExtractorFromData = mod.createExtractorFromData || (mod.default && mod.default.createExtractorFromData);
-        if(!createExtractorFromData) throw new Error('módulo carregado sem createExtractorFromData');
-        return { createExtractorFromData, wasmBinary };
-      }catch(e){ lastErr = e; console.warn('[PlanetaHQ] Falha ao carregar suporte a CBR de', src.mod, e); }
+    try{
+      // O decoder é local e faz parte da casca do PWA. O Service Worker
+      // pré-armazena o bundle e o WASM antes do app entrar em modo offline.
+      const moduleUrl = new URL('./vendor/node-unrar-js.bundle.js', document.baseURI).href;
+      const wasmUrl = new URL('./vendor/unrar.wasm', document.baseURI).href;
+      const [mod, wasmBinary] = await Promise.all([
+        import(/* @vite-ignore */ moduleUrl),
+        fetch(wasmUrl, {cache:'no-store'}).then(r=>{ if(!r.ok) throw new Error('WASM local HTTP '+r.status); return r.arrayBuffer(); })
+      ]);
+      const createExtractorFromData = mod.createExtractorFromData || (mod.default && mod.default.createExtractorFromData);
+      if(!createExtractorFromData) throw new Error('bundle local sem createExtractorFromData');
+      return { createExtractorFromData, wasmBinary };
+    }catch(e){
+      // Falha pode ser transitória (ex.: assets ainda não publicados); permite
+      // nova tentativa depois que a casca local for instalada/atualizada.
+      unrarAssetsPromise = null;
+      console.error('[PlanetaHQ] Falha ao carregar suporte CBR local', e);
+      throw new Error('O leitor de CBR offline não está disponível. Conecte-se à internet, atualize o app e tente novamente. ' + (e && e.message || ''));
     }
-    throw new Error('Não foi possível carregar o suporte a CBR (todas as fontes falharam). ' + (lastErr && lastErr.message || ''));
   })();
   return unrarAssetsPromise;
 }
@@ -6941,15 +6943,44 @@ async function writeHomeCache(key, arrProp, list, savedAt){
 // parcial, o cache local NÃO é sobrescrito — mantém os dados bons que já
 // existiam (se existirem) e só grava de verdade quando uma varredura
 // termina 100% limpa, sem nenhuma pasta ter falhado.
-async function finalizeHomeSectionResult(key, arrProp, freshValue, hadError){
-  if(hadError){
-    const existing = await readHomeCache(key, arrProp);
-    if(existing){
-      logErr(`[PlanetaHQ] Varredura de "${key}" teve erro parcial — mantendo cache anterior em vez de sobrescrever.`);
-      return existing[arrProp];
-    }
-    return freshValue;
+function snapshotDriveChildren(){
+  const snapshot=Object.create(null);
+  Object.entries(state.folderCache || {}).forEach(([parentId, listing])=>{
+    if(!listing || !Array.isArray(listing.folders) || !Array.isArray(listing.files)) return;
+    snapshot[parentId]=new Set([...listing.folders,...listing.files].map(item=>item.id));
+  });
+  return snapshot;
+}
+function homeItemParentId(item){
+  return item && (item._parentId || item.parentId || (item._collectionRoot && item._collectionRoot.id) || null);
+}
+function mergePartiallyConfirmedHomeItems(existingItems, freshItems, confirmedChildren){
+  const merged=new Map((existingItems||[]).filter(item=>item && item.id).map(item=>[item.id,item]));
+  // Um item só é removido do cache se conseguimos consultar seu próprio pai
+  // e o Drive confirmou que ele não está mais lá. Pais não consultados por
+  // erro de rede permanecem intactos para não criar sumiços falsos.
+  for(const [id,item] of merged){
+    const parentId=homeItemParentId(item);
+    const siblings=parentId && confirmedChildren && confirmedChildren[parentId];
+    if(siblings && !siblings.has(item.id)) merged.delete(id);
   }
+  (freshItems||[]).forEach(item=>{ if(item && item.id) merged.set(item.id,item); });
+  return [...merged.values()];
+}
+async function finalizeHomeSectionResult(key, arrProp, freshValue, syncInfo){
+  syncInfo=syncInfo || {};
+  const existing=await readHomeCache(key, arrProp);
+  if(syncInfo.aborted){
+    return existing ? existing[arrProp] : freshValue;
+  }
+  if(syncInfo.partial && existing){
+    const merged=mergePartiallyConfirmedHomeItems(existing[arrProp],freshValue,syncInfo.confirmedChildren);
+    // Mesmo com alguma falha em outra parte da árvore, persiste remoções
+    // comprovadas pelo pai, além de acrescentar os itens atuais que vimos.
+    await writeHomeCache(key,arrProp,merged);
+    return merged;
+  }
+  if(syncInfo.partial) return freshValue;
   await writeHomeCache(key, arrProp, freshValue);
   return freshValue;
 }
@@ -7048,31 +7079,36 @@ async function getLibrarySections(forceRefresh){
     // (mesmo que vazia de verdade) tem permissão de gravar.
     const wasAborted = token !== librarySectionsToken;
     const skipWrite = errorState.hadError || wasAborted;
+    const syncInfo={
+      aborted:wasAborted,
+      partial:errorState.hadError && !wasAborted,
+      confirmedChildren:snapshotDriveChildren()
+    };
     if(!skipWrite){
       lastSuccessfulDriveReconcileAt = Date.now();
       revalidateFolderCovers();
     } // sem await: não atrasa a resposta, roda em segundo plano
     const [aranhaFolders, xmenFolders, mangaFolders, comics, allFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders, deadpoolFolders, wolverineFolders, motoqueiroFolders] = await Promise.all([
-      finalizeHomeSectionResult(ARANHA_CACHE_KEY, 'folders', raw.aranhaFolders, skipWrite),
-      finalizeHomeSectionResult(XMEN_CACHE_KEY, 'folders', raw.xmenFolders, skipWrite),
-      finalizeHomeSectionResult(MANGA_CACHE_KEY, 'folders', raw.mangaFolders, skipWrite),
-      finalizeHomeSectionResult(ALLCOMICS_CACHE_KEY, 'comics', raw.comics, skipWrite),
-      finalizeHomeSectionResult(ALLFOLDERS_CACHE_KEY, 'folders', raw.folders, skipWrite),
-      finalizeHomeSectionResult(BATMAN_CACHE_KEY, 'folders', raw.batmanFolders, skipWrite),
-      finalizeHomeSectionResult(SALVAT_CACHE_KEY, 'folders', raw.salvatFolders, skipWrite),
-      finalizeHomeSectionResult(HULK_CACHE_KEY, 'folders', raw.hulkFolders, skipWrite),
-      finalizeHomeSectionResult(LANTERNA_CACHE_KEY, 'folders', raw.lanternaFolders, skipWrite),
-      finalizeHomeSectionResult(IRONMAN_CACHE_KEY, 'folders', raw.ironmanFolders, skipWrite),
-      finalizeHomeSectionResult(SUPERMAN_CACHE_KEY, 'folders', raw.supermanFolders, skipWrite),
-      finalizeHomeSectionResult(UNIVERSO_ABSOLUTO_CACHE_KEY, 'folders', raw.universoAbsolutoFolders, skipWrite),
-      finalizeHomeSectionResult(MULHER_MARAVILHA_CACHE_KEY, 'folders', raw.mulherMaravilhaFolders, skipWrite),
-      finalizeHomeSectionResult(DOOMSDAY_CACHE_KEY, 'folders', raw.doomsdayFolders, skipWrite),
-      finalizeHomeSectionResult(THANOS_CACHE_KEY, 'folders', raw.thanosFolders, skipWrite),
-      finalizeHomeSectionResult(DARKSEID_CACHE_KEY, 'folders', raw.darkseidFolders, skipWrite),
-      finalizeHomeSectionResult(QUARTETO_CACHE_KEY, 'folders', raw.quartetoFolders, skipWrite),
-      finalizeHomeSectionResult(DEADPOOL_CACHE_KEY, 'folders', raw.deadpoolFolders, skipWrite),
-      finalizeHomeSectionResult(WOLVERINE_CACHE_KEY, 'folders', raw.wolverineFolders, skipWrite),
-      finalizeHomeSectionResult(MOTOQUEIRO_CACHE_KEY, 'folders', raw.motoqueiroFolders, skipWrite)
+      finalizeHomeSectionResult(ARANHA_CACHE_KEY, 'folders', raw.aranhaFolders, syncInfo),
+      finalizeHomeSectionResult(XMEN_CACHE_KEY, 'folders', raw.xmenFolders, syncInfo),
+      finalizeHomeSectionResult(MANGA_CACHE_KEY, 'folders', raw.mangaFolders, syncInfo),
+      finalizeHomeSectionResult(ALLCOMICS_CACHE_KEY, 'comics', raw.comics, syncInfo),
+      finalizeHomeSectionResult(ALLFOLDERS_CACHE_KEY, 'folders', raw.folders, syncInfo),
+      finalizeHomeSectionResult(BATMAN_CACHE_KEY, 'folders', raw.batmanFolders, syncInfo),
+      finalizeHomeSectionResult(SALVAT_CACHE_KEY, 'folders', raw.salvatFolders, syncInfo),
+      finalizeHomeSectionResult(HULK_CACHE_KEY, 'folders', raw.hulkFolders, syncInfo),
+      finalizeHomeSectionResult(LANTERNA_CACHE_KEY, 'folders', raw.lanternaFolders, syncInfo),
+      finalizeHomeSectionResult(IRONMAN_CACHE_KEY, 'folders', raw.ironmanFolders, syncInfo),
+      finalizeHomeSectionResult(SUPERMAN_CACHE_KEY, 'folders', raw.supermanFolders, syncInfo),
+      finalizeHomeSectionResult(UNIVERSO_ABSOLUTO_CACHE_KEY, 'folders', raw.universoAbsolutoFolders, syncInfo),
+      finalizeHomeSectionResult(MULHER_MARAVILHA_CACHE_KEY, 'folders', raw.mulherMaravilhaFolders, syncInfo),
+      finalizeHomeSectionResult(DOOMSDAY_CACHE_KEY, 'folders', raw.doomsdayFolders, syncInfo),
+      finalizeHomeSectionResult(THANOS_CACHE_KEY, 'folders', raw.thanosFolders, syncInfo),
+      finalizeHomeSectionResult(DARKSEID_CACHE_KEY, 'folders', raw.darkseidFolders, syncInfo),
+      finalizeHomeSectionResult(QUARTETO_CACHE_KEY, 'folders', raw.quartetoFolders, syncInfo),
+      finalizeHomeSectionResult(DEADPOOL_CACHE_KEY, 'folders', raw.deadpoolFolders, syncInfo),
+      finalizeHomeSectionResult(WOLVERINE_CACHE_KEY, 'folders', raw.wolverineFolders, syncInfo),
+      finalizeHomeSectionResult(MOTOQUEIRO_CACHE_KEY, 'folders', raw.motoqueiroFolders, syncInfo)
     ]);
     return { aranhaFolders, xmenFolders, mangaFolders, comics, allFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders, deadpoolFolders, wolverineFolders, motoqueiroFolders,
       hadError: errorState.hadError,

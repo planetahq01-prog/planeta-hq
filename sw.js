@@ -607,7 +607,7 @@
   sobe pra os aparelhos buscarem o index.html novo.
 */
 /* v85: index.html agora monta as seções como mistas e inclui a logo Flash; o cache da Home também reconstrói o índice pai/filho. */
-const CACHE_VERSION = 'v89';
+const CACHE_VERSION = 'v91';
 // Cache das capas: separado do da casca do app e mantido entre versões.
 const COVERS_CACHE = 'planeta-hq-covers-v1';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
@@ -621,10 +621,10 @@ const APP_SHELL = [
   // baixado na aba "Baixados") falha assim que o aparelho está offline, com
   // o erro "Setting up fake worker failed: Cannot load script at: ...".
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js',
-  // Suporte a CBR (ver ensureRarLib no index.html) — precisam ser
-  // EXATAMENTE as mesmas URLs da primeira fonte ali.
-  'https://cdn.jsdelivr.net/npm/node-unrar-js@2.0.2/esm/index.esm.js',
-  'https://cdn.jsdelivr.net/npm/node-unrar-js@2.0.2/esm/js/unrar.wasm',
+  // Suporte a CBR local (bundle ESM + WASM): indispensáveis para abrir
+  // HQs .cbr totalmente offline, sem buscar código em CDN.
+  './vendor/node-unrar-js.bundle.js',
+  './vendor/unrar.wasm',
   'https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700;800&display=swap',
   // Logos das seções da Home — desde a v37, vêm do proxy/R2 (mesmo cache
   // compartilhado das capas), não mais direto do postimg.cc: precisam ser
@@ -669,15 +669,14 @@ const APP_SHELL = [
 // URLs absolutas resolvidas uma única vez, pra comparar por igualdade exata
 // (nunca mais por sufixo/heurística) na hora de decidir o que é "casca".
 const APP_SHELL_URLS = new Set(APP_SHELL.map((u) => new URL(u, self.location.href).href));
+const REQUIRED_LOCAL_ASSETS = new Set([
+  './vendor/node-unrar-js.bundle.js',
+  './vendor/unrar.wasm'
+].map((u) => new URL(u, self.location.href).href));
 
-// Buscados com CORS de verdade (não 'no-cors') porque um import() de
-// módulo JS rejeita resposta "opaca" mesmo vinda do cache, e o .wasm
-// ficaria com 0 bytes do mesmo jeito se servido opaco — o jsDelivr manda
-// os cabeçalhos CORS certos pra isso funcionar.
-const CORS_URLS = new Set([
-  'https://cdn.jsdelivr.net/npm/node-unrar-js@2.0.2/esm/index.esm.js',
-  'https://cdn.jsdelivr.net/npm/node-unrar-js@2.0.2/esm/js/unrar.wasm'
-]);
+// Os assets do CBR agora são locais/same-origin: não precisam de fetch
+// CORS nem de CDN e são armazenados como respostas normais do app.
+const CORS_URLS = new Set();
 
 self.addEventListener('install', (event) => {
   self.skipWaiting();
@@ -690,8 +689,15 @@ self.addEventListener('install', (event) => {
       return Promise.all(
         APP_SHELL.map((url) =>
           fetch(url, { mode: CORS_URLS.has(url) ? 'cors' : (url.startsWith('http') ? 'no-cors' : 'same-origin'), cache: 'no-store' })
-            .then((res) => cache.put(url, res))
-            .catch(() => {})
+            .then((res) => {
+              const absolute = new URL(url, self.location.href).href;
+              if (REQUIRED_LOCAL_ASSETS.has(absolute) && !res.ok) throw new Error('Asset offline obrigatório indisponível: ' + url + ' (' + res.status + ')');
+              return cache.put(url, res);
+            })
+            .catch((err) => {
+              // Não ativa uma versão nova sem o leitor CBR offline completo.
+              if (REQUIRED_LOCAL_ASSETS.has(new URL(url, self.location.href).href)) throw err;
+            })
         )
       );
     })
