@@ -7116,6 +7116,45 @@ function fileBaseName(f){
   return f.name.replace(/\.(pdf|cbz|cbr)$/i,'');
 }
 
+// Seletores locais para compor as coleções a partir do índice já varrido.
+// Não fazem novas chamadas de rede: usam os caminhos e IDs gravados pelo crawler.
+function comicsInsideNamedFolder(allComics, targetNames){
+  const targets=new Set((targetNames||[]).map(normalizeForFolderMatch));
+  const list=(allComics||[]).filter(f=>{
+    const path=f._path||[];
+    return path.some(seg=>targets.has(normalizeForFolderMatch(seg)));
+  }).map(f=>{
+    const path=f._path||[];
+    const idx=path.findIndex(seg=>targets.has(normalizeForFolderMatch(seg)));
+    const rootId=(f._pathIds||[])[idx];
+    return rootId ? {...f,_collectionRoot:{id:rootId,name:path[idx]}} : f;
+  });
+  const nat=(a,b)=>a.localeCompare(b,'pt-BR',{numeric:true});
+  return list.sort((a,b)=>nat((a._path||[]).join(' / '),(b._path||[]).join(' / ')) || nat(a.name,b.name));
+}
+
+function comicsDirectlyInNamedFolder(allComics, targetNames){
+  const targets=new Set((targetNames||[]).map(normalizeForFolderMatch));
+  const list=(allComics||[]).filter(f=>{
+    const path=f._path||[];
+    return path.length && targets.has(normalizeForFolderMatch(path[path.length-1]));
+  }).map(f=>{
+    const path=f._path||[];
+    return f._parentId ? {...f,_collectionRoot:{id:f._parentId,name:path[path.length-1]}} : f;
+  });
+  return list.sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
+}
+
+function comicsInsideMangaFolder(allComics, mangaFolderId, rootLabel){
+  const list=(allComics||[]).filter(f=>f._mangaFolderId===mangaFolderId).map(f=>{
+    const idx=(f._pathIds||[]).indexOf(mangaFolderId);
+    const rootName=rootLabel || (f._path||[])[idx] || fileBaseName(f);
+    return {...f,_collectionRoot:{id:mangaFolderId,name:rootName}};
+  });
+  const nat=(a,b)=>a.localeCompare(b,'pt-BR',{numeric:true});
+  return list.sort((a,b)=>nat((a._path||[]).join(' / '),(b._path||[]).join(' / ')) || nat(a.name,b.name));
+}
+
 // Confere se uma HQ bate com uma escolha fixa: o último segmento precisa
 // bater com o nome do arquivo, e os segmentos anteriores (se houver)
 // precisam bater com o final do caminho de pastas da HQ, na ordem certa.
