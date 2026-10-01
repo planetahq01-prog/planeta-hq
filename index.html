@@ -1834,7 +1834,7 @@ function guessExt(f){
 // conteúdo válido em algum nível?" — evita repetir a varredura recursiva
 // da árvore inteira toda vez que o app abre.
 const FOLDER_OK_CACHE_KEY = 'planetahq_folderok_v2';
-const FOLDER_OK_TTL = 12*3600*1000; // 12h
+const FOLDER_OK_TTL = 60*1000; // revalida exclusões/remoções em até 1 minuto
 let folderOkCache = (()=>{ try{ return JSON.parse(localStorage.getItem(FOLDER_OK_CACHE_KEY)) || {}; }catch(e){ return {}; } })();
 let folderOkDirty = false;
 function getCachedFolderOk(id){
@@ -1975,9 +1975,13 @@ function driveListUrl(q, pageToken){
 }
 
 const folderCacheInFlight = {};
+const DRIVE_FOLDER_CACHE_TTL = 60*1000;
+let folderCacheFetchedAt = Object.create(null);
 
 async function driveListFolder(folderId){
-  if(state.folderCache[folderId]) return state.folderCache[folderId];
+  const cached=state.folderCache[folderId];
+  const fetchedAt=folderCacheFetchedAt[folderId] || 0;
+  if(cached && Date.now()-fetchedAt < DRIVE_FOLDER_CACHE_TTL) return cached;
   if(folderCacheInFlight[folderId]) return folderCacheInFlight[folderId];
   const promise = driveListFolderUncached(folderId).finally(()=>{
     delete folderCacheInFlight[folderId];
@@ -2029,6 +2033,7 @@ async function driveListFolderUncached(folderId){
     // segundo plano, e usa cache — ver filterEmptyFoldersInBackground().
     const result = {folders: rawFolders, files: comics};
     state.folderCache[folderId] = result;
+    folderCacheFetchedAt[folderId] = Date.now();
     driveFoldersVisited++;
     return result;
   } finally {
@@ -3016,8 +3021,17 @@ function fmtSize(bytes){
   return mb >= 1 ? mb.toFixed(1)+' MB' : (bytes/1024).toFixed(0)+' KB';
 }
 function toast(msg){
+  const text=String(msg == null ? '' : msg);
+  const normalized=text.normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
+  // Bloqueio final do alerta global obsoleto. Mantém todos os toasts
+  // específicos (downloads, favoritos, conexão, validação etc.).
+  if(normalized.includes('algo deu errado') ||
+     (normalized.includes('toque de novo') && normalized.includes('feche e abra'))){
+    pushDebugLog('ALERTA GENÉRICO SUPRIMIDO', [text]);
+    return;
+  }
   const t = $('#toast');
-  t.textContent = msg;
+  t.textContent = text;
   t.classList.add('show');
   clearTimeout(toast._t);
   toast._t = setTimeout(()=>t.classList.remove('show'), 2400);
@@ -6885,6 +6899,8 @@ const DEADPOOL_CACHE_KEY = 'planetahq_deadpool_cache_v1';
 const WOLVERINE_CACHE_KEY = 'planetahq_wolverine_cache_v1';
 const MOTOQUEIRO_CACHE_KEY = 'planetahq_motoqueiro_cache_v1';
 const HOME_CACHE_MAX_AGE = 6*3600*1000;
+const DRIVE_CATALOG_REVALIDATE_INTERVAL = 60*1000;
+let lastSuccessfulDriveReconcileAt = 0;
 
 async function readHomeCache(key, arrProp){
   try{
@@ -6949,7 +6965,15 @@ let librarySectionsPromise = null;
 // ou vencida, refaz a varredura inteira de uma vez (o que também as
 // resssincroniza).
 async function getLibrarySections(forceRefresh){
-  if(forceRefresh) librarySectionsPromise = null;
+  if(forceRefresh){
+    librarySectionsPromise = null;
+    // Invalidar caches de listagem desta sessão e de pastas marcadas com
+    // conteúdo; a varredura precisa consultar as relações reais no Drive.
+    state.folderCache = {};
+    folderCacheFetchedAt = Object.create(null);
+    folderOkCache = {};
+    folderOkDirty = true;
+  }
   if(librarySectionsPromise) return librarySectionsPromise;
 
   if(!forceRefresh){
@@ -7024,7 +7048,10 @@ async function getLibrarySections(forceRefresh){
     // (mesmo que vazia de verdade) tem permissão de gravar.
     const wasAborted = token !== librarySectionsToken;
     const skipWrite = errorState.hadError || wasAborted;
-    if(!skipWrite) revalidateFolderCovers(); // sem await: não atrasa a resposta, roda em segundo plano
+    if(!skipWrite){
+      lastSuccessfulDriveReconcileAt = Date.now();
+      revalidateFolderCovers();
+    } // sem await: não atrasa a resposta, roda em segundo plano
     const [aranhaFolders, xmenFolders, mangaFolders, comics, allFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders, deadpoolFolders, wolverineFolders, motoqueiroFolders] = await Promise.all([
       finalizeHomeSectionResult(ARANHA_CACHE_KEY, 'folders', raw.aranhaFolders, skipWrite),
       finalizeHomeSectionResult(XMEN_CACHE_KEY, 'folders', raw.xmenFolders, skipWrite),
@@ -7872,6 +7899,12 @@ let homeToken = 0;
 async function renderHomeSections(forceRefresh, onProgress){
   const wrap = $('#home-sections');
   if(!wrap) return;
+  // Ao abrir o app (ou voltar à Home após um intervalo), repinta o cache
+  // local imediatamente e consulta o Drive em segundo plano. Assim itens
+  // apagados/mandados à lixeira não ficam presos no cache de 6 horas.
+  if(!forceRefresh && navigator.onLine!==false && Date.now()-lastSuccessfulDriveReconcileAt>=DRIVE_CATALOG_REVALIDATE_INTERVAL){
+    forceRefresh=true;
+  }
 
   const myToken = ++homeToken;
   const isStale = t=>t!==homeToken;
