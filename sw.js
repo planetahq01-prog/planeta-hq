@@ -598,7 +598,15 @@
   não mudou de comportamento — só a versão sobe pra os aparelhos buscarem
   o index.html novo.
 */
-const CACHE_VERSION = 'v83';
+/*
+  v84: index.html mudou — voltou o aviso visível (toast) em erros não
+  tratados, que tinha se perdido numa atualização anterior. Sem isso, uma
+  falha silenciosa (como a biblioteca não carregando no app instalado) não
+  dava nenhum sinal na tela, e no APK não tem como abrir o console pra ver
+  o erro real. Este arquivo em si não mudou de comportamento — só a versão
+  sobe pra os aparelhos buscarem o index.html novo.
+*/
+const CACHE_VERSION = 'v84';
 // Cache das capas: separado do da casca do app e mantido entre versões.
 const COVERS_CACHE = 'planeta-hq-covers-v1';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;

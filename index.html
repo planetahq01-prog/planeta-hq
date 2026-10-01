@@ -2898,10 +2898,23 @@ function logErr(...args){ console.error(...args); pushDebugLog('ERRO', args); }
 function logWarn(...args){ console.warn(...args); pushDebugLog('AVISO', args); }
 window.addEventListener('error', (e)=>{
   pushDebugLog('ERRO NÃO TRATADO', [e.message, e.filename ? `(${e.filename}:${e.lineno})` : '', e.error]);
+  toastError('Algo deu errado. Toque de novo — se persistir, feche e abra o app.');
 });
 window.addEventListener('unhandledrejection', (e)=>{
   pushDebugLog('PROMESSA REJEITADA', [e.reason]);
+  toastError('Algo deu errado. Toque de novo — se persistir, feche e abra o app.');
 });
+// Sem isso, um erro silencioso (ex.: a biblioteca falhando ao carregar)
+// só aparece no console — e no APK instalado não tem como abrir o
+// console. Um toast simples, sem detalhes técnicos, pelo menos avisa que
+// algo falhou em vez de parecer que travou sem motivo.
+let lastToastErrorAt = 0;
+function toastError(msg){
+  const now = Date.now();
+  if(now - lastToastErrorAt < 3000) return;
+  lastToastErrorAt = now;
+  toast(msg);
+}
 
 const coverObserver = ('IntersectionObserver' in window) ? new IntersectionObserver((entries)=>{
   entries.forEach(entry=>{
