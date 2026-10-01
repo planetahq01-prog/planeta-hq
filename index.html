@@ -6352,7 +6352,7 @@ function normalizeForFolderMatch(s){
   return normalizeStr(s).replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ');
 }
 
-const ALLFOLDERS_CACHE_KEY = 'planetahq_allfolders_cache_v1';
+const ALLFOLDERS_CACHE_KEY = 'planetahq_allfolders_cache_v2'; // v2: reconstruir o índice pai/filho usado pelas seções mistas
 
 // Varredura ÚNICA de toda a biblioteca, usada pra montar as 5 seções da
 // Home de uma vez só (Aranha, X-Men, Mangás e Todos os quadrinhos/
@@ -6677,7 +6677,8 @@ function resolveHomeCollectionRoot(allFolders, allComics, folderNames, parentNam
   const parents = (parentNames || []).map(normalizeForFolderMatch);
   const parentMatches = folder=>{
     if(!parents.length) return true;
-    const parent = folderList.find(item=>item.id===folder._parentId);
+    const parentId=folder._parentId!=null ? folder._parentId : folder.parentId;
+    const parent = folderList.find(item=>item.id===parentId);
     const parentName = normalizeForFolderMatch((parent && parent.name) || ((folder._path||[]).slice(-1)[0]) || '');
     return parents.includes(parentName);
   };
@@ -6730,18 +6731,28 @@ function mixedHomeItems(root, seedItems, data){
   const hasComicIndex = Array.isArray(data.allComics);
   const folderBuckets=data.foldersByParent;
   const comicBuckets=data.comicsByParent;
+  const parentIdOf=item=>item && (item._parentId!=null ? item._parentId : item.parentId);
   let folders = hasFolderIndex
-    ? (folderBuckets instanceof Map ? (folderBuckets.get(root.id)||[]) : data.allFolders.filter(item=>item && item._parentId===root.id))
+    ? (folderBuckets instanceof Map ? (folderBuckets.get(root.id)||[]) : data.allFolders.filter(item=>item && parentIdOf(item)===root.id))
     : (seedItems||[]).filter(isHomeFolderItem);
   let comics = hasComicIndex
-    ? (comicBuckets instanceof Map ? (comicBuckets.get(root.id)||[]) : data.allComics.filter(item=>item && (item._parentId===root.id || item.parentId===root.id)))
+    ? (comicBuckets instanceof Map ? (comicBuckets.get(root.id)||[]) : data.allComics.filter(item=>item && parentIdOf(item)===root.id))
     : (seedItems||[]).filter(item=>item && !isHomeFolderItem(item));
+
+  // Uma lista-semente da pasta nomeada é uma fonte já confirmada de conteúdo.
+  // Se um cache/índice pai-filho antigo não trouxer correspondências, não
+  // descarte os itens conhecidos e deixe a seção desaparecer inteira.
+  const seeds=Array.isArray(seedItems)?seedItems:[];
+  const seededFolders=seeds.filter(isHomeFolderItem);
+  const seededComics=seeds.filter(item=>item && !isHomeFolderItem(item));
+  if(!folders.length && seededFolders.length) folders=seededFolders;
+  if(!comics.length && seededComics.length) comics=seededComics;
+
   const nat=(a,b)=>String(a||'').localeCompare(String(b||''),'pt-BR',{numeric:true});
   folders = folders.slice().sort((a,b)=>nat(a.name,b.name)).map(item=>({...item,_collectionRoot:{id:root.id,name:root.name}}));
   comics = comics.slice().sort((a,b)=>nat(a.name,b.name)).map(item=>({...item,_collectionRoot:{id:root.id,name:root.name}}));
   return folders.concat(comics);
 }
-
 function buildMixedCarouselCard(item){
   const isFolder = isHomeFolderItem(item);
   const card = buildCarouselCard(item,{isFolder,dlCorner:!isFolder,size:item.size});
@@ -7387,9 +7398,10 @@ function paintHomeSections(wrap, data){
   lastHomeSectionsData = data;
   const foldersByParent=new Map(),comicsByParent=new Map();
   (Array.isArray(data.allFolders)?data.allFolders:[]).forEach(item=>{
-    if(!item || !item._parentId)return;
-    if(!foldersByParent.has(item._parentId))foldersByParent.set(item._parentId,[]);
-    foldersByParent.get(item._parentId).push(item);
+    const parentId=item&&(item._parentId!=null?item._parentId:item.parentId);
+    if(parentId==null)return;
+    if(!foldersByParent.has(parentId))foldersByParent.set(parentId,[]);
+    foldersByParent.get(parentId).push(item);
   });
   (Array.isArray(data.allComics)?data.allComics:[]).forEach(item=>{
     const parentId=item&&(item._parentId!=null?item._parentId:item.parentId);
@@ -7798,7 +7810,7 @@ function paintHomeSections(wrap, data){
 // lastPaintedHomeSignature abaixo).
 function homeSectionsSignature({aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders, deadpoolFolders, wolverineFolders, motoqueiroFolders, allComics, allFolders}){
   const ids = arr => (arr||[]).map(x=>x.id+':'+((x._collectionRoot&&x._collectionRoot.id)||'')).join(',');
-  const folderIds = arr => (arr||[]).map(x=>x.id+':'+x.name+':'+(x._parentId||'')).join(',');
+  const folderIds = arr => (arr||[]).map(x=>x.id+':'+x.name+':'+(x._parentId!=null?x._parentId:(x.parentId||''))).join(',');
   // IDs de caminho/raiz entram na assinatura para a tela velha em cache ser
   // substituída assim que a varredura atualizada descobrir as raízes físicas.
   const namedIds = arr => (arr||[]).map(x=>x.id+':'+x.name+':'+(x._mangaFolderId||'')+':'+((x._pathIds||[]).join('/'))+':'+((x._collectionRoot&&x._collectionRoot.id)||'')).join(',');

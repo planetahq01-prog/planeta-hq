@@ -606,7 +606,8 @@
   o erro real. Este arquivo em si não mudou de comportamento — só a versão
   sobe pra os aparelhos buscarem o index.html novo.
 */
-const CACHE_VERSION = 'v84';
+/* v85: index.html agora monta as seções como mistas e inclui a logo Flash; o cache da Home também reconstrói o índice pai/filho. */
+const CACHE_VERSION = 'v85';
 // Cache das capas: separado do da casca do app e mantido entre versões.
 const COVERS_CACHE = 'planeta-hq-covers-v1';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
@@ -656,6 +657,8 @@ const APP_SHELL = [
   'https://i.postimg.cc/j59jC0D5/pngaaa-com-153784.png',
   'https://i.postimg.cc/rpwx7r3J/pngaaa-com-979580.png',
   'https://i.postimg.cc/gkKwd0vg/175900-ghost-rider-download-hd.png',
+  // Logo da nova seção Coleção: Flash.
+  'https://i.postimg.cc/HsXMK065/the-flash-seeklogo.png',
   // Logos das ESTANTES (v47/v48) — botão/painel/tela de transição do
   // seletor Marvel/DC/Mangás (ver SHELVES no index.html). Precisam bater
   // EXATAMENTE com o `logo` de cada estante lá.
