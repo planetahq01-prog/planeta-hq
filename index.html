@@ -2897,11 +2897,27 @@ function pushDebugLog(prefix, args){
 function logErr(...args){ console.error(...args); pushDebugLog('ERRO', args); }
 function logWarn(...args){ console.warn(...args); pushDebugLog('AVISO', args); }
 window.addEventListener('error', (e)=>{
+  // Erros de recursos (por exemplo, miniatura que falhou ao carregar) são
+  // recuperáveis e não significam que a interface inteira está com problema.
+  if(e.target && e.target !== window){
+    const target=e.target;
+    const label=target.tagName ? target.tagName.toLowerCase() : 'recurso';
+    pushDebugLog('RECURSO NÃO CARREGADO (não crítico)', [label, target.src || target.href || '']);
+    return;
+  }
   pushDebugLog('ERRO NÃO TRATADO', [e.message, e.filename ? `(${e.filename}:${e.lineno})` : '', e.error]);
   toastError('Algo deu errado. Toque de novo — se persistir, feche e abra o app.');
 });
 window.addEventListener('unhandledrejection', (e)=>{
-  pushDebugLog('PROMESSA REJEITADA', [e.reason]);
+  const reason=e.reason;
+  const reasonName=reason && reason.name ? reason.name : '';
+  const reasonText=String(reason && reason.message ? reason.message : reason || '');
+  // Cancelar trabalho obsoleto durante scroll/saída de tela é esperado.
+  if(reasonName==='AbortError' || /\b(abort(?:ed)?|cancel(?:led|ed)?)\b/i.test(reasonText)){
+    pushDebugLog('CANCELAMENTO DE TAREFA (esperado)', [reason]);
+    return;
+  }
+  pushDebugLog('PROMESSA REJEITADA', [reason]);
   toastError('Algo deu errado. Toque de novo — se persistir, feche e abra o app.');
 });
 // Sem isso, um erro silencioso (ex.: a biblioteca falhando ao carregar)
@@ -4580,11 +4596,18 @@ function buildCoverNode(src, f){
       usingFallback = true;
       img.onerror = null;
       logWarn(`[PlanetaHQ] capa: ${why} —`, f.name);
-      const fallback = await resolveCoverFallback(f);
-      if(fallback) img.src = fallback;
-      else img.remove();
+      try{
+        const fallback = await resolveCoverFallback(f);
+        if(fallback) img.src = fallback;
+        else img.remove();
+      }catch(err){
+        // Falha ao regenerar uma miniatura não deve virar rejeição global nem
+        // interromper os gestos da Home; só esta imagem fica sem capa.
+        logWarn('[PlanetaHQ] capa: fallback não disponível —', f.name, err);
+        img.remove();
+      }
     };
-    img.onerror = ()=> triggerFallback('capa do R2/Drive falhou, tentando gerar');
+    img.onerror = ()=>{ void triggerFallback('capa do R2/Drive falhou, tentando gerar'); };
     // Rede de segurança: se a <img> nem carregar nem soltar erro nenhum
     // (o mesmo tipo de conexão travada que motivou os timeouts em
     // ensureFreshAccessCode/cover_check logo acima — sem isso, era mais
