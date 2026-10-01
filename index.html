@@ -2896,9 +2896,11 @@ function pushDebugLog(prefix, args){
 }
 function logErr(...args){ console.error(...args); pushDebugLog('ERRO', args); }
 function logWarn(...args){ console.warn(...args); pushDebugLog('AVISO', args); }
+// Erros globais ficam registrados para diagnóstico, sem interromper gestos
+// normais da Home. Busca, leitura, navegação e downloads mostram seus próprios
+// erros nos pontos em que a pessoa pode agir; um erro de fundo (por exemplo,
+// uma capa que falhou ao carregar) não deve disparar um toast enganoso.
 window.addEventListener('error', (e)=>{
-  // Erros de recursos (por exemplo, miniatura que falhou ao carregar) são
-  // recuperáveis e não significam que a interface inteira está com problema.
   if(e.target && e.target !== window){
     const target=e.target;
     const label=target.tagName ? target.tagName.toLowerCase() : 'recurso';
@@ -2906,31 +2908,17 @@ window.addEventListener('error', (e)=>{
     return;
   }
   pushDebugLog('ERRO NÃO TRATADO', [e.message, e.filename ? `(${e.filename}:${e.lineno})` : '', e.error]);
-  toastError('Algo deu errado. Toque de novo — se persistir, feche e abra o app.');
 });
 window.addEventListener('unhandledrejection', (e)=>{
   const reason=e.reason;
   const reasonName=reason && reason.name ? reason.name : '';
   const reasonText=String(reason && reason.message ? reason.message : reason || '');
-  // Cancelar trabalho obsoleto durante scroll/saída de tela é esperado.
   if(reasonName==='AbortError' || /\b(abort(?:ed)?|cancel(?:led|ed)?)\b/i.test(reasonText)){
     pushDebugLog('CANCELAMENTO DE TAREFA (esperado)', [reason]);
     return;
   }
-  pushDebugLog('PROMESSA REJEITADA', [reason]);
-  toastError('Algo deu errado. Toque de novo — se persistir, feche e abra o app.');
+  pushDebugLog('PROMESSA REJEITADA (sem alerta global)', [reason]);
 });
-// Sem isso, um erro silencioso (ex.: a biblioteca falhando ao carregar)
-// só aparece no console — e no APK instalado não tem como abrir o
-// console. Um toast simples, sem detalhes técnicos, pelo menos avisa que
-// algo falhou em vez de parecer que travou sem motivo.
-let lastToastErrorAt = 0;
-function toastError(msg){
-  const now = Date.now();
-  if(now - lastToastErrorAt < 3000) return;
-  lastToastErrorAt = now;
-  toast(msg);
-}
 
 const coverObserver = ('IntersectionObserver' in window) ? new IntersectionObserver((entries)=>{
   entries.forEach(entry=>{
