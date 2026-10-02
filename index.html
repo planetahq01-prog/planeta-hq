@@ -4916,52 +4916,24 @@ function normalizeStr(s){
   return String(s).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase();
 }
 
-async function driveSearchByName(term){
-  // Pede pro próprio Google Drive procurar pelo nome — uma chamada (ou
-  // poucas, se paginar), independente de quantas pastas a biblioteca tem.
-  const escaped = term.replace(/\\/g,'\\\\').replace(/'/g,"\\'");
-  let files = [];
-  let pageToken = null;
-  do{
-    const data = await driveFetchJson(()=>driveListUrl(`name contains '${escaped}' and trashed = false`, pageToken));
-    files = files.concat(resolveShortcuts(data.files));
-    pageToken = data.nextPageToken || null;
-  } while(pageToken);
-  return files;
-}
-
 async function searchLibrary(normTerm, rawTerm, token, isStale){
-  // A busca do próprio Drive é uma chamada paginada. Se o proxy falhar,
-  // não iniciamos a varredura recursiva completa: ela gerava milhares de
-  // pedidos em segundo plano, deixando a busca e o leitor lentos.
-  let direct;
-  try{ direct = await driveSearchByName(rawTerm); }
-  catch(e){
-    console.warn('[PlanetaHQ] Busca direta falhou; evitando varredura completa após erro de rede/proxy.',e);
-    throw new Error('A busca teve uma falha temporária de conexão. Tente novamente; o app não iniciou uma varredura completa da biblioteca.');
-  }
-  if(isStale(token)) return {folders: [], files: []};
-  const folders = direct
-    .filter(f=>f.mimeType === 'application/vnd.google-apps.folder' && normalizeStr(f.name).includes(normTerm))
-    .sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
-  const comics = direct
-    .map(f=>({...f, _ext: guessExt(f)}))
-    .filter(f=>f._ext && normalizeStr(f.name).includes(normTerm))
-    .sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
-  if(folders.length || comics.length) return {folders, files:comics};
-
-  // A resposta direta veio corretamente, mas nenhum resultado útil apareceu
-  // (por exemplo, o nome bateu em arquivos que não são HQs/pastas). Só nesse
-  // caso mantém o índice completo como fallback de compatibilidade.
+  // Não usar `name contains ...` global no Drive: com a chave de API do
+  // Worker essa busca fora da raiz compartilhada pode retornar 403
+  // insufficientFilePermissions. A Home já mantém o índice completo em
+  // IndexedDB; filtrar esse catálogo também evita uma requisição por busca.
   const [allFolders, allComics] = await Promise.all([
     getAllFoldersCached(),
     getAllComicsCached()
   ]);
   if(isStale(token)) return {folders: [], files: []};
-  return {
-    folders:allFolders.filter(f=>normalizeStr(f.name).includes(normTerm)).sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true})),
-    files:allComics.filter(f=>normalizeStr(f.name).includes(normTerm)).sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}))
-  };
+  const folders = (allFolders || [])
+    .filter(f=>f && normalizeStr(f.name).includes(normTerm))
+    .sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
+  const comics = (allComics || [])
+    .map(f=>({...f, _ext:f._ext || guessExt(f)}))
+    .filter(f=>f._ext && normalizeStr(f.name).includes(normTerm))
+    .sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
+  return {folders, files:comics};
 }
 
 function openFolderFromSearch(f){
@@ -8635,7 +8607,7 @@ async function boot(){
 }
 
 initConnectivityEvents();
-window.PLANETAHQ_BUILD='v94';
+window.PLANETAHQ_BUILD='v95';
 let appBootComplete=false;
 let pendingSWReload=false;
 let swReloadRequested=false;
