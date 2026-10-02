@@ -1911,7 +1911,7 @@ async function driveFetchJson(buildUrl){
   // atualizado — antes, reutilizar a mesma URL antiga fazia a tentativa
   // seguinte falhar de novo com o código já vencido, pedindo o código de
   // novo à toa mesmo depois da pessoa acabar de digitar um válido.
-  const MAX_ATTEMPTS = 6;
+  const MAX_ATTEMPTS = 4;
   for(let attempt=1; attempt<=MAX_ATTEMPTS; attempt++){
     const url = buildUrl();
     await driveAcquireSlot();
@@ -1948,7 +1948,8 @@ async function driveFetchJson(buildUrl){
     }
     const isRateLimit = res.status === 429 ||
       (res.status === 403 && /rateLimitExceeded|userRateLimitExceeded|quotaExceeded/i.test(errBody));
-    if(isRateLimit && attempt < MAX_ATTEMPTS){
+    const isTransientServerError = [408,425,500,502,503,504].includes(res.status);
+    if((isRateLimit || isTransientServerError) && attempt < MAX_ATTEMPTS){
       const backoff = Math.min(8000, 400 * (2 ** (attempt-1))) + Math.random()*300;
       await sleep(backoff);
       continue;
@@ -2065,65 +2066,68 @@ function driveMediaUrl(fileId){
 
 async function driveFetchBlob(fileId, onProgress, knownSize, signal){
   const url = driveMediaUrl(fileId);
-  // Controller interno: além de repassar o cancelamento de quem chamou
-  // (signal), ele permite que os NOSSOS timeouts (15s sem resposta / 20s
-  // sem chegar nenhum pedaço) encerrem a conexão de verdade. Antes, o
-  // timeout só fazia a função desistir — a conexão e o download seguiam
-  // rodando escondidos, ocupando banda e memória até terminar sozinhos.
-  const ctrl = new AbortController();
-  const onExternalAbort = ()=> ctrl.abort();
-  if(signal){
-    if(signal.aborted) ctrl.abort();
-    else signal.addEventListener('abort', onExternalAbort, {once:true});
-  }
-  try{
-    let res;
+  const MAX_ATTEMPTS = 3;
+  const RETRYABLE_HTTP = new Set([408,425,429,500,502,503,504]);
+  let lastError = null;
+  for(let attempt=1; attempt<=MAX_ATTEMPTS; attempt++){
+    if(signal && signal.aborted) throw new DOMException('Download cancelado.','AbortError');
+    const ctrl = new AbortController();
+    const onExternalAbort = ()=>ctrl.abort();
+    if(signal) signal.addEventListener('abort',onExternalAbort,{once:true});
     try{
-      // cache:'no-store' — nunca deixar o navegador guardar em disco os bytes
-      // de uma HQ só porque ela foi aberta/baixada; quem decide o que fica
-      // salvo é exclusivamente o idbSet('downloads', ...) feito por quem chama
-      // esta função, não o cache HTTP do navegador.
-      res = await withStallTimeout(fetch(url, {cache:'no-store', signal: ctrl.signal}), 15000, 'Tempo esgotado ao contatar o Google Drive.');
-    }catch(networkErr){
-      // Cancelamento de propósito (signal.abort() chamado por quem pediu o
-      // download) — repassa como está, sem trocar pela mensagem de erro de
-      // rede/proxy abaixo, que é só pra falhas de verdade.
-      if(signal && signal.aborted) throw networkErr;
-      if(CONFIG.proxyUrl){
-        throw new Error('Não foi possível contatar o proxy configurado. Verifique a URL nas configurações.');
+      let res;
+      try{
+        res = await withStallTimeout(fetch(url,{cache:'no-store',signal:ctrl.signal}),15000,'Tempo esgotado ao contatar o proxy.');
+      }catch(networkErr){
+        if(signal && signal.aborted) throw new DOMException('Download cancelado.','AbortError');
+        throw Object.assign(new Error(networkErr.message||'Falha de rede ao contatar o proxy.'),{retryableProxy:true,networkFailure:true,cause:networkErr});
       }
-      throw new Error('Falha de rede/CORS ao baixar o arquivo. Configure uma URL de proxy nas configurações.');
+      if(!res.ok){
+        const httpError = new Error(`Não foi possível baixar o arquivo (${res.status}).`);
+        httpError.retryableProxy = RETRYABLE_HTTP.has(res.status);
+        httpError.proxyStatus = res.status;
+        if(httpError.retryableProxy && attempt<MAX_ATTEMPTS){
+          try{await res.body?.cancel();}catch(e){}
+          throw httpError;
+        }
+        throw httpError;
+      }
+      const total = Number(res.headers.get('Content-Length')) || Number(knownSize) || 0;
+      const reader = res.body.getReader();
+      const chunks = [];
+      let received = 0;
+      let lastPct = -1;
+      while(true){
+        if(signal && signal.aborted) throw new DOMException('Download cancelado.','AbortError');
+        const {done,value} = await withStallTimeout(reader.read(),20000,'A conexão travou no meio do download.');
+        if(done) break;
+        chunks.push(value);
+        received += value.length;
+        if(onProgress && total){
+          const pct=Math.min(99,Math.max(1,Math.round((received/total)*100)));
+          if(pct!==lastPct){lastPct=pct;onProgress(pct/100);}
+        }
+      }
+      if(onProgress) onProgress(1);
+      return new Blob(chunks);
+    }catch(err){
+      ctrl.abort();
+      if(signal && signal.aborted) throw new DOMException('Download cancelado.','AbortError');
+      lastError=err;
+      const retryable=err && (err.retryableProxy || err.networkFailure || !err.proxyStatus);
+      if(!retryable || attempt>=MAX_ATTEMPTS){
+        if(err && err.proxyStatus) throw err;
+        if(navigator.onLine===false) throw new Error('Sem conexão com a internet. Esta HQ não está salva localmente neste aparelho; abra a aba Baixados para conferir os arquivos offline.');
+        if(CONFIG.proxyUrl) throw new Error(`Falha de rede ao acessar o proxy após ${attempt} tentativa(s). Isso não confirma que a URL esteja errada; tente novamente. ${err && err.message || ''}`);
+        throw new Error(`Falha de rede/CORS após ${attempt} tentativa(s). Verifique sua conexão. ${err && err.message || ''}`);
+      }
+      if(onProgress) onProgress(0);
+      await sleep(Math.min(2000,350*(2**(attempt-1))+Math.random()*250));
+    }finally{
+      if(signal) signal.removeEventListener('abort',onExternalAbort);
     }
-    if(!res.ok) throw new Error(`Não foi possível baixar o arquivo (${res.status}).`);
-    // Alguns proxies/CDNs não expõem o header Content-Length via CORS, então usamos
-    // o tamanho já conhecido pela listagem do Drive (f.size) como alternativa, para
-    // que a porcentagem sempre consiga avançar de forma real.
-    const total = Number(res.headers.get('Content-Length')) || Number(knownSize) || 0;
-    const reader = res.body.getReader();
-    const chunks = [];
-    let received = 0;
-    let lastPct = -1;
-    while(true){
-      if(signal && signal.aborted){
-        throw new DOMException('Download cancelado.', 'AbortError');
-      }
-      const {done, value} = await withStallTimeout(reader.read(), 20000, 'A conexão travou no meio do download.');
-      if(done) break;
-      chunks.push(value);
-      received += value.length;
-      if(onProgress && total){
-        const pct = Math.min(99, Math.max(1, Math.round((received/total)*100)));
-        if(pct !== lastPct){ lastPct = pct; onProgress(pct/100); }
-      }
-    }
-    if(onProgress) onProgress(1);
-    return new Blob(chunks);
-  }catch(err){
-    ctrl.abort(); // qualquer falha/cancelamento encerra a conexão na hora
-    throw err;
-  }finally{
-    if(signal) signal.removeEventListener('abort', onExternalAbort);
   }
+  throw lastError || new Error('Não foi possível baixar a HQ. Tente novamente.');
 }
 
 /* ---------------------------------------------------------------------
@@ -2415,7 +2419,7 @@ async function loadPdfWithFallback(source, onProgress, knownSize, fileId, signal
       const loadingTask = pdfjsLib.getDocument({
         url: objectUrl,
         rangeChunkSize: 1 << 18,
-        cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
+        cMapUrl: new URL('./vendor/pdfjs/cmaps/', document.baseURI).href,
         cMapPacked: true
       });
       const pdf = await loadingTask.promise;
@@ -2435,7 +2439,7 @@ async function loadPdfWithFallback(source, onProgress, knownSize, fileId, signal
     disableAutoFetch: true,
     disableStream: false,
     disableRange: false,
-    cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
+    cMapUrl: new URL('./vendor/pdfjs/cmaps/', document.baseURI).href,
     cMapPacked: true
   });
   if(onProgress){
@@ -2463,21 +2467,21 @@ async function loadPdfWithFallback(source, onProgress, knownSize, fileId, signal
       ]);
     }catch(e){
       if(signal && signal.aborted) throw abortErr();
-      if(e && e.message !== 'stream-timeout') throw e;
+      const networkFailure = !!(e && (e.name === 'TypeError' || /failed to fetch|network|fetch|server response.*(408|429|5\d\d)|status (408|429|5\d\d)/i.test(String(e.message||''))));
+      if(e && e.message !== 'stream-timeout' && !networkFailure) throw e;
       loadingTask.destroy().catch(()=>{});
-      logWarn('PDF demorando demais por streaming, baixando arquivo inteiro como alternativa:', fileId);
-      // Usa o download nativo do navegador (fetch + .blob()) em vez do nosso
-      // loop manual de leitura por pedaços — pra arquivos grandes, deixar o
-      // próprio navegador cuidar da montagem do arquivo é bem mais leve pra
-      // memória do celular do que acumular tudo manualmente em JavaScript.
+      logWarn(networkFailure
+        ? 'Falha transitória no streaming do PDF; tentando download completo com retry:'
+        : 'PDF demorando demais por streaming; tentando download completo com retry:',fileId,e);
+      // PDF.js usa pedidos Range próprios. Se um deles falhar, baixa o PDF
+      // inteiro pelo mesmo fluxo resiliente de HQs (3 tentativas), e então
+      // deixa o leitor local de Blob abrir por partes sem novas chamadas ao proxy.
       if(onProgress) onProgress(0);
-      const res = await fetch(driveMediaUrl(fileId), {cache:'no-store', signal});
-      if(!res.ok) throw new Error(`Não foi possível baixar o arquivo (${res.status}).`);
-      const blob = await res.blob();
+      const blob = await driveFetchBlob(fileId,onProgress,knownSize,signal);
+      if(signal && signal.aborted) throw abortErr();
       if(onProgress) onProgress(1);
-      const fallbackTask = pdfjsLib.getDocument({data: await blob.arrayBuffer()});
-      const fallbackDoc = await fallbackTask.promise;
-      if(signal && signal.aborted){ fallbackTask.destroy().catch(()=>{}); throw abortErr(); }
+      const fallbackDoc = await loadPdfWithFallback(blob,null,knownSize,null,signal);
+      if(signal && signal.aborted){ fallbackDoc.destroy().catch(()=>{}); throw abortErr(); }
       return fallbackDoc;
     }
   } finally {
@@ -4465,7 +4469,7 @@ async function renderPdfCoverThumb(url, signal){
     disableAutoFetch: true,
     disableStream: false,
     disableRange: false,
-    cMapUrl: 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/cmaps/',
+    cMapUrl: new URL('./vendor/pdfjs/cmaps/', document.baseURI).href,
     cMapPacked: true
   });
   // Guardamos a loadingTask pra conseguir destruí-la em QUALQUER desfecho
@@ -4927,40 +4931,37 @@ async function driveSearchByName(term){
 }
 
 async function searchLibrary(normTerm, rawTerm, token, isStale){
-  // 1) Tenta a busca direta do Drive primeiro — rápida mesmo em bibliotecas
-  // enormes, porque quem procura é o próprio Google, não a gente pasta por
-  // pasta.
-  try{
-    const direct = await driveSearchByName(rawTerm);
-    if(isStale(token)) return {folders: [], files: []};
-    if(direct.length){
-      const folders = direct
-        .filter(f=>f.mimeType === 'application/vnd.google-apps.folder' && normalizeStr(f.name).includes(normTerm))
-        .sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
-      const comics = direct
-        .map(f=>({...f, _ext: guessExt(f)}))
-        .filter(f=>f._ext && normalizeStr(f.name).includes(normTerm))
-        .sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
-      if(folders.length || comics.length) return {folders, files: comics};
-    }
-  }catch(e){
-    console.warn('[PlanetaHQ] Busca direta do Drive falhou, usando índice local como reforço.', e);
+  // A busca do próprio Drive é uma chamada paginada. Se o proxy falhar,
+  // não iniciamos a varredura recursiva completa: ela gerava milhares de
+  // pedidos em segundo plano, deixando a busca e o leitor lentos.
+  let direct;
+  try{ direct = await driveSearchByName(rawTerm); }
+  catch(e){
+    console.warn('[PlanetaHQ] Busca direta falhou; evitando varredura completa após erro de rede/proxy.',e);
+    throw new Error('A busca teve uma falha temporária de conexão. Tente novamente; o app não iniciou uma varredura completa da biblioteca.');
   }
+  if(isStale(token)) return {folders: [], files: []};
+  const folders = direct
+    .filter(f=>f.mimeType === 'application/vnd.google-apps.folder' && normalizeStr(f.name).includes(normTerm))
+    .sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
+  const comics = direct
+    .map(f=>({...f, _ext: guessExt(f)}))
+    .filter(f=>f._ext && normalizeStr(f.name).includes(normTerm))
+    .sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
+  if(folders.length || comics.length) return {folders, files:comics};
 
-  // 2) Sem resultado pela via rápida: usa o índice completo (cacheado) da
-  // biblioteca como reforço — pode ser mais lento na primeira vez.
+  // A resposta direta veio corretamente, mas nenhum resultado útil apareceu
+  // (por exemplo, o nome bateu em arquivos que não são HQs/pastas). Só nesse
+  // caso mantém o índice completo como fallback de compatibilidade.
   const [allFolders, allComics] = await Promise.all([
     getAllFoldersCached(),
     getAllComicsCached()
   ]);
   if(isStale(token)) return {folders: [], files: []};
-  const folders = allFolders
-    .filter(f=>normalizeStr(f.name).includes(normTerm))
-    .sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
-  const files = allComics
-    .filter(f=>normalizeStr(f.name).includes(normTerm))
-    .sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
-  return {folders, files};
+  return {
+    folders:allFolders.filter(f=>normalizeStr(f.name).includes(normTerm)).sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true})),
+    files:allComics.filter(f=>normalizeStr(f.name).includes(normTerm)).sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}))
+  };
 }
 
 function openFolderFromSearch(f){
@@ -5711,7 +5712,7 @@ async function openReader(fileMeta, forceLocal, parentId){
       state.reader.fromDownload = true;
       doc = await openComicFromBlob({...fileMeta, _ext: fileMeta._ext || local.ext}, local.blob);
     } else {
-      if(forceLocal) throw new Error('Este arquivo não está mais salvo offline.');
+      if(forceLocal || navigator.onLine===false) throw new Error('Esta HQ não foi encontrada nos downloads deste aparelho. Sem internet, só é possível abrir arquivos que aparecem na aba Baixados.');
       state.reader.fromDownload = false;
       const ext = fileMeta._ext || guessExt(fileMeta) || fileMeta.name.split('.').pop().toLowerCase();
       const setPct = (v)=>{
@@ -5764,6 +5765,29 @@ async function openReader(fileMeta, forceLocal, parentId){
     cacheCoverFromDoc(fileMeta.id, doc); // sem await: não atrasa a leitura
     await rebuildReaderView();
   }catch(err){
+    const fileExt = fileMeta._ext || guessExt(fileMeta) || fileMeta.name.split('.').pop().toLowerCase();
+    const pdfNetworkFailure = fileExt === 'pdf' && !forceLocal && state.reader.doc &&
+      (err && (err.name === 'TypeError' || /failed to fetch|network|fetch|server response.*(408|429|5\d\d)|status (408|429|5\d\d)/i.test(String(err.message||''))));
+    if(pdfNetworkFailure && !myAbort.signal.aborted && myToken === readerLoadToken){
+      try{
+        status.classList.remove('hidden');
+        status.innerHTML = '<div class="spinner"></div><div>A conexão do PDF oscilou. Tentando um download mais confiável…</div>';
+        const previousDoc = state.reader.doc;
+        if(previousDoc && previousDoc.dispose) await previousDoc.dispose();
+        const completeBlob = await driveFetchBlob(fileMeta.id,null,Number(fileMeta.size)||0,myAbort.signal);
+        if(myAbort.signal.aborted || myToken !== readerLoadToken) return;
+        const localPdf = await openComicPDF(completeBlob,null,Number(fileMeta.size)||0,null,myAbort.signal);
+        if(myAbort.signal.aborted || myToken !== readerLoadToken){ if(localPdf.dispose)localPdf.dispose(); return; }
+        state.reader.doc = localPdf;
+        await rebuildReaderView();
+        status.classList.add('hidden');
+        return;
+      }catch(fallbackError){
+        if(fallbackError && fallbackError.name === 'AbortError') return;
+        if(myToken !== readerLoadToken) return;
+        err = fallbackError;
+      }
+    }
     // Cancelamento de propósito (ver readerAbortController acima): a tela
     // de status já foi tomada por uma chamada mais nova, então não há
     // nada certo pra mostrar aqui — mexer nela agora só pisaria na HQ que
@@ -8611,7 +8635,17 @@ async function boot(){
 }
 
 initConnectivityEvents();
-boot();
+window.PLANETAHQ_BUILD='v94';
+let appBootComplete=false;
+let pendingSWReload=false;
+let swReloadRequested=false;
+function reloadAfterServiceWorkerUpdate(){
+  if(swReloadRequested)return;
+  swReloadRequested=true;
+  location.reload();
+}
+const appBootPromise=boot();
+appBootPromise.then(()=>{appBootComplete=true;if(pendingSWReload)reloadAfterServiceWorkerUpdate();},()=>{appBootComplete=true;if(pendingSWReload)reloadAfterServiceWorkerUpdate();});
 
 if('serviceWorker' in navigator){
   // Guarda ANTES de registrar se esta aba já era controlada por algum
@@ -8644,19 +8678,16 @@ if('serviceWorker' in navigator){
       console.warn('Falha ao registrar service worker (app pode não funcionar offline):', err);
     });
   });
-  if(hadControllerBefore){
-    // Quando uma versão nova do service worker assume o controle da página
-    // (após instalar e ativar), recarrega uma única vez pra já rodar sob a
-    // versão nova — sem isso, a aba aberta continuaria usando as regras de
-    // rede da versão antiga até a pessoa fechar e reabrir o app por conta
-    // própria.
-    let swRefreshed = false;
-    navigator.serviceWorker.addEventListener('controllerchange', ()=>{
-      if(swRefreshed) return;
-      swRefreshed = true;
-      location.reload();
-    });
-  }
+  // Se o worker novo assumir o controle, recarrega uma vez para garantir
+  // que o HTML e o worker sejam da mesma versão. Na primeira instalação,
+  // espera o boot inicial terminar antes de recarregar.
+  let swRefreshed = false;
+  navigator.serviceWorker.addEventListener('controllerchange', ()=>{
+    if(swRefreshed) return;
+    swRefreshed = true;
+    if(hadControllerBefore || appBootComplete) reloadAfterServiceWorkerUpdate();
+    else pendingSWReload=true;
+  });
 }
 </script>
 </body>

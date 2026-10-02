@@ -607,10 +607,181 @@
   sobe pra os aparelhos buscarem o index.html novo.
 */
 /* v85: index.html agora monta as seções como mistas e inclui a logo Flash; o cache da Home também reconstrói o índice pai/filho. */
-const CACHE_VERSION = 'v91';
+const CACHE_VERSION = 'v94';
 // Cache das capas: separado do da casca do app e mantido entre versões.
 const COVERS_CACHE = 'planeta-hq-covers-v1';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
+
+const PDF_CMAP_FILES = [
+  '78-EUC-H.bcmap',
+  '78-EUC-V.bcmap',
+  '78-H.bcmap',
+  '78-RKSJ-H.bcmap',
+  '78-RKSJ-V.bcmap',
+  '78-V.bcmap',
+  '78ms-RKSJ-H.bcmap',
+  '78ms-RKSJ-V.bcmap',
+  '83pv-RKSJ-H.bcmap',
+  '90ms-RKSJ-H.bcmap',
+  '90ms-RKSJ-V.bcmap',
+  '90msp-RKSJ-H.bcmap',
+  '90msp-RKSJ-V.bcmap',
+  '90pv-RKSJ-H.bcmap',
+  '90pv-RKSJ-V.bcmap',
+  'Add-H.bcmap',
+  'Add-RKSJ-H.bcmap',
+  'Add-RKSJ-V.bcmap',
+  'Add-V.bcmap',
+  'Adobe-CNS1-0.bcmap',
+  'Adobe-CNS1-1.bcmap',
+  'Adobe-CNS1-2.bcmap',
+  'Adobe-CNS1-3.bcmap',
+  'Adobe-CNS1-4.bcmap',
+  'Adobe-CNS1-5.bcmap',
+  'Adobe-CNS1-6.bcmap',
+  'Adobe-CNS1-UCS2.bcmap',
+  'Adobe-GB1-0.bcmap',
+  'Adobe-GB1-1.bcmap',
+  'Adobe-GB1-2.bcmap',
+  'Adobe-GB1-3.bcmap',
+  'Adobe-GB1-4.bcmap',
+  'Adobe-GB1-5.bcmap',
+  'Adobe-GB1-UCS2.bcmap',
+  'Adobe-Japan1-0.bcmap',
+  'Adobe-Japan1-1.bcmap',
+  'Adobe-Japan1-2.bcmap',
+  'Adobe-Japan1-3.bcmap',
+  'Adobe-Japan1-4.bcmap',
+  'Adobe-Japan1-5.bcmap',
+  'Adobe-Japan1-6.bcmap',
+  'Adobe-Japan1-UCS2.bcmap',
+  'Adobe-Korea1-0.bcmap',
+  'Adobe-Korea1-1.bcmap',
+  'Adobe-Korea1-2.bcmap',
+  'Adobe-Korea1-UCS2.bcmap',
+  'B5-H.bcmap',
+  'B5-V.bcmap',
+  'B5pc-H.bcmap',
+  'B5pc-V.bcmap',
+  'CNS-EUC-H.bcmap',
+  'CNS-EUC-V.bcmap',
+  'CNS1-H.bcmap',
+  'CNS1-V.bcmap',
+  'CNS2-H.bcmap',
+  'CNS2-V.bcmap',
+  'ETHK-B5-H.bcmap',
+  'ETHK-B5-V.bcmap',
+  'ETen-B5-H.bcmap',
+  'ETen-B5-V.bcmap',
+  'ETenms-B5-H.bcmap',
+  'ETenms-B5-V.bcmap',
+  'EUC-H.bcmap',
+  'EUC-V.bcmap',
+  'Ext-H.bcmap',
+  'Ext-RKSJ-H.bcmap',
+  'Ext-RKSJ-V.bcmap',
+  'Ext-V.bcmap',
+  'GB-EUC-H.bcmap',
+  'GB-EUC-V.bcmap',
+  'GB-H.bcmap',
+  'GB-V.bcmap',
+  'GBK-EUC-H.bcmap',
+  'GBK-EUC-V.bcmap',
+  'GBK2K-H.bcmap',
+  'GBK2K-V.bcmap',
+  'GBKp-EUC-H.bcmap',
+  'GBKp-EUC-V.bcmap',
+  'GBT-EUC-H.bcmap',
+  'GBT-EUC-V.bcmap',
+  'GBT-H.bcmap',
+  'GBT-V.bcmap',
+  'GBTpc-EUC-H.bcmap',
+  'GBTpc-EUC-V.bcmap',
+  'GBpc-EUC-H.bcmap',
+  'GBpc-EUC-V.bcmap',
+  'H.bcmap',
+  'HKdla-B5-H.bcmap',
+  'HKdla-B5-V.bcmap',
+  'HKdlb-B5-H.bcmap',
+  'HKdlb-B5-V.bcmap',
+  'HKgccs-B5-H.bcmap',
+  'HKgccs-B5-V.bcmap',
+  'HKm314-B5-H.bcmap',
+  'HKm314-B5-V.bcmap',
+  'HKm471-B5-H.bcmap',
+  'HKm471-B5-V.bcmap',
+  'HKscs-B5-H.bcmap',
+  'HKscs-B5-V.bcmap',
+  'Hankaku.bcmap',
+  'Hiragana.bcmap',
+  'KSC-EUC-H.bcmap',
+  'KSC-EUC-V.bcmap',
+  'KSC-H.bcmap',
+  'KSC-Johab-H.bcmap',
+  'KSC-Johab-V.bcmap',
+  'KSC-V.bcmap',
+  'KSCms-UHC-H.bcmap',
+  'KSCms-UHC-HW-H.bcmap',
+  'KSCms-UHC-HW-V.bcmap',
+  'KSCms-UHC-V.bcmap',
+  'KSCpc-EUC-H.bcmap',
+  'KSCpc-EUC-V.bcmap',
+  'Katakana.bcmap',
+  'NWP-H.bcmap',
+  'NWP-V.bcmap',
+  'RKSJ-H.bcmap',
+  'RKSJ-V.bcmap',
+  'Roman.bcmap',
+  'UniCNS-UCS2-H.bcmap',
+  'UniCNS-UCS2-V.bcmap',
+  'UniCNS-UTF16-H.bcmap',
+  'UniCNS-UTF16-V.bcmap',
+  'UniCNS-UTF32-H.bcmap',
+  'UniCNS-UTF32-V.bcmap',
+  'UniCNS-UTF8-H.bcmap',
+  'UniCNS-UTF8-V.bcmap',
+  'UniGB-UCS2-H.bcmap',
+  'UniGB-UCS2-V.bcmap',
+  'UniGB-UTF16-H.bcmap',
+  'UniGB-UTF16-V.bcmap',
+  'UniGB-UTF32-H.bcmap',
+  'UniGB-UTF32-V.bcmap',
+  'UniGB-UTF8-H.bcmap',
+  'UniGB-UTF8-V.bcmap',
+  'UniJIS-UCS2-H.bcmap',
+  'UniJIS-UCS2-HW-H.bcmap',
+  'UniJIS-UCS2-HW-V.bcmap',
+  'UniJIS-UCS2-V.bcmap',
+  'UniJIS-UTF16-H.bcmap',
+  'UniJIS-UTF16-V.bcmap',
+  'UniJIS-UTF32-H.bcmap',
+  'UniJIS-UTF32-V.bcmap',
+  'UniJIS-UTF8-H.bcmap',
+  'UniJIS-UTF8-V.bcmap',
+  'UniJIS2004-UTF16-H.bcmap',
+  'UniJIS2004-UTF16-V.bcmap',
+  'UniJIS2004-UTF32-H.bcmap',
+  'UniJIS2004-UTF32-V.bcmap',
+  'UniJIS2004-UTF8-H.bcmap',
+  'UniJIS2004-UTF8-V.bcmap',
+  'UniJISPro-UCS2-HW-V.bcmap',
+  'UniJISPro-UCS2-V.bcmap',
+  'UniJISPro-UTF8-V.bcmap',
+  'UniJISX0213-UTF32-H.bcmap',
+  'UniJISX0213-UTF32-V.bcmap',
+  'UniJISX02132004-UTF32-H.bcmap',
+  'UniJISX02132004-UTF32-V.bcmap',
+  'UniKS-UCS2-H.bcmap',
+  'UniKS-UCS2-V.bcmap',
+  'UniKS-UTF16-H.bcmap',
+  'UniKS-UTF16-V.bcmap',
+  'UniKS-UTF32-H.bcmap',
+  'UniKS-UTF32-V.bcmap',
+  'UniKS-UTF8-H.bcmap',
+  'UniKS-UTF8-V.bcmap',
+  'V.bcmap',
+  'WP-Symbol.bcmap'
+];
 
 const APP_SHELL = [
   './index.html',
@@ -625,6 +796,7 @@ const APP_SHELL = [
   // HQs .cbr totalmente offline, sem buscar código em CDN.
   './vendor/node-unrar-js.bundle.js',
   './vendor/unrar.wasm',
+  ...PDF_CMAP_FILES.map((name) => `./vendor/pdfjs/cmaps/${name}`),
   'https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700;800&display=swap',
   // Logos das seções da Home — desde a v37, vêm do proxy/R2 (mesmo cache
   // compartilhado das capas), não mais direto do postimg.cc: precisam ser
@@ -669,39 +841,37 @@ const APP_SHELL = [
 // URLs absolutas resolvidas uma única vez, pra comparar por igualdade exata
 // (nunca mais por sufixo/heurística) na hora de decidir o que é "casca".
 const APP_SHELL_URLS = new Set(APP_SHELL.map((u) => new URL(u, self.location.href).href));
-const REQUIRED_LOCAL_ASSETS = new Set([
-  './vendor/node-unrar-js.bundle.js',
-  './vendor/unrar.wasm'
-].map((u) => new URL(u, self.location.href).href));
+const REQUIRED_LOCAL_ASSETS = new Set(
+  APP_SHELL.filter((u) => u.startsWith('./vendor/')).map((u) => new URL(u, self.location.href).href)
+);
 
 // Os assets do CBR agora são locais/same-origin: não precisam de fetch
 // CORS nem de CDN e são armazenados como respostas normais do app.
 const CORS_URLS = new Set();
 
-self.addEventListener('install', (event) => {
+async function precacheAppShell(cache){
+  // Limita as conexões paralelas: o shell inclui 168 mapas PDF e não deve
+  // abrir centenas de downloads simultâneos no celular.
+  const batchSize=8;
+  for(let i=0;i<APP_SHELL.length;i+=batchSize){
+    const batch=APP_SHELL.slice(i,i+batchSize);
+    await Promise.all(batch.map(async(url)=>{
+      const absolute=new URL(url,self.location.href).href;
+      try{
+        const res=await fetch(url,{mode:CORS_URLS.has(url)?'cors':(url.startsWith('http')?'no-cors':'same-origin'),cache:'no-store'});
+        if(REQUIRED_LOCAL_ASSETS.has(absolute)&&!res.ok)throw new Error('Asset offline obrigatório indisponível: '+url+' ('+res.status+')');
+        await cache.put(url,res);
+      }catch(err){
+        // A nova versão só assume quando todos os assets locais obrigatórios
+        // de CBR/PDF foram armazenados. Recursos externos opcionais podem falhar.
+        if(REQUIRED_LOCAL_ASSETS.has(absolute))throw err;
+      }
+    }));
+  }
+}
+self.addEventListener('install',(event)=>{
   self.skipWaiting();
-  event.waitUntil(
-    caches.open(CACHE_NAME).then((cache) => {
-      // 'no-cors' é necessário pros recursos de outro domínio (cdnjs, google fonts);
-      // a resposta fica "opaca", mas ainda é cacheada e servida normalmente offline.
-      // 'cache: no-store' evita que esta busca inicial já traga uma cópia
-      // antiga do cache HTTP nativo do navegador.
-      return Promise.all(
-        APP_SHELL.map((url) =>
-          fetch(url, { mode: CORS_URLS.has(url) ? 'cors' : (url.startsWith('http') ? 'no-cors' : 'same-origin'), cache: 'no-store' })
-            .then((res) => {
-              const absolute = new URL(url, self.location.href).href;
-              if (REQUIRED_LOCAL_ASSETS.has(absolute) && !res.ok) throw new Error('Asset offline obrigatório indisponível: ' + url + ' (' + res.status + ')');
-              return cache.put(url, res);
-            })
-            .catch((err) => {
-              // Não ativa uma versão nova sem o leitor CBR offline completo.
-              if (REQUIRED_LOCAL_ASSETS.has(new URL(url, self.location.href).href)) throw err;
-            })
-        )
-      );
-    })
-  );
+  event.waitUntil(caches.open(CACHE_NAME).then((cache)=>precacheAppShell(cache)));
 });
 
 self.addEventListener('activate', (event) => {
