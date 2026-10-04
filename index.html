@@ -2066,7 +2066,7 @@ function driveMediaUrl(fileId){
 
 async function driveFetchBlob(fileId, onProgress, knownSize, signal){
   const url = driveMediaUrl(fileId);
-  const MAX_ATTEMPTS = 3;
+  const MAX_ATTEMPTS = 4;
   const RETRYABLE_HTTP = new Set([408,425,429,500,502,503,504]);
   let lastError = null;
   for(let attempt=1; attempt<=MAX_ATTEMPTS; attempt++){
@@ -2077,7 +2077,7 @@ async function driveFetchBlob(fileId, onProgress, knownSize, signal){
     try{
       let res;
       try{
-        res = await withStallTimeout(fetch(url,{cache:'no-store',signal:ctrl.signal}),15000,'Tempo esgotado ao contatar o proxy.');
+        res = await withStallTimeout(fetch(url,{cache:'no-store',signal:ctrl.signal}),20000,'Tempo esgotado ao contatar o proxy.');
       }catch(networkErr){
         if(signal && signal.aborted) throw new DOMException('Download cancelado.','AbortError');
         throw Object.assign(new Error(networkErr.message||'Falha de rede ao contatar o proxy.'),{retryableProxy:true,networkFailure:true,cause:networkErr});
@@ -2099,7 +2099,7 @@ async function driveFetchBlob(fileId, onProgress, knownSize, signal){
       let lastPct = -1;
       while(true){
         if(signal && signal.aborted) throw new DOMException('Download cancelado.','AbortError');
-        const {done,value} = await withStallTimeout(reader.read(),20000,'A conexão travou no meio do download.');
+        const {done,value} = await withStallTimeout(reader.read(),30000,'A conexão travou no meio do download.');
         if(done) break;
         chunks.push(value);
         received += value.length;
@@ -2122,7 +2122,7 @@ async function driveFetchBlob(fileId, onProgress, knownSize, signal){
         throw new Error(`Falha de rede/CORS após ${attempt} tentativa(s). Verifique sua conexão. ${err && err.message || ''}`);
       }
       if(onProgress) onProgress(0);
-      await sleep(Math.min(2000,350*(2**(attempt-1))+Math.random()*250));
+      await sleep(Math.min(4000,500*(2**(attempt-1))+Math.random()*400));
     }finally{
       if(signal) signal.removeEventListener('abort',onExternalAbort);
     }
@@ -4917,19 +4917,38 @@ function normalizeStr(s){
 }
 
 async function searchLibrary(normTerm, rawTerm, token, isStale){
-  // Não usar `name contains ...` global no Drive: com a chave de API do
-  // Worker essa busca fora da raiz compartilhada pode retornar 403
-  // insufficientFilePermissions. A Home já mantém o índice completo em
-  // IndexedDB; filtrar esse catálogo também evita uma requisição por busca.
-  const [allFolders, allComics] = await Promise.all([
-    getAllFoldersCached(),
-    getAllComicsCached()
+  // getAllFoldersCached/getAllComicsCached podem iniciar uma varredura total
+  // se o índice passou do TTL. Para a busca, primeiro usa diretamente o
+  // último catálogo persistido; assim cada consulta é previsível e rápida,
+  // inclusive enquanto a Home revalida os dados em segundo plano.
+  let folderRec, comicRec;
+  [folderRec, comicRec] = await Promise.all([
+    readHomeCache(ALLFOLDERS_CACHE_KEY,'folders'),
+    readHomeCache(ALLCOMICS_CACHE_KEY,'comics')
   ]);
   if(isStale(token)) return {folders: [], files: []};
-  const folders = (allFolders || [])
+
+  let allFolders = folderRec && Array.isArray(folderRec.folders) ? folderRec.folders : null;
+  let allComics = comicRec && Array.isArray(comicRec.comics) ? comicRec.comics : null;
+  if(!allFolders || !allComics){
+    // Primeira instalação ou cache ausente: ainda é necessário construir o
+    // índice uma vez. A tela não fica em spinner infinito se a varredura
+    // estiver parada; o trabalho pode terminar em segundo plano e preencher
+    // o cache para a próxima busca.
+    const indexData = await withStallTimeout(
+      getLibrarySections(),
+      45000,
+      'O catálogo da biblioteca ainda está sendo preparado. Aguarde o carregamento da Home e tente novamente.'
+    );
+    if(isStale(token)) return {folders: [], files: []};
+    allFolders = indexData.allFolders || [];
+    allComics = indexData.comics || [];
+  }
+
+  const folders = allFolders
     .filter(f=>f && normalizeStr(f.name).includes(normTerm))
     .sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
-  const comics = (allComics || [])
+  const comics = allComics
     .map(f=>({...f, _ext:f._ext || guessExt(f)}))
     .filter(f=>f._ext && normalizeStr(f.name).includes(normTerm))
     .sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
@@ -8607,7 +8626,7 @@ async function boot(){
 }
 
 initConnectivityEvents();
-window.PLANETAHQ_BUILD='v95';
+window.PLANETAHQ_BUILD='v97';
 let appBootComplete=false;
 let pendingSWReload=false;
 let swReloadRequested=false;
