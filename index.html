@@ -586,19 +586,6 @@ body.theme-transitioning .tab.active{
 .shelf-option-label{font-size:11.5px;color:var(--paper-dim);font-weight:600;}
 .shelf-option.active .shelf-option-label{color:var(--paper);}
 
-/* Fonte "estilo anime" (Bangers) usada onde o nome "Mangás" faz o papel de
-   logo — tanto no seletor quanto na tela cheia de transição. */
-.manga-logo-text{
-  font-family:'Bangers',var(--font-display),sans-serif;
-  letter-spacing:.03em;line-height:1;
-  background:linear-gradient(180deg,#fff59a 0%,#ffd400 35%,#e60012 100%);
-  -webkit-background-clip:text;background-clip:text;color:transparent;
-  -webkit-text-stroke:1px rgba(0,0,0,.35);
-  text-shadow:0 3px 0 rgba(0,0,0,.25);
-  font-size:26px;
-}
-.manga-logo-text.big{font-size:64px;-webkit-text-stroke:2px rgba(0,0,0,.4);}
-
 /* Tela cheia de transição — mostra a logo grande enquanto o tema troca por
    baixo dela (ver switchShelf no JS: o body ganha o data-shelf novo bem no
    meio da animação, escondido atrás desta camada). */
@@ -1103,6 +1090,14 @@ html,body,button,input,select,textarea{font-family:'WhizBang','Inter',sans-serif
 .double-wrap.rtl{flex-direction:row-reverse;}
 #direction-segmented button{font-size:10px;padding:7px 3px;}
 
+
+/* Carrosséis Home no celular: três capas inteiras visíveis; telas maiores preservam 138px. */
+@media(max-width:699px){
+  .carousel{gap:8px;padding-left:14px;padding-right:14px;}
+  .carousel-card{flex:0 0 calc((100vw - 44px)/3);width:calc((100vw - 44px)/3);}
+  .carousel-card .cc-cover{border-radius:5px;}
+  .carousel-card .cc-name{font-size:11px;}
+}
 </style>
 </head><body>
   <div id="access-gate" class="hidden" style="position:fixed;inset:0;z-index:9999;background:#0a0e1a;display:flex;align-items:center;justify-content:center;padding:24px;">
@@ -1560,6 +1555,9 @@ let navPushedCount = 0;     // quantos níveis extras estão empilhados no hist�
 let downloadsFolderViewId = null;
 let navSuppressPop = false; // true enquanto nós mesmos disparamos history.go()
 let navProgrammaticTabSwitch = false; // true enquanto o popstate troca de aba sozinho
+let searchFolderStack = [];
+let searchQueryNavActive = false;
+let searchFolderRenderToken = 0;
 
 function navPushLevel(){
   try{ history.pushState({appNav:true}, ''); }catch(e){}
@@ -1577,7 +1575,9 @@ function navCurrentDepth(){
   const tabDepth = state.currentTab === 'library' ? 0 : 1;
   const folderDepth = state.currentTab === 'library' ? Math.max(0, state.path.length - 1) : 0;
   const offlineFolderDepth = state.currentTab === 'downloads' && downloadsFolderViewId ? 1 : 0;
-  return (readerOpen ? 1 : 0) + tabDepth + folderDepth + offlineFolderDepth;
+  const searchOpen = !$('#view-search').classList.contains('hidden');
+  const searchDepth = searchOpen ? 1 + (searchQueryNavActive ? 1 : 0) + searchFolderStack.length : 0;
+  return (readerOpen ? 1 : 0) + tabDepth + folderDepth + offlineFolderDepth + searchDepth;
 }
 // Chamar depois de uma ação de UI que faz o usuário "voltar" (clique na
 // seta de voltar, no breadcrumb, no X do leitor, na aba biblioteca) —
@@ -1590,16 +1590,32 @@ function navSyncAfterBack(){
 
 window.addEventListener('popstate', ()=>{
   if(navSuppressPop){ navSuppressPop = false; return; }
-  // Botão físico/gesto de voltar de verdade: desfaz um nível.
-  if(!$('#view-search').classList.contains('hidden')){
-    closeSearch({syncNav:false});
-  } else if(!$('#view-reader').classList.contains('hidden')){
+  let consumed = false;
+  // O leitor é a camada mais profunda, mesmo quando foi aberto sobre a busca.
+  if(!$('#view-reader').classList.contains('hidden')){
     closeReader();
+    consumed = true;
+  } else if(!$('#view-search').classList.contains('hidden')){
+    if(searchFolderStack.length){
+      searchFolderStack.pop();
+      searchFolderRenderToken++;
+      restoreSearchLocation();
+      consumed = true;
+    } else if(searchQueryNavActive){
+      searchQueryNavActive = false;
+      resetSearchQueryView();
+      consumed = true;
+    } else {
+      closeSearch({syncNav:false});
+      consumed = true;
+    }
   } else if(state.currentTab === 'library' && state.path.length > 1){
     goToBreadcrumbIndex(state.path.length - 2);
+    consumed = true;
   } else if(state.currentTab === 'downloads' && downloadsFolderViewId){
     downloadsFolderViewId=null;
     renderDownloads();
+    consumed = true;
   } else if(state.currentTab !== 'library'){
     const libTab = document.querySelector('.tab[data-tab="library"]');
     if(libTab){
@@ -1607,8 +1623,9 @@ window.addEventListener('popstate', ()=>{
       libTab.click();
       navProgrammaticTabSwitch = false;
     }
+    consumed = true;
   }
-  navPushedCount = Math.max(0, navPushedCount - 1);
+  if(consumed) navPushedCount = Math.max(0, navPushedCount - 1);
 });
 
 function loadReaderPrefs(){
@@ -4955,28 +4972,134 @@ async function searchLibrary(normTerm, rawTerm, token, isStale){
   return {folders, files:comics};
 }
 
-function openFolderFromSearch(f){
-  if(!$('#view-search').classList.contains('hidden')) closeSearch();
-  if(state.currentTab !== 'library') document.querySelector('.tab[data-tab="library"]').click();
-  $('#search-input').value = '';
-  state.path = [{id: CONFIG.rootFolderId, name:'Biblioteca'}];
-  enterFolder(f.id, f.name).then(navSyncAfterBack);
+function setSearchResultsHeading(label, visible=true){
+  const heading=$('#search-results-heading');
+  const title=heading&&heading.querySelector('span');
+  if(title) title.textContent=label;
+  if(heading) heading.classList.toggle('hidden',!visible);
+}
+
+function resetSearchQueryView(){
+  clearTimeout(searchDebounceTimer);
+  searchToken++;
+  releaseCoverObservers($('#grid-search'));
+  $('#search-input').value='';
+  $('#btn-search-clear').classList.add('hidden');
+  $('#search-suggestions').classList.remove('hidden');
+  setSearchResultsHeading('RESULTADOS DA BUSCA',false);
+  $('#grid-search').innerHTML='';
+}
+
+function restoreSearchLocation(){
+  const current=searchFolderStack[searchFolderStack.length-1];
+  if(current){ openFolderFromSearch(current,{push:false}); return; }
+  const term=$('#search-input').value.trim();
+  $('#search-suggestions').classList.toggle('hidden',!!term);
+  setSearchResultsHeading('RESULTADOS DA BUSCA',!!term);
+  if(term) runSearch(term);
+  else resetSearchQueryView();
+}
+
+async function openFolderFromSearch(f,{push=true}={}){
+  if($('#view-search').classList.contains('hidden')) return;
+  if(push){
+    searchFolderStack.push(f);
+    navPushLevel();
+  }
+  searchToken++;
+  clearTimeout(searchDebounceTimer);
+  const folder=searchFolderStack[searchFolderStack.length-1];
+  if(!folder) return;
+  const token=++searchFolderRenderToken;
+  const grid=$('#grid-search');
+  $('#search-suggestions').classList.add('hidden');
+  setSearchResultsHeading(folder.name,true);
+  releaseCoverObservers(grid);
+  renderAppState(grid,{type:'loading',icon:'<div class="spinner" aria-hidden="true"></div>',title:'Abrindo pasta',message:folder.name});
+  try{
+    const listing=await driveListFolder(folder.id);
+    if(token!==searchFolderRenderToken || $('#view-search').classList.contains('hidden')) return;
+    const folderPath=Array.isArray(folder._path)?folder._path.concat(folder.name):searchFolderStack.map(x=>x.name);
+    const folders=(listing.folders||[]).map(item=>({...item,_parentId:folder.id,_path:folderPath}));
+    const allFiles=(listing.files||[]).map(item=>({...item,_parentId:folder.id,_path:folderPath}));
+    const files=await applyLibraryFilterSort(allFiles);
+    if(token!==searchFolderRenderToken) return;
+    state.currentListContext=files;
+    state.currentListIsLocal=false;
+    grid.innerHTML='';
+    if(!folders.length && !files.length){
+      renderAppState(grid,{icon:ICONS.folder,title:'Pasta vazia',message:'Não há HQs ou subpastas nesta pasta.'});
+      return;
+    }
+    const folderCards=folders.map(item=>{
+      const card=renderFolderCard(item,{fromSearch:true});
+      grid.appendChild(card);
+      return {card,f:item};
+    });
+    const comicCards=files.map(item=>{
+      const card=renderComicCard(item);
+      grid.appendChild(card);
+      return {card,f:item};
+    });
+    folderCards.forEach(({card,f})=>{
+      if(!card.classList.contains('cover-immediate')) lazyLoadCover(card,()=>attachFolderCoverAsync(card,f));
+    });
+    comicCards.forEach(({card,f})=>lazyLoadCover(card,()=>attachCoverAsync(card,f)));
+  }catch(error){
+    if(token!==searchFolderRenderToken) return;
+    logWarn('[PlanetaHQ] falha ao abrir pasta a partir da busca',folder.id,error);
+    const actions=[{label:'Tentar novamente',primary:true,onClick:()=>openFolderFromSearch(folder,{push:false})},{label:'Voltar',onClick:()=>handleSearchBack()}];
+    if(navigator.onLine===false) actions.splice(1,0,{label:'Ler conteúdo baixado',onClick:openOfflineDownloads});
+    renderAppState(grid,{type:'error',icon:ICONS.warning,title:'Não foi possível abrir esta pasta',message:error.message||'Verifique sua conexão e tente novamente.',actions});
+  }
+}
+
+function handleSearchBack(){
+  if(searchFolderStack.length){
+    searchFolderStack.pop();
+    searchFolderRenderToken++;
+    restoreSearchLocation();
+    navSyncAfterBack();
+    return;
+  }
+  if(searchQueryNavActive){
+    searchQueryNavActive=false;
+    resetSearchQueryView();
+    navSyncAfterBack();
+    return;
+  }
+  closeSearch();
 }
 
 let searchToken = 0;
 let searchDebounceTimer = null;
 $('#search-input').addEventListener('input', e=>{
-  const term = e.target.value.trim();
+  const term=e.target.value.trim();
+  const hadFolderStack=searchFolderStack.length>0;
+  if(hadFolderStack){
+    searchFolderStack=[];
+    searchFolderRenderToken++;
+  }
+  const wasQueryActive=searchQueryNavActive;
+  const searchOpen=!$('#view-search').classList.contains('hidden');
+  if(term && !wasQueryActive && searchOpen){
+    searchQueryNavActive=true;
+    navPushLevel();
+  }else if(!term && wasQueryActive){
+    searchQueryNavActive=false;
+  }
+  if(hadFolderStack || (!term && wasQueryActive)) navSyncAfterBack();
   clearTimeout(searchDebounceTimer);
-  $('#btn-search-clear').classList.toggle('hidden', !term);
-  $('#search-suggestions').classList.toggle('hidden', !!term);
-  $('#search-results-heading').classList.toggle('hidden', !term);
+  $('#btn-search-clear').classList.toggle('hidden',!term);
+  $('#search-suggestions').classList.toggle('hidden',!!term);
+  setSearchResultsHeading('RESULTADOS DA BUSCA',!!term);
   if(!term){
     searchToken++;
-    $('#grid-search').innerHTML = '';
+    releaseCoverObservers($('#grid-search'));
+    $('#grid-search').innerHTML='';
     return;
   }
-  searchDebounceTimer = setTimeout(()=>runSearch(term), 300);
+  searchDebounceTimer=setTimeout(()=>runSearch(term),300);
 });
 
 async function runSearch(term){
@@ -6521,7 +6644,7 @@ async function crawlLibrarySections(token, isStale, errorState){
   const aranhaFolders = await childrenOfNamedFolder(['colecao homem aranha']);
   const xmenFolders = await childrenOfNamedFolder(['x men','xmen']);
   const mangaFolders = await childrenOfNamedFolder(['mangas','manga']);
-  // Seções "edição única" de cada mangá (ver MANGA_SECTIONS): marca cada HQ
+  // Classificação dos mangás: marca cada HQ
   // com o ID da pasta-de-mangá (filha de "MANGÁS") a que ela pertence, em
   // qualquer nível de subpasta. Isso é feito por ID de pasta (não pelo
   // caminho de nomes em _path) de propósito: as pastas dentro de "MANGÁS"
@@ -7411,30 +7534,7 @@ const DEFAULT_SHELF = 'todas';
 // da subpasta no Drive pra ela ser a desta seção — assim "Attack on Titan
 // (Shingeki no Kyojin)" ou "Jujutsu Kaisen (30) Completo" casam sem precisar
 // digitar o nome inteiro. A ordem desta lista é a ordem das seções na tela.
-const MANGA_SECTIONS = [
-  {key:'manga_akira',        title:'Akira',                 match:['akira']},
-  {key:'manga_ashitanojoe',  title:'Ashita no Joe',         match:['ashita no joe']},
-  {key:'manga_aot',          title:'Attack On Titan',       match:['attack on titan','shingeki no kyojin']},
-  {key:'manga_blackclover',  title:'Black Clover',          match:['black clover']},
-  {key:'manga_bokunohero',   title:'Boku no Hero',          match:['boku no hero']},
-  {key:'manga_cdz',          title:'Cavaleiros do Zodíaco', match:['cavaleiros do zodiaco','saint seiya']},
-  {key:'manga_deathnote',    title:'Death Note',            match:['death note']},
-  {key:'manga_dbs',          title:'Dragon Ball Super',     match:['dragon ball super']},
-  {key:'manga_fairytail',    title:'Fairy Tail',            match:['fairy tail']},
-  {key:'manga_gantz',        title:'Gantz',                 match:['gantz']},
-  {key:'manga_hxh',          title:'Hunter x Hunter',       match:['hunter x hunter']},
-  {key:'manga_jjk',          title:'Jujutsu Kaisen',        match:['jujutsu kaisen']},
-  {key:'manga_kny',          title:'Kimetsu no Yaiba',      match:['kimetsu no yaiba']},
-  {key:'manga_kingdom',      title:'Kingdom',               match:['kingdom']},
-  {key:'manga_monster',      title:'Monster',               match:['monster']},
-  {key:'manga_nanatsu',      title:'Nanatsu no Taizai',     match:['nanatsu no taizai']},
-  {key:'manga_naruto',       title:'Naruto',                match:['naruto']},
-  {key:'manga_eva',          title:'Neon Gênesis Evangelion', match:['evangelion']},
-  {key:'manga_oldboy',       title:'Old Boy',               match:['old boy','oldboy']},
-  {key:'manga_souleater',    title:'Soul Eater',            match:['soul eater']},
-  {key:'manga_tokyoghoul',   title:'Tokyo Ghoul',           match:['tokyo ghoul']},
-  {key:'manga_yyh',          title:'Yu Yu Hakusho',         match:['yu yu hakusho','yuyu hakusho']}
-];
+
 
 const MARVEL_LOGO = 'https://i.postimg.cc/vBNJsJVq/Marvel-Logo.jpg';
 const DC_LOGO = 'https://i.postimg.cc/P550CfQJ/DC-Comics-logo.png';
@@ -7461,13 +7561,6 @@ const SHELVES = {
     logo: DC_LOGO,
     sections: ['batman','superman','flash','lanterna','mulhermaravilha','recomendados','universoAbsoluto','classicoLiga','sagaLiga','darkseid'],
     pathKeywords: ['batman','superman','colecao flash','lanterna verde','mulher maravilha','wonder woman','universo absoluto','liga da justica da america','a saga da liga da justica','colecao darkseid']
-  },
-  manga: {
-    key: 'manga', label: 'Mangás',
-    logo: 'https://i.postimg.cc/SRVMTbts/Manga-21-09-2026-(1).png',
-    // Só as seções "edição única", uma por mangá (ver MANGA_SECTIONS).
-    sections: MANGA_SECTIONS.map(d=>d.key),
-    pathKeywords: ['mangas','manga']
   }
 };
 // Ordem das seções da estante padrão "Marvel + DC" (definida pelo usuário —
@@ -7615,24 +7708,6 @@ function paintHomeSections(wrap, data){
     { kind: SECTION_KINDS.MISTA,folderNames:['lanterna verde'],parentNames:['dc'] }
   );
   if(secLanterna){ built['lanterna'] = secLanterna; wireHomeLogoFallback(secLanterna, 'lanterna'); }
-
-  // Uma seção "edição única" por mangá da lista MANGA_SECTIONS: o carrossel
-  // é feito das próprias HQs (volumes/capítulos) da subpasta de "MANGÁS"
-  // correspondente, com o botão de baixar no canto da capa. Título em texto
-  // simples (sem logo). Mangá sem pasta correspondente, ou sem HQs, some.
-  MANGA_SECTIONS.forEach(def=>{
-    const folder = (mangaFolders || []).find(f=>{
-      const n = normalizeForFolderMatch(f.name);
-      return def.match.some(m=>n.includes(m));
-    });
-    if(!folder) return;
-    const secMangaTitle = buildMixedCollectionSection(
-      escapeHtml(def.title),
-      comicsInsideMangaFolder(allComics, folder.id, folder.name),
-      {rootFolder:{id:folder.id,name:folder.name},collectionTitle:def.title}
-    );
-    if(secMangaTitle) built[def.key] = secMangaTitle;
-  });
 
   // "Coleção [logo do Batman]": subpastas de dentro da pasta "Batman" (ex.:
   // "DC > Batman > 1 - Batman: Ano Um" e as demais) — mesma lógica das
@@ -8174,25 +8249,34 @@ function closeMenu(){
 }
 function openSearch(){
   closeMenu();
-  const screen = $('#view-search');
+  const screen=$('#view-search');
+  if(!screen.classList.contains('hidden')) return;
+  searchFolderStack=[];
+  searchQueryNavActive=!!$('#search-input').value.trim();
   screen.classList.remove('hidden');
   $('#btn-search').setAttribute('aria-expanded','true');
   navPushLevel();
-  if($('#search-input').value.trim()) runSearch($('#search-input').value.trim());
-  setTimeout(()=>$('#search-input').focus(), 40);
+  if(searchQueryNavActive) navPushLevel();
+  if(searchQueryNavActive) runSearch($('#search-input').value.trim());
+  else resetSearchQueryView();
+  setTimeout(()=>$('#search-input').focus(),40);
 }
 function closeSearch({syncNav=true}={}){
-  const screen = $('#view-search');
+  const screen=$('#view-search');
   if(screen.classList.contains('hidden')) return;
   screen.classList.add('hidden');
   $('#btn-search').setAttribute('aria-expanded','false');
   clearTimeout(searchDebounceTimer);
   searchToken++;
-  $('#search-input').value = '';
+  searchFolderRenderToken++;
+  searchFolderStack=[];
+  searchQueryNavActive=false;
+  $('#search-input').value='';
   $('#btn-search-clear').classList.add('hidden');
   $('#search-suggestions').classList.remove('hidden');
-  $('#search-results-heading').classList.add('hidden');
-  $('#grid-search').innerHTML = '';
+  setSearchResultsHeading('RESULTADOS DA BUSCA',false);
+  releaseCoverObservers($('#grid-search'));
+  $('#grid-search').innerHTML='';
   if(syncNav) navSyncAfterBack();
 }
 $('#btn-menu').onclick = ()=>{
@@ -8222,7 +8306,7 @@ $('#downloads-manager-toggle').onclick = ()=>{
 };
 $('#app-menu-backdrop').onclick = closeMenu;
 $('#btn-search').onclick = openSearch;
-$('#btn-search-close').onclick = ()=>closeSearch();
+$('#btn-search-close').onclick = handleSearchBack;
 $('#btn-search-clear').onclick = ()=>{
   $('#search-input').value = '';
   $('#search-input').dispatchEvent(new Event('input', {bubbles:true}));
@@ -8238,7 +8322,7 @@ document.querySelectorAll('.search-chip').forEach(chip=>{
 });
 document.addEventListener('keydown', e=>{
   if(e.key === 'Escape'){
-    if(!$('#view-search').classList.contains('hidden')) closeSearch();
+    if(!$('#view-search').classList.contains('hidden')) handleSearchBack();
     else if(!$('#app-menu').classList.contains('hidden')) closeMenu();
   }
 });
@@ -8379,7 +8463,7 @@ async function openDevicesModal(){
    11) Inicialização
    --------------------------------------------------------------------- */
 /* ---------------------------------------------------------------------
-   10.5) Estantes (Marvel / DC / Mangás)
+   10.5) Estantes (Marvel / DC)
    --------------------------------------------------------------------- */
 // Logo(s) de uma estante: uma imagem só, várias lado a lado (estante padrão
 // Marvel + DC) ou, sem imagem nenhuma, o nome em texto.
@@ -8387,7 +8471,7 @@ function shelfLogoHtml(shelf, big){
   const logos = shelf.logos || (shelf.logo ? [shelf.logo] : []);
   const lazy = big ? '' : ' loading="lazy"';
   const alt = escapeHtml(shelf.label);
-  if(!logos.length) return `<span class="manga-logo-text${big ? ' big' : ''}">${alt}</span>`;
+  if(!logos.length) return `<span class="shelf-logo-text">${alt}</span>`;
   const imgs = logos.map(u=>`<img src="${u}" alt="${alt}"${lazy}>`).join('');
   return logos.length > 1 ? `<span class="shelf-logo-row">${imgs}</span>` : imgs;
 }
@@ -8626,7 +8710,7 @@ async function boot(){
 }
 
 initConnectivityEvents();
-window.PLANETAHQ_BUILD='v97';
+window.PLANETAHQ_BUILD='v99';
 let appBootComplete=false;
 let pendingSWReload=false;
 let swReloadRequested=false;
