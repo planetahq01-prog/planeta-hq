@@ -519,6 +519,7 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 .home-section-title .section-logo[data-logo="wolverine"]{height:50px;}
 .home-section-title .section-logo[data-logo="motoqueiro"]{height:50px;}
 .home-section-title .section-logo[data-logo="flash"]{height:50px;}
+.home-section-title .section-logo[data-logo="demolidor"]{height:50px;}
 .home-section-title .section-logo.hidden{display:none;}
 .home-section-title .section-logo-text.hidden{display:none;}
 
@@ -7474,14 +7475,15 @@ const HOME_LOGOS = {
   deadpool: 'https://i.postimg.cc/j59jC0D5/pngaaa-com-153784.png',
   wolverine: 'https://i.postimg.cc/rpwx7r3J/pngaaa-com-979580.png',
   motoqueiro: 'https://i.postimg.cc/gkKwd0vg/175900-ghost-rider-download-hd.png',
-  flash: 'https://i.postimg.cc/HsXMK065/the-flash-seeklogo.png'
+  flash: 'https://i.postimg.cc/HsXMK065/the-flash-seeklogo.png',
+  demolidor: 'https://i.postimg.cc/zv1NH4Nf/daredevil-seeklogo.png'
 };
 
 // Logos que NÃO passam pelo proxy/R2 (o worker.js só conhece as ids antigas
 // acima): vão direto pela URL do postimg.cc, sem gastar uma requisição
 // ao proxy que só ia falhar antes de cair no link direto. Se um dia você
 // adicionar 'avengers' ao mapa de logos do worker.js, é só tirar daqui.
-const LOGO_IDS_DIRECT = new Set(['avengers', 'liga', 'aranhaespecial', 'ligasaga', 'quarteto', 'deadpool', 'wolverine', 'motoqueiro', 'flash']);
+const LOGO_IDS_DIRECT = new Set(['avengers', 'liga', 'aranhaespecial', 'ligasaga', 'quarteto', 'deadpool', 'wolverine', 'motoqueiro', 'flash', 'demolidor']);
 
 // Com proxy configurado, a logo vem do cache compartilhado (R2) via
 // worker.js — instantânea pra qualquer pessoa, mesmo na primeira visita
@@ -7553,8 +7555,8 @@ const SHELVES = {
   marvel: {
     key: 'marvel', label: 'Marvel',
     logo: MARVEL_LOGO,
-    sections: ['aranha','especiaisAranha','hulk','ironman','recomendados','doomsday','xmen','wolverine','deadpool','motoqueiro','quarteto','classicoAvengers','thanos','salvat'],
-    pathKeywords: ['colecao homem aranha','edicoes especiais homem aranha','colecao hulk','colecao homem de ferro','doomsday','x men','xmen','colecao wolverine','colecao deadpool','colecao motoqueiro fantasma','colecao quarteto fantastico','vingadores classico','colecao thanos','graphic novels marvel']
+    sections: ['aranha','especiaisAranha','hulk','ironman','demolidor','recomendados','doomsday','xmen','wolverine','deadpool','motoqueiro','quarteto','classicoAvengers','thanos','salvat'],
+    pathKeywords: ['colecao homem aranha','edicoes especiais homem aranha','colecao hulk','colecao homem de ferro','colecao demolidor','doomsday','x men','xmen','colecao wolverine','colecao deadpool','colecao motoqueiro fantasma','colecao quarteto fantastico','vingadores classico','colecao thanos','graphic novels marvel']
   },
   dc: {
     key: 'dc', label: 'DC',
@@ -7569,6 +7571,7 @@ SHELVES.todas.sections = [
   'aranha',            // Homem-Aranha
   'batman',            // Batman
   'ironman',           // Homem de Ferro
+  'demolidor',        // Demolidor
   'superman',          // Superman
   'flash',              // Flash
   'hulk',              // Hulk
@@ -7959,6 +7962,26 @@ function paintHomeSections(wrap, data){
     { kind: SECTION_KINDS.MISTA }
   );
   if(secMotoqueiro){ built['motoqueiro'] = secMotoqueiro; wireHomeLogoFallback(secMotoqueiro, 'motoqueiro'); }
+
+
+  // "Coleção: Demolidor" — seção MISTA, conteúdo da pasta raiz, com suas
+  // subpastas e HQs soltas reunidas no mesmo carrossel.
+  const demolidorLoose = comicsDirectlyInNamedFolder(allComics, ['colecao demolidor']);
+  const demolidorLooseIds = new Set(demolidorLoose.map(c=>c.id));
+  const secDemolidor = buildHomeSection(
+    `Coleção: <span class="section-logo-text hidden" data-logo-text="demolidor">Demolidor</span><img class="section-logo" data-logo="demolidor" src="${logoSrc('demolidor')}" alt="Demolidor" loading="eager" decoding="async">`,
+    demolidorLoose,
+    (it)=>{
+      if(demolidorLooseIds.has(it.id)){
+        const card = buildCarouselCard(it, { isFolder:false, dlCorner:true, size: it.size });
+        card.dataset.cardKind = 'edicao';
+        return card;
+      }
+      return buildCarouselCard(it, { isFolder:true });
+    },
+    { kind: SECTION_KINDS.MISTA, folderNames:['colecao demolidor'] }
+  );
+  if(secDemolidor){ built['demolidor'] = secDemolidor; wireHomeLogoFallback(secDemolidor, 'demolidor'); }
 
   const secRec = buildHomeSection('Recomendados', recommended, (it)=>{
     return buildCarouselCard(it, { isFolder:false, size: it.size });
@@ -8710,7 +8733,7 @@ async function boot(){
 }
 
 initConnectivityEvents();
-window.PLANETAHQ_BUILD='v99';
+window.PLANETAHQ_BUILD='v100';
 let appBootComplete=false;
 let pendingSWReload=false;
 let swReloadRequested=false;
