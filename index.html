@@ -6723,8 +6723,11 @@ async function crawlLibrarySections(token, isStale, errorState){
   const deadpoolFolders = await childrenOfNamedFolder(['colecao deadpool']);
   const wolverineFolders = await childrenOfNamedFolder(['colecao wolverine']);
   const motoqueiroFolders = await childrenOfNamedFolder(['colecao motoqueiro fantasma']);
+  // Pasta "Coleção: Capitão América" — seção MISTA com todo o conteúdo
+  // diretamente dentro dela: subpastas e HQs soltas na raiz.
+  const capitaoAmericaFolders = await childrenOfNamedFolder(['colecao capitao america']);
 
-  return {comics, folders: allFolders, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders, deadpoolFolders, wolverineFolders, motoqueiroFolders,
+  return {comics, folders: allFolders, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders, deadpoolFolders, wolverineFolders, motoqueiroFolders, capitaoAmericaFolders,
     hadError: !!(errorState && errorState.hadError),
     errorMessage: errorState && errorState.lastError ? errorState.lastError.message : null};
 }
@@ -7476,14 +7479,15 @@ const HOME_LOGOS = {
   wolverine: 'https://i.postimg.cc/rpwx7r3J/pngaaa-com-979580.png',
   motoqueiro: 'https://i.postimg.cc/gkKwd0vg/175900-ghost-rider-download-hd.png',
   flash: 'https://i.postimg.cc/HsXMK065/the-flash-seeklogo.png',
-  demolidor: 'https://i.postimg.cc/zv1NH4Nf/daredevil-seeklogo.png'
+  demolidor: 'https://i.postimg.cc/zv1NH4Nf/daredevil-seeklogo.png',
+  capitaoamerica: 'https://i.postimg.cc/Y9zqd0Ph/captain-america-seeklogo.png'
 };
 
 // Logos que NÃO passam pelo proxy/R2 (o worker.js só conhece as ids antigas
 // acima): vão direto pela URL do postimg.cc, sem gastar uma requisição
 // ao proxy que só ia falhar antes de cair no link direto. Se um dia você
 // adicionar 'avengers' ao mapa de logos do worker.js, é só tirar daqui.
-const LOGO_IDS_DIRECT = new Set(['avengers', 'liga', 'aranhaespecial', 'ligasaga', 'quarteto', 'deadpool', 'wolverine', 'motoqueiro', 'flash', 'demolidor']);
+const LOGO_IDS_DIRECT = new Set(['avengers', 'liga', 'aranhaespecial', 'ligasaga', 'quarteto', 'deadpool', 'wolverine', 'motoqueiro', 'flash', 'demolidor', 'capitaoamerica']);
 
 // Com proxy configurado, a logo vem do cache compartilhado (R2) via
 // worker.js — instantânea pra qualquer pessoa, mesmo na primeira visita
@@ -7555,8 +7559,8 @@ const SHELVES = {
   marvel: {
     key: 'marvel', label: 'Marvel',
     logo: MARVEL_LOGO,
-    sections: ['aranha','especiaisAranha','hulk','ironman','demolidor','recomendados','doomsday','xmen','wolverine','deadpool','motoqueiro','quarteto','classicoAvengers','thanos','salvat'],
-    pathKeywords: ['colecao homem aranha','edicoes especiais homem aranha','colecao hulk','colecao homem de ferro','colecao demolidor','doomsday','x men','xmen','colecao wolverine','colecao deadpool','colecao motoqueiro fantasma','colecao quarteto fantastico','vingadores classico','colecao thanos','graphic novels marvel']
+    sections: ['aranha','especiaisAranha','hulk','ironman','demolidor','capitaoamerica','recomendados','doomsday','xmen','wolverine','deadpool','motoqueiro','quarteto','classicoAvengers','thanos','salvat'],
+    pathKeywords: ['colecao homem aranha','edicoes especiais homem aranha','colecao hulk','colecao homem de ferro','colecao demolidor','colecao capitao america','doomsday','x men','xmen','colecao wolverine','colecao deadpool','colecao motoqueiro fantasma','colecao quarteto fantastico','vingadores classico','colecao thanos','graphic novels marvel']
   },
   dc: {
     key: 'dc', label: 'DC',
@@ -7572,6 +7576,7 @@ SHELVES.todas.sections = [
   'batman',            // Batman
   'ironman',           // Homem de Ferro
   'demolidor',        // Demolidor
+  'capitaoamerica',   // Capitão América
   'superman',          // Superman
   'flash',              // Flash
   'hulk',              // Hulk
@@ -7634,7 +7639,7 @@ function paintHomeSections(wrap, data){
     comicsByParent.get(parentId).push(item);
   });
   homeSectionDataContext = {...data,foldersByParent,comicsByParent};
-  const {continueItems, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders, deadpoolFolders, wolverineFolders, motoqueiroFolders, allComics, allFolders, hadError, errorMessage} = data;
+  const {continueItems, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders, deadpoolFolders, wolverineFolders, motoqueiroFolders, capitaoAmericaFolders, allComics, allFolders, hadError, errorMessage} = data;
   // "Recomendados" só com HQs da estante atual (Marvel só recomenda Marvel,
   // DC só DC etc.) — ver comicShelfOf. Repintar ao trocar de estante já
   // recalcula isto (switchShelf chama paintHomeSections de novo).
@@ -7982,6 +7987,25 @@ function paintHomeSections(wrap, data){
     { kind: SECTION_KINDS.MISTA, folderNames:['colecao demolidor'] }
   );
   if(secDemolidor){ built['demolidor'] = secDemolidor; wireHomeLogoFallback(secDemolidor, 'demolidor'); }
+
+  // "Coleção: Capitão América" — seção MISTA com subpastas e HQs
+  // soltas diretamente na pasta raiz da coleção.
+  const capitaoAmericaLoose = comicsDirectlyInNamedFolder(allComics, ['colecao capitao america']);
+  const capitaoAmericaLooseIds = new Set(capitaoAmericaLoose.map(c=>c.id));
+  const secCapitaoAmerica = buildHomeSection(
+    `Coleção: <span class="section-logo-text hidden" data-logo-text="capitaoamerica">Capitão América</span><img class="section-logo" data-logo="capitaoamerica" src="${logoSrc('capitaoamerica')}" alt="Capitão América" loading="eager" decoding="async">`,
+    (capitaoAmericaFolders || []).concat(capitaoAmericaLoose),
+    (it)=>{
+      if(capitaoAmericaLooseIds.has(it.id)){
+        const card = buildCarouselCard(it, { isFolder:false, dlCorner:true, size: it.size });
+        card.dataset.cardKind = 'edicao';
+        return card;
+      }
+      return buildCarouselCard(it, { isFolder:true });
+    },
+    { kind: SECTION_KINDS.MISTA, folderNames:['colecao capitao america'] }
+  );
+  if(secCapitaoAmerica){ built['capitaoamerica'] = secCapitaoAmerica; wireHomeLogoFallback(secCapitaoAmerica, 'capitaoamerica'); }
 
   const secRec = buildHomeSection('Recomendados', recommended, (it)=>{
     return buildCarouselCard(it, { isFolder:false, size: it.size });

@@ -607,7 +607,7 @@
   sobe pra os aparelhos buscarem o index.html novo.
 */
 /* v85: index.html agora monta as seções como mistas e inclui a logo Flash; o cache da Home também reconstrói o índice pai/filho. */
-const CACHE_VERSION = 'v100';
+const CACHE_VERSION = 'v101';
 // Cache das capas: separado do da casca do app e mantido entre versões.
 const COVERS_CACHE = 'planeta-hq-covers-v1';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
@@ -833,6 +833,8 @@ const APP_SHELL = [
   'https://i.postimg.cc/HsXMK065/the-flash-seeklogo.png',
   // Logo da nova seção Coleção: Demolidor.
   'https://i.postimg.cc/zv1NH4Nf/daredevil-seeklogo.png',
+  // Logo da nova seção Coleção: Capitão América — direta do postimg.cc.
+  'https://i.postimg.cc/Y9zqd0Ph/captain-america-seeklogo.png',
   // Logos das estantes atuais Marvel/DC (ver SHELVES no index.html).
   'https://i.postimg.cc/vBNJsJVq/Marvel-Logo.jpg',
   'https://i.postimg.cc/P550CfQJ/DC-Comics-logo.png'
