@@ -613,11 +613,9 @@ body.theme-transitioning .tab.active{
 .featured-heading{display:flex;align-items:center;justify-content:space-between;padding:0 16px 10px;}
 .featured-heading h2{margin:0;font-family:var(--font-display);font-size:18px;letter-spacing:.01em;color:var(--paper);}
 .featured-heading span{font-size:10px;color:var(--text-muted);}
-.featured-carousel{display:flex;gap:12px;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;-webkit-overflow-scrolling:touch;padding:0 14px 10px;scrollbar-width:none;cursor:grab;}
-.featured-carousel::-webkit-scrollbar{display:none;}
-.featured-carousel.dragging{cursor:grabbing;scroll-snap-type:none;}
-.featured-carousel.dragging *{pointer-events:none;}
-.featured-slide{position:relative;flex:0 0 calc(100vw - 28px);width:calc(100vw - 28px);max-width:470px;aspect-ratio:3/4;scroll-snap-align:center;overflow:hidden;border:0;border-radius:16px;background:var(--ink-elevated);box-shadow:0 18px 34px -20px rgba(0,0,0,.9);}
+.featured-carousel{display:block;padding:0 14px 10px;}
+.featured-slide{position:relative;width:100%;max-width:470px;margin:0 auto;aspect-ratio:3/4;overflow:hidden;border:0;border-radius:16px;background:var(--ink-elevated);contain:layout paint;}
+
 .featured-slide-media,.featured-slide-media img{position:absolute;inset:0;width:100%;height:100%;display:block;}
 .featured-slide-media img{object-fit:cover;}
 .featured-slide-placeholder{display:flex;align-items:center;justify-content:center;padding:30px;text-align:center;color:var(--text-muted);background:radial-gradient(circle at 50% 22%,rgba(39,209,232,.18),transparent 38%),linear-gradient(155deg,#111b38,#050811 70%);font-size:12px;line-height:1.45;}
@@ -628,12 +626,12 @@ body.theme-transitioning .tab.active{
 .featured-slide-description{margin:0 0 12px;max-width:340px;color:rgba(255,255,255,.82);font-size:11px;line-height:1.4;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;}
 .featured-slide-actions{display:flex;gap:8px;}
 .featured-action{min-height:34px;padding:8px 12px;border:0;border-radius:7px;background:#fff;color:#080b14;font-size:11px;font-weight:800;cursor:pointer;}
-.featured-action.secondary{border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.16);color:#fff;backdrop-filter:blur(8px);}
+.featured-action.secondary{border:1px solid rgba(255,255,255,.2);background:rgba(255,255,255,.16);color:#fff;}
 .featured-action:disabled{opacity:.55;cursor:default;}
 .featured-dots{display:flex;justify-content:center;gap:5px;padding-top:1px;}
 .featured-dot{width:6px;height:6px;padding:0;border:0;border-radius:50%;background:rgba(255,255,255,.25);}
 .featured-dot.active{width:18px;border-radius:4px;background:var(--accent);}
-@media(min-width:700px){.featured-carousel{justify-content:center;}.featured-slide{flex-basis:min(70vw,470px);width:min(70vw,470px);}}
+@media(min-width:700px){.featured-slide{width:min(70vw,470px);}}
 
 .carousel{
   display:flex;gap:10px;overflow-x:auto;overflow-y:hidden;
@@ -7734,8 +7732,7 @@ function buildFeaturedSection(data){
   heading.appendChild(elHtml('h2','', 'Destaques'));
   heading.appendChild(el('span','', 'Coleções em evidência'));
   section.appendChild(heading);
-  const carousel=el('div','carousel featured-carousel');
-  const dots=el('div','featured-dots');
+  const carousel=el('div','featured-carousel');
   [selected].forEach((item,index)=>{
     const root=resolveHomeCollectionRoot(allFolders,allComics,item.folderNames,item.parentNames,[],item.title);
     const slide=el('article','featured-slide');
@@ -7759,11 +7756,9 @@ function buildFeaturedSection(data){
     if(!root){listBtn.disabled=true;listBtn.title='A pasta ainda não foi encontrada no Drive';}
     else {isFavorite(root.id).then(fav=>{listBtn.textContent=fav?'✓ Minha lista':'+ Minha lista';}); listBtn.onclick=async()=>{const now=await toggleFavorite({...root,mimeType:'application/vnd.google-apps.folder'});listBtn.textContent=now?'✓ Minha lista':'+ Minha lista';toast(now?'Adicionado aos favoritos':'Removido dos favoritos');};}
     actions.appendChild(listBtn); copy.appendChild(actions); slide.appendChild(copy); carousel.appendChild(slide);
-    const dot=el('button','featured-dot'); dot.type='button'; dot.setAttribute('aria-label',`Ver destaque ${index+1}`); dot.onclick=()=>slide.scrollIntoView({behavior:'smooth',block:'nearest',inline:'center'}); dots.appendChild(dot);
+
   });
-  carousel.addEventListener('scroll',()=>{const center=carousel.scrollLeft+carousel.clientWidth/2;let nearest=0,best=Infinity;[...carousel.children].forEach((slide,i)=>{const d=Math.abs(slide.offsetLeft+slide.offsetWidth/2-center);if(d<best){best=d;nearest=i;}});[...dots.children].forEach((dot,i)=>dot.classList.toggle('active',i===nearest));},{passive:true});
-  if(dots.firstElementChild) dots.firstElementChild.classList.add('active');
-  attachCarouselDrag(carousel); section.appendChild(carousel); section.appendChild(dots); return section;
+  section.appendChild(carousel); return section;
 }
 
 // Estantes — cada uma é uma "vitrine" com seu próprio subconjunto e ordem
