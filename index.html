@@ -635,6 +635,12 @@ body.theme-transitioning .tab.active{
    navegador do computador (no toque isso nunca foi um problema). */
 .carousel-card, .carousel-card *{user-select:none;-webkit-user-drag:none;}
 @media(hover:hover){ .carousel-card:hover .cc-cover{transform:translateY(-3px);} }
+.home-section[data-home-key="lancamentos"] .carousel-card{
+  flex-basis:172px;width:172px;
+}
+.home-section[data-home-key="lancamentos"] .carousel-card .cc-name{
+  font-size:13px;
+}
 .carousel-card .cc-cover img{
   position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;
   opacity:0;
@@ -2018,6 +2024,7 @@ function resolveShortcuts(rawFiles){
         name: f.name,
         mimeType: f.shortcutDetails.targetMimeType,
         size: f.size,
+        createdTime: f.createdTime,
         modifiedTime: f.modifiedTime,
         thumbnailLink: f.thumbnailLink
       };
@@ -6519,7 +6526,7 @@ function normalizeForFolderMatch(s){
   return normalizeStr(s).replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ');
 }
 
-const ALLFOLDERS_CACHE_KEY = 'planetahq_allfolders_cache_v2'; // v2: reconstruir o índice pai/filho usado pelas seções mistas
+const ALLFOLDERS_CACHE_KEY = 'planetahq_allfolders_cache_v3'; // v3: inclui createdTime para a seção Lançamentos
 
 // Varredura ÚNICA de toda a biblioteca, usada pra montar as 5 seções da
 // Home de uma vez só (Aranha, X-Men, Mangás e Todos os quadrinhos/
@@ -7027,7 +7034,7 @@ function attachCarouselDrag(carousel){
 const ARANHA_CACHE_KEY = 'planetahq_aranha_cache_v3'; // v3: seção passou a ser baseada na pasta "Coleção Homem-Aranha", não mais filtro por nome
 const XMEN_CACHE_KEY = 'planetahq_xmen_cache_v1';
 const MANGA_CACHE_KEY = 'planetahq_manga_cache_v1';
-const ALLCOMICS_CACHE_KEY = 'planetahq_allcomics_cache_v2'; // v2: cada HQ de mangá ganhou _mangaFolderId (ver crawlLibrarySections)
+const ALLCOMICS_CACHE_KEY = 'planetahq_allcomics_cache_v3'; // v3: inclui createdTime para a seção Lançamentos
 const BATMAN_CACHE_KEY = 'planetahq_batman_cache_v1';
 const SALVAT_CACHE_KEY = 'planetahq_salvat_cache_v1';
 const HULK_CACHE_KEY = 'planetahq_hulk_cache_v1';
@@ -7362,6 +7369,32 @@ function comicsDirectlyInNamedFolder(allComics, targetNames){
   return list.sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
 }
 
+function buildLaunchItems(allFolders, allComics){
+  // Lançamentos consideram somente o primeiro nível da biblioteca. Assim,
+  // uma pasta recém-criada aparece como um único item, sem duplicar cada HQ
+  // que está dentro dela. HQs só aparecem quando estão diretamente na raiz.
+  const rootId = CONFIG.rootFolderId;
+  const folders = (allFolders||[]).filter(f=>
+    (f._parentId!=null ? f._parentId : f.parentId) === rootId
+  );
+  const comics = (allComics||[]).filter(f=>
+    (f._parentId!=null ? f._parentId : f.parentId) === rootId
+  );
+  const items = folders.concat(comics);
+  const now = Date.now();
+  const recentCutoff = now - 30*24*60*60*1000;
+  return items
+    .filter(item=>{
+      const created = Date.parse(item.createdTime || '');
+      return Number.isFinite(created) && created >= recentCutoff;
+    })
+    .sort((a,b)=>{
+      const dateDiff = Date.parse(b.createdTime||'') - Date.parse(a.createdTime||'');
+      return dateDiff || String(a.name||'').localeCompare(String(b.name||''),'pt-BR',{numeric:true});
+    })
+    .slice(0, 24);
+}
+
 function comicsInsideMangaFolder(allComics, mangaFolderId, rootLabel){
   const list=(allComics||[]).filter(f=>f._mangaFolderId===mangaFolderId).map(f=>{
     const idx=(f._pathIds||[]).indexOf(mangaFolderId);
@@ -7657,6 +7690,12 @@ function paintHomeSections(wrap, data){
   const built = {};
 
   const continueForShelf=filterContinueItemsForShelf(continueItems,currentShelf);
+  const launchItems = buildLaunchItems(allFolders, allComics);
+  const secLancamentos = buildHomeSection('Lançamentos', launchItems, buildMixedCarouselCard, {
+    kind: 'lancamentos', collectionTitle:'Lançamentos', browseItems:launchItems
+  });
+  if(secLancamentos){ built['lancamentos'] = secLancamentos; }
+
   const secContinue = buildHomeSection('Continuar lendo', continueForShelf, (it)=>{
     return buildCarouselCard(it, { isFolder:false, progressPct: it.pct, sub: `${it.pct}% · pág. ${it.pageIndex+1}/${it.pageCount}` });
   }, {collectionTitle:'Continuar lendo',browseLoader:async()=>{
@@ -8019,7 +8058,7 @@ function paintHomeSections(wrap, data){
   // não aparece em lugar nenhum (é o comportamento certo aqui: as estantes
   // são vitrines curadas, não "mostra tudo que tiver").
   const shelfDef = SHELVES[currentShelf] || SHELVES.marvel;
-  const orderedKeys = ['continuar', ...shelfDef.sections];
+  const orderedKeys = ['lancamentos','continuar', ...shelfDef.sections];
   orderedKeys.forEach(k=>{
     if(built[k]){
       built[k].dataset.homeKey = k; // âncora estável pra restaurar a posição da Home (ver captureHomeScroll)
