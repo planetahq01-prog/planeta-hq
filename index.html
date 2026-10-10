@@ -7911,9 +7911,8 @@ function paintHomeSections(wrap, data){
   // UM lugar só, sem mexer no código de cada seção.
   const built = {};
 
-  // Destaques temporariamente desativados para estabilizar a rolagem e o
-  // renderizador do WebView. A implementação permanece no arquivo para ser
-  // reativada posteriormente sem perder a configuração das coleções.
+  const secFeatured = buildFeaturedSection({allFolders,allComics});
+  if(secFeatured){ built['destaques'] = secFeatured; }
 
   const continueForShelf=filterContinueItemsForShelf(continueItems,currentShelf);
   const launchItems = buildLaunchItems(allFolders, allComics);
@@ -8349,6 +8348,11 @@ let homeToken = 0;
 async function renderHomeSections(forceRefresh, onProgress){
   const wrap = $('#home-sections');
   if(!wrap) return;
+  // Não revalida/reconstrói uma Home que já está visível em segundo plano.
+  // Essa chamada automática podia limpar e repintar toda a área central
+  // enquanto a pessoa rolava, produzindo os frames pretos vistos no WebView.
+  // Atualizações explícitas continuam passando forceRefresh=true.
+  if(!forceRefresh && wrap.querySelector('.home-section')) return;
   // Ao abrir o app (ou voltar à Home após um intervalo), repinta o cache
   // local imediatamente e consulta o Drive em segundo plano. Assim itens
   // apagados/mandados à lixeira não ficam presos no cache de 6 horas.
