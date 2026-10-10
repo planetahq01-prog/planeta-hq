@@ -3733,23 +3733,34 @@ async function enterFolder(id, name, {reset=false, skipHome=false, collectionRoo
   // o app. Não empilha ao (re)carregar a raiz da biblioteca.
   if(id !== CONFIG.rootFolderId) navPushLevel();
 }
-function goToBreadcrumbIndex(idx){
-  if(idx===0){ state.collectionMode=false; state.virtualCollection=null; $('#view-library').classList.remove('collection-grid-mode'); }
+async function goToBreadcrumbIndex(idx){
+  const goingHome = idx === 0;
+  if(goingHome){
+    state.collectionMode=false;
+    state.virtualCollection=null;
+    $('#view-library').classList.remove('collection-grid-mode');
+  }
   state.path = state.path.slice(0, idx+1);
   $('#search-input').value = '';
   renderBreadcrumb();
+  // Ao voltar para a Home, não chamamos renderLibrary(root): essa função
+  // escondia a Home, limpava o grid e deixava um frame vazio/preto antes da
+  // renderização assíncrona. A Home já é a tela da raiz, então basta torná-la
+  // visível, renderizá-la e só depois restaurar a posição salva.
+  if(goingHome){
+    $('#home-sections').classList.remove('hidden');
+    await renderHomeSections();
+    restoreHomeScrollOnReturn();
+    return;
+  }
   // De propósito NÃO rola pro topo aqui: só ENTRAR numa pasta abre lá do
   // início (ver enterFolder). Voltar pra uma pasta anterior não mexe na
-  // rolagem. (Voltar pra Home restaura a posição de onde a pessoa estava.)
-  renderLibrary(state.path[state.path.length-1].id, false);
-  if(state.path[state.path.length-1].id === CONFIG.rootFolderId){
-    renderHomeSections();
-    restoreHomeScrollOnReturn();
-  }
+  // rolagem.
+  await renderLibrary(state.path[state.path.length-1].id, false);
 }
-function goBack(){
+async function goBack(){
   if(state.path.length<=1) return;
-  goToBreadcrumbIndex(state.path.length-2);
+  await goToBreadcrumbIndex(state.path.length-2);
   navSyncAfterBack();
 }
 function renderBreadcrumb(){
