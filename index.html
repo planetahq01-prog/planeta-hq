@@ -3757,9 +3757,22 @@ async function goToBreadcrumbIndex(idx){
   // renderização assíncrona. A Home já é a tela da raiz, então basta torná-la
   // visível, renderizá-la e só depois restaurar a posição salva.
   if(goingHome){
-    $('#home-sections').classList.remove('hidden');
-    await renderHomeSections();
-    restoreHomeScrollOnReturn();
+    // A Home original nunca foi destruída ao entrar na pasta; só ficou
+    // escondida. Reutilizá-la evita qualquer repintura assíncrona e mantém a
+    // posição exata que o usuário estava vendo.
+    const home = $('#home-sections');
+    const grid = $('#grid-library');
+    if(grid){ releaseCoverObservers(grid); grid.innerHTML = ''; }
+    $('#folder-download-toolbar').classList.add('hidden');
+    $('#filter-bar').classList.add('hidden');
+    if(home) home.classList.remove('hidden');
+    $('#view-library').classList.remove('hidden');
+    const snap = homeScrollSnapshot;
+    homeScrollSnapshot = null;
+    homeRestoreWindow = snap ? {snap, until: Date.now() + HOME_RESTORE_WINDOW_MS} : null;
+    const restore = ()=>{ if(snap) window.scrollTo(0, Math.max(0, snap.top)); };
+    restore();
+    requestAnimationFrame(()=>{ restore(); requestAnimationFrame(restore); });
     return;
   }
   // De propósito NÃO rola pro topo aqui: só ENTRAR numa pasta abre lá do
@@ -7898,8 +7911,9 @@ function paintHomeSections(wrap, data){
   // UM lugar só, sem mexer no código de cada seção.
   const built = {};
 
-  const secFeatured = buildFeaturedSection({allFolders,allComics});
-  if(secFeatured){ built['destaques'] = secFeatured; }
+  // Destaques temporariamente desativados para estabilizar a rolagem e o
+  // renderizador do WebView. A implementação permanece no arquivo para ser
+  // reativada posteriormente sem perder a configuração das coleções.
 
   const continueForShelf=filterContinueItemsForShelf(continueItems,currentShelf);
   const launchItems = buildLaunchItems(allFolders, allComics);
