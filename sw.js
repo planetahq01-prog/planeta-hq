@@ -607,7 +607,7 @@
   sobe pra os aparelhos buscarem o index.html novo.
 */
 /* v85: index.html agora monta as seções como mistas e inclui a logo Flash; o cache da Home também reconstrói o índice pai/filho. */
-const CACHE_VERSION = 'v102';
+const CACHE_VERSION = 'v123';
 // Cache das capas: separado do da casca do app e mantido entre versões.
 const COVERS_CACHE = 'planeta-hq-covers-v1';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
@@ -786,6 +786,27 @@ const PDF_CMAP_FILES = [
 const APP_SHELL = [
   './index.html',
   './manifest.json',
+  './icon-192.png',
+  './icon-512.png',
+  './icon-512-maskable.png',
+  './favicon-32.png',
+  // Artes locais dos Destaques — pré-cacheadas para aparecerem offline.
+  './featured-homem-aranha-1.jpg',
+  './featured-homem-aranha-2.jpg',
+  './featured-homem-aranha-3.jpg',
+  './featured-especiais-homem-aranha-1.jpg',
+  './featured-especiais-homem-aranha-2.jpg',
+  './featured-homem-de-ferro-1.jpg',
+  './featured-homem-de-ferro-2.jpg',
+  './featured-hulk-1.jpg',
+  './featured-hulk-2.jpg',
+  './featured-universo-absoluto-1.jpg',
+  './featured-batman-1.jpg',
+  './featured-batman-2.jpg',
+  './featured-batman-3.jpg',
+  './featured-lanterna-1.jpg',
+  './featured-lanterna-2.jpg',
+  './featured-lanterna-3.jpg',
   'https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js',
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js',
   // O worker do pdf.js — sem ele em cache, ler qualquer PDF (inclusive um já
