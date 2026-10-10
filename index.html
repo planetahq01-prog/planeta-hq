@@ -2749,7 +2749,7 @@ function withCoverTimeout(promise){
   });
   return Promise.race([promise, timeout]).finally(()=> clearTimeout(timer));
 }
-const COVER_MAX_CONCURRENT = 9;
+const COVER_MAX_CONCURRENT = 4;
 let coverActiveCount = 0;
 const coverQueue = [];
 function pumpCoverQueue(){
@@ -2780,7 +2780,7 @@ function scheduleCoverTask(task){ coverQueue.push(task); pumpCoverQueue(); }
 //  2) enquanto o leitor está aberto, nenhuma capa pesada roda (as em
 //     andamento são pausadas e voltam pra fila) e, enquanto há download
 //     em andamento, roda no máximo 1 por vez — HQ tem prioridade.
-const NETWORK_COVER_MAX_CONCURRENT = 5;
+const NETWORK_COVER_MAX_CONCURRENT = 2;
 let networkCoverActiveCount = 0;
 const networkCoverQueueTasks = [];
 const networkCoverRunning = new Set();
@@ -2864,6 +2864,21 @@ function networkCoverQueue(task){
     armNetworkCoverWaitTimer(entry);
     networkCoverQueueTasks.push(entry);
     pumpNetworkCoverQueue();
+  });
+}
+// Ao trocar de pasta/tela, não deixe tarefas da tela abandonada continuarem
+// consumindo CPU, memória e rede em segundo plano. Elas eram uma causa de
+// travamento do frame inteiro quando a pessoa navegava rapidamente.
+function cancelStaleCoverWork(){
+  coverQueue.length = 0;
+  const queued = networkCoverQueueTasks.splice(0);
+  queued.forEach(entry=>{
+    if(entry.waitTimer) clearTimeout(entry.waitTimer);
+    try{ entry.reject(new DOMException('Tela de capas substituída.', 'AbortError')); }catch(e){}
+  });
+  networkCoverRunning.forEach(entry=>{
+    entry.requeue = false;
+    try{ entry.ctrl.abort(); }catch(e){}
   });
 }
 // Chamada quando uma HQ vai abrir: para na hora tudo que a fila de capas
@@ -3655,7 +3670,7 @@ function captureHomeScroll(){
     const c = sec.querySelector('.carousel');
     if(c && c.scrollLeft > 0) snap.carousels[sec.dataset.homeKey] = c.scrollLeft;
   });
-  homeScrollSnapshot = snap;
+  if(state.path.length <= 1) homeScrollSnapshot = snap;
 }
 
 function applyHomeRestore(snap){
@@ -3671,14 +3686,10 @@ function applyHomeRestore(snap){
     if(c) c.scrollLeft = snap.carousels[k];
   });
   // Vertical: pela seção-âncora; se ela não existir mais, pelo scrollTop bruto.
-  let top = snap.top;
-  const anchor = snap.anchorKey && byKey[snap.anchorKey];
-  if(anchor){
-    const viewTop = view.getBoundingClientRect().top;
-    const currentScroll = window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
-    top = currentScroll + (anchor.getBoundingClientRect().top - viewTop) + snap.anchorOffset;
-  }
-  window.scrollTo(0, Math.max(0, top));
+  // A Home usa a rolagem do documento inteiro. Como a Home não muda durante
+  // a navegação, o valor exato salvo é mais confiável que uma âncora baseada
+  // em getBoundingClientRect(), especialmente após capas entrarem no layout.
+  window.scrollTo(0, Math.max(0, snap.top));
   return true;
 }
 
@@ -3836,6 +3847,7 @@ function renderVirtualCollection(){
   comics.forEach(({card,item})=>lazyLoadCover(card,()=>attachCoverAsync(card,item)));
 }
 async function renderLibrary(folderId, forceRefresh){
+  cancelStaleCoverWork();
   $('#home-sections').classList.add('hidden');
   const grid = $('#grid-library');
   const folderToolbar=$('#folder-download-toolbar');
@@ -4701,6 +4713,20 @@ function buildCoverNode(src, f){
   return img;
 }
 
+// Mantém o placeholder visível enquanto a imagem ainda está transparente.
+// Substituir o placeholder imediatamente revelava o fundo preto por alguns
+// frames, principalmente quando várias capas chegavam ao mesmo tempo.
+function mountCoverNodeOverPlaceholder(placeholder, node){
+  if(!placeholder || !node || !placeholder.isConnected) return false;
+  const parent = placeholder.parentNode;
+  if(!parent) return false;
+  node.addEventListener('load', ()=>{
+    if(placeholder.isConnected) placeholder.remove();
+  }, {once:true});
+  parent.appendChild(node);
+  return true;
+}
+
 // BUG CORRIGIDO (capas de PASTA que ficavam brancas pra sempre, só nos
 // carrosséis da Home e no grid da biblioteca — nunca dentro da própria
 // pasta): o caminho de "capa imediata" (getImmediateFolderCoverSrc, usado
@@ -4769,7 +4795,10 @@ async function attachCoverToEl(placeholder, f){
   }
   if(!src){ placeholder.classList.remove('skeleton'); return; }
   const node = buildCoverNode(src, f);
-  if(placeholder.isConnected) placeholder.replaceWith(node);
+  if(placeholder.isConnected){
+    if(placeholder.parentElement && placeholder.parentElement.matches('.folder-cover, .cc-cover')) mountCoverNodeOverPlaceholder(placeholder, node);
+    else placeholder.replaceWith(node);
+  }
 }
 async function attachCoverAsync(card, f){
   const placeholder = card.querySelector('.cover-placeholder');
@@ -4916,7 +4945,7 @@ async function attachFolderCoverAsync(card, folderObj){
   const override = getFolderCoverOverride(folderObj.name);
   if(override){
     card.classList.add('has-cover');
-    if(placeholder.isConnected) placeholder.replaceWith(buildCoverNode(override));
+    if(placeholder.isConnected) mountCoverNodeOverPlaceholder(placeholder, buildCoverNode(override));
     return;
   }
   // resolveFolderCoverFile faz uma etapa A MAIS antes mesmo de chegar na
@@ -5248,7 +5277,9 @@ async function attachOfflineFolderCover(card,placeholder,file){
     try{src=await resolveCoverFallback(file);}catch(e){logWarn('[PlanetaHQ] não foi possível gerar a capa local da pasta baixada',file.name,e);}
   }
   if(src&&placeholder.isConnected){
-    card.classList.add('has-cover');placeholder.replaceWith(buildCoverNode(src,file));return;
+    card.classList.add('has-cover');
+    mountCoverNodeOverPlaceholder(placeholder, buildCoverNode(src,file));
+    return;
   }
   if(!placeholder.isConnected)return;
   card.classList.add('has-cover');
@@ -6878,7 +6909,7 @@ function buildCarouselCard(item, opts){
       // eram as mais afetadas: arquivos adicionados/alterados há pouco
       // tempo são justamente os que mais sofrem com thumbnailLink falho.
       const img = buildCoverNode(src, coverFile);
-      if(ph) ph.replaceWith(img);
+      if(ph) mountCoverNodeOverPlaceholder(ph, img);
     }catch(e){ if(ph) ph.classList.remove('skeleton'); }
   };
   if(!hasImmediateCover) lazyLoadCover(btn, loadCover);
@@ -7859,6 +7890,7 @@ function paintHomeSections(wrap, data){
     const sh = comicShelfOf(f);
     return currentShelf === 'todas' ? sh !== 'manga' : sh === currentShelf; // padrão = Marvel + DC
   }));
+  cancelStaleCoverWork();
   releaseCoverObservers(wrap);
   wrap.innerHTML = '';
   let anySection = false;
@@ -8367,8 +8399,11 @@ async function renderHomeSections(forceRefresh, onProgress){
       allComics: cachedComics ? cachedComics.comics : undefined,
       allFolders: cachedAllFolders ? cachedAllFolders.folders : undefined
     };
-    paintHomeSections(wrap, fastData);
-    lastPaintedHomeSignature = homeSectionsSignature(fastData);
+    const fastSignature = homeSectionsSignature(fastData);
+    if(!wrap.querySelector('.home-section') || fastSignature !== lastPaintedHomeSignature){
+      paintHomeSections(wrap, fastData);
+      lastPaintedHomeSignature = fastSignature;
+    }
   } else {
     wrap.innerHTML = `<div class="home-section"><div class="home-section-title">Carregando seções…</div></div>`;
     wrap.classList.remove('hidden');
