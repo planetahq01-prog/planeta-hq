@@ -7892,7 +7892,11 @@ function paintHomeSections(wrap, data){
   }));
   cancelStaleCoverWork();
   releaseCoverObservers(wrap);
-  wrap.innerHTML = '';
+  // Monta toda a nova árvore fora da tela. Antes o contêiner visível era
+  // esvaziado primeiro e preenchido depois; esse intervalo aparecia como uma
+  // piscada preta no WebView quando a pessoa rolava rápido ou as capas
+  // terminavam de ser resolvidas.
+  const staging = document.createElement('div');
   let anySection = false;
   // As seções são montadas aqui, por chave, e só no final são colocadas na
   // tela na ordem de HOME_SECTION_ORDER — assim a ordem da Home se muda em
@@ -8282,7 +8286,7 @@ function paintHomeSections(wrap, data){
   orderedKeys.forEach(k=>{
     if(built[k]){
       built[k].dataset.homeKey = k; // âncora estável pra restaurar a posição da Home (ver captureHomeScroll)
-      wrap.appendChild(built[k]);
+      staging.appendChild(built[k]);
       anySection = true;
     }
   });
@@ -8308,6 +8312,10 @@ function paintHomeSections(wrap, data){
     }
     return;
   }
+  // Troca de uma vez: a Home antiga permanece visível até a nova árvore
+  // completa estar pronta. replaceChildren não expõe um estado vazio entre
+  // os frames de pintura.
+  wrap.replaceChildren(...staging.childNodes);
   wrap.classList.remove('hidden');
   // Voltando de uma subpasta: toda vez que a Home é repintada durante a
   // janela de restauração, recoloca a posição de onde a pessoa estava.
