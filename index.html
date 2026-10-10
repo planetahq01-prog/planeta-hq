@@ -63,8 +63,8 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 }
 
 /* ============ LAYOUT BASE ============ */
-#app{display:block;min-height:100%;height:auto;}
-#chrome{position:static;}
+#app{display:flex;flex-direction:column;height:100%;}
+#chrome{position:static;flex:0 0 auto;}
 .hidden{display:none !important;}
 
 /* ---- Topbar ---- */
@@ -73,8 +73,8 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
   padding:12px 16px;background-color:var(--ink);
   background-image:radial-gradient(rgba(255,255,255,.05) 1px, transparent 1px);
   background-size:12px 12px;
-  border-bottom:0;
-  position:static;
+  border-bottom:1px solid var(--ink-border);
+  position:sticky;top:0;z-index:20;
 }
 /* Linha 1: logo + botões de ação. Linha 2: busca em largura total.
    Antes tudo ficava numa linha só; com 3 botões de ícone (atualizar,
@@ -128,7 +128,7 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 }
 
 /* ---- Conteúdo / grid ---- */
-.view{display:block;flex:none;overflow:visible;min-height:0;}
+.view{display:block;flex:1 1 0%;overflow-y:auto;-webkit-overflow-scrolling:touch;min-height:0;}
 .grid{
   display:grid;
   grid-template-columns:repeat(auto-fill,minmax(130px,1fr));
@@ -3654,7 +3654,7 @@ function captureHomeScroll(){
     return;
   }
   const viewTop = view.getBoundingClientRect().top;
-  const snap = {top: window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0, anchorKey: null, anchorOffset: 0, carousels: {}};
+  const snap = {top: view.scrollTop || 0, anchorKey: null, anchorOffset: 0, carousels: {}};
   // Âncora: a primeira seção cuja parte de baixo ainda aparece na tela.
   for(const sec of secs){
     const r = sec.getBoundingClientRect();
@@ -3683,11 +3683,8 @@ function applyHomeRestore(snap){
     const c = byKey[k] && byKey[k].querySelector('.carousel');
     if(c) c.scrollLeft = snap.carousels[k];
   });
-  // Vertical: pela seção-âncora; se ela não existir mais, pelo scrollTop bruto.
-  // A Home usa a rolagem do documento inteiro. Como a Home não muda durante
-  // a navegação, o valor exato salvo é mais confiável que uma âncora baseada
-  // em getBoundingClientRect(), especialmente após capas entrarem no layout.
-  window.scrollTo(0, Math.max(0, snap.top));
+  // A rolagem vertical pertence à própria view da Biblioteca.
+  view.scrollTo(0, Math.max(0, snap.top));
   return true;
 }
 
@@ -3717,7 +3714,8 @@ function restoreHomeScrollOnReturn(){
 // isso a pasta nova herdava a posição de rolagem da tela anterior (ex.: a
 // Home rolada lá embaixo) e aparecia no meio.
 function scrollLibraryToTop(){
-  window.scrollTo(0, 0);
+  const view = $('#view-library');
+  if(view) view.scrollTop = 0;
 }
 
 async function enterFolder(id, name, {reset=false, skipHome=false, collectionRoot=false}={}){
@@ -3770,7 +3768,7 @@ async function goToBreadcrumbIndex(idx){
     const snap = homeScrollSnapshot;
     homeScrollSnapshot = null;
     homeRestoreWindow = snap ? {snap, until: Date.now() + HOME_RESTORE_WINDOW_MS} : null;
-    const restore = ()=>{ if(snap) window.scrollTo(0, Math.max(0, snap.top)); };
+    const restore = ()=>{ const view=$('#view-library'); if(snap && view) view.scrollTo(0, Math.max(0, snap.top)); };
     restore();
     requestAnimationFrame(()=>{ restore(); requestAnimationFrame(restore); });
     return;
