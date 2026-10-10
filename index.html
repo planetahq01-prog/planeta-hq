@@ -7874,7 +7874,46 @@ function filterContinueItemsForShelf(items, shelfKey){
   });
 }
 
+// Evita substituir todos os cards da Home enquanto o usuário ainda está
+// navegando pela tela. Em WebViews móveis, remover as camadas visíveis
+// durante o momentum do scroll pode produzir quadros pretos intermitentes.
+let homeInteractionUntil = 0;
+let pendingHomePaint = null;
+let homePaintTimer = null;
+const HOME_PAINT_IDLE_MS = 700;
+function noteHomeInteraction(){
+  homeInteractionUntil = Date.now() + HOME_PAINT_IDLE_MS;
+  if(homePaintTimer) clearTimeout(homePaintTimer);
+  if(pendingHomePaint){
+    homePaintTimer = setTimeout(flushPendingHomePaint, HOME_PAINT_IDLE_MS + 20);
+  }
+}
+function flushPendingHomePaint(){
+  homePaintTimer = null;
+  if(!pendingHomePaint) return;
+  const wait = homeInteractionUntil - Date.now();
+  if(wait > 0){
+    homePaintTimer = setTimeout(flushPendingHomePaint, wait + 20);
+    return;
+  }
+  const pending = pendingHomePaint;
+  pendingHomePaint = null;
+  paintHomeSectionsNow(pending.wrap, pending.data);
+}
+window.addEventListener('scroll', noteHomeInteraction, {passive:true});
+['touchstart','touchmove','pointerdown','wheel'].forEach(type=>
+  window.addEventListener(type, noteHomeInteraction, {passive:true})
+);
 function paintHomeSections(wrap, data){
+  if(Date.now() < homeInteractionUntil){
+    pendingHomePaint = {wrap, data};
+    if(homePaintTimer) clearTimeout(homePaintTimer);
+    homePaintTimer = setTimeout(flushPendingHomePaint, homeInteractionUntil - Date.now() + 20);
+    return;
+  }
+  paintHomeSectionsNow(wrap, data);
+}
+function paintHomeSectionsNow(wrap, data){
   lastHomeSectionsData = data;
   const foldersByParent=new Map(),comicsByParent=new Map();
   (Array.isArray(data.allFolders)?data.allFolders:[]).forEach(item=>{
