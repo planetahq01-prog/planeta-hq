@@ -636,10 +636,18 @@ body.theme-transitioning .tab.active{
 .carousel-card, .carousel-card *{user-select:none;-webkit-user-drag:none;}
 @media(hover:hover){ .carousel-card:hover .cc-cover{transform:translateY(-3px);} }
 .home-section[data-home-key="lancamentos"] .carousel-card{
-  flex-basis:172px;width:172px;
+  flex-basis:150px;width:150px;
 }
 .home-section[data-home-key="lancamentos"] .carousel-card .cc-name{
   font-size:13px;
+}
+@media(max-width:699px){
+  /* Com 16px de margem e 10px entre cards, deixa aproximadamente 2,5
+     capas visíveis na largura da tela. */
+  .home-section[data-home-key="lancamentos"] .carousel-card{
+    flex-basis:calc((100vw - 52px)/2.5);
+    width:calc((100vw - 52px)/2.5);
+  }
 }
 .carousel-card .cc-cover img{
   position:absolute;inset:0;width:100%;height:100%;object-fit:cover;display:block;
@@ -6790,7 +6798,7 @@ function buildCarouselCard(item, opts){
         }
       } else {
         coverFile = item;
-        src = await resolveCoverSrc(item);
+        src = await resolveCoverSrc(item, {persistOffline: !!opts.persistOffline});
       }
       if(!src){ if(ph) ph.classList.remove('skeleton'); return; }
       // Usa buildCoverNode (a mesma função da biblioteca normal) em vez de
@@ -7691,7 +7699,14 @@ function paintHomeSections(wrap, data){
 
   const continueForShelf=filterContinueItemsForShelf(continueItems,currentShelf);
   const launchItems = buildLaunchItems(allFolders, allComics);
-  const secLancamentos = buildHomeSection('Lançamentos', launchItems, buildMixedCarouselCard, {
+  const secLancamentos = buildHomeSection('Lançamentos', launchItems, (it)=>{
+    const isFolder = isHomeFolderItem(it);
+    const card = buildCarouselCard(it, {
+      isFolder, dlCorner:!isFolder, size:it.size, persistOffline:true
+    });
+    if(!isFolder) card.dataset.cardKind='edicao';
+    return card;
+  }, {
     kind: 'lancamentos', collectionTitle:'Lançamentos', browseItems:launchItems
   });
   if(secLancamentos){ built['lancamentos'] = secLancamentos; }
