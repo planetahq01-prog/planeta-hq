@@ -3641,7 +3641,7 @@ function captureHomeScroll(){
     return;
   }
   const viewTop = view.getBoundingClientRect().top;
-  const snap = {top: view.scrollTop, anchorKey: null, anchorOffset: 0, carousels: {}};
+  const snap = {top: window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0, anchorKey: null, anchorOffset: 0, carousels: {}};
   // Âncora: a primeira seção cuja parte de baixo ainda aparece na tela.
   for(const sec of secs){
     const r = sec.getBoundingClientRect();
@@ -3675,9 +3675,10 @@ function applyHomeRestore(snap){
   const anchor = snap.anchorKey && byKey[snap.anchorKey];
   if(anchor){
     const viewTop = view.getBoundingClientRect().top;
-    top = view.scrollTop + (anchor.getBoundingClientRect().top - viewTop) + snap.anchorOffset;
+    const currentScroll = window.scrollY || document.documentElement.scrollTop || document.body.scrollTop || 0;
+    top = currentScroll + (anchor.getBoundingClientRect().top - viewTop) + snap.anchorOffset;
   }
-  view.scrollTop = Math.max(0, top);
+  window.scrollTo(0, Math.max(0, top));
   return true;
 }
 
@@ -3698,7 +3699,7 @@ function restoreHomeScrollOnReturn(){
 }
 // Se a pessoa tocar/rolar a tela, ela assume o controle: para de restaurar.
 ['touchstart','pointerdown','wheel','keydown'].forEach(ev=>{
-  $('#view-library').addEventListener(ev, ()=>{ homeRestoreWindow = null; }, {passive:true});
+  window.addEventListener(ev, ()=>{ homeRestoreWindow = null; }, {passive:true});
 });
 
 // A rolagem da Biblioteca (Home e pastas) é a do #view-library. Toda vez que
@@ -3707,8 +3708,7 @@ function restoreHomeScrollOnReturn(){
 // isso a pasta nova herdava a posição de rolagem da tela anterior (ex.: a
 // Home rolada lá embaixo) e aparecia no meio.
 function scrollLibraryToTop(){
-  const v = $('#view-library');
-  if(v) v.scrollTop = 0;
+  window.scrollTo(0, 0);
 }
 
 async function enterFolder(id, name, {reset=false, skipHome=false, collectionRoot=false}={}){
