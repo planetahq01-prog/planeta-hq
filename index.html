@@ -1144,7 +1144,7 @@ html,body,button,input,select,textarea{font-family:'WhizBang','Inter',sans-serif
 }
 
 /* Tela de detalhes da Coleção: Demolidor */
-#collection-details-screen{position:fixed;inset:0;z-index:40;overflow:auto;background:#06080d;color:var(--paper);padding:0 0 max(28px,env(safe-area-inset-bottom));}
+#collection-details-screen{position:fixed;inset:0;z-index:46;overflow:auto;background:#06080d;color:var(--paper);padding:0 0 max(28px,env(safe-area-inset-bottom));}
 .detail-screen-header{position:sticky;top:0;z-index:4;display:flex;align-items:center;gap:14px;padding:calc(12px + env(safe-area-inset-top)) 18px 12px;background:rgba(6,8,13,.96);border-bottom:1px solid rgba(255,255,255,.06);backdrop-filter:blur(12px);}
 .detail-screen-back{width:40px;height:40px;border:0;border-radius:50%;background:transparent;color:var(--paper);font-size:28px;line-height:1;}
 .detail-screen-title{font-size:20px;font-weight:800;letter-spacing:-.03em;}
@@ -7578,9 +7578,13 @@ function buildCarouselCard(item, opts){
   if(!hasImmediateCover) lazyLoadCover(btn, loadCover);
 
   btn.onclick = async ()=>{
+    await loadCustomDetailMetadata();
+    const pid = item.parentId!=null ? item.parentId : (item._parentId!=null ? item._parentId : CONFIG.rootFolderId);
+    if(CUSTOM_DETAIL_METADATA[item.id]){
+      openCollectionDetails({...item,_parentId:pid},pid); return;
+    }
     if(isFolder){ enterFolder(item.id, item.name); return; }
     if(btn.classList.contains('loading')) return;
-    const pid = item.parentId!=null ? item.parentId : item._parentId;
     if(pid!=null){
       btn.classList.add('loading');
       try{
