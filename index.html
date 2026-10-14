@@ -4254,7 +4254,16 @@ function renderFolderCard(f, opts){
   cover.appendChild(buildFolderOfflineButton(f));
   card.appendChild(cover);
   card.appendChild(el('div','label', f.name));
-  card.onclick = opts.onOpen ? ()=>opts.onOpen(f) : (opts.fromSearch ? ()=>openFolderFromSearch(f) : ()=>enterFolder(f.id, f.name));
+  card.onclick = async ()=>{
+    await loadCustomDetailMetadata();
+    if(CUSTOM_DETAIL_METADATA[f.id]){
+      const parentId=f._parentId!=null?f._parentId:(state.path[state.path.length-1]&&state.path[state.path.length-1].id);
+      openCollectionDetails({...f,_parentId:parentId},parentId); return;
+    }
+    if(opts.onOpen){ await opts.onOpen(f); return; }
+    if(opts.fromSearch){ openFolderFromSearch(f); return; }
+    enterFolder(f.id, f.name);
+  };
   return card;
 }
 
@@ -4273,12 +4282,19 @@ function renderComicCard(f, opts){
   card.appendChild(buildCornerDownloadButton(f));
 
   card.onclick = async ()=>{
-    if(opts.onOpen){ opts.onOpen(f); return; }
+    const pid = f._parentId!=null ? f._parentId : (state.path[state.path.length-1] && state.path[state.path.length-1].id);
+    if(opts.onOpen){
+      await loadCustomDetailMetadata();
+      if(CUSTOM_DETAIL_METADATA[f.id]){ openCollectionDetails({...f,_parentId:pid},pid); return; }
+      await opts.onOpen(f); return;
+    }
     if(card.classList.contains('loading')) return;
     card.classList.add('loading');
-    const pid = f._parentId!=null ? f._parentId : (state.path[state.path.length-1] && state.path[state.path.length-1].id);
-    try{ await openReader(f, undefined, pid); }
-    finally{ card.classList.remove('loading'); }
+    try{
+      await loadCustomDetailMetadata();
+      if(CUSTOM_DETAIL_METADATA[f.id]){ openCollectionDetails({...f,_parentId:pid},pid); return; }
+      await openReader(f, undefined, pid);
+    }finally{ card.classList.remove('loading'); }
   };
   return card;
 }
@@ -4604,8 +4620,10 @@ function buildCollectionChapterCard(entry,index,parentId){
   void loadCover();
   return card;
 }
-function openCollectionChapter(entry,parentId){
+async function openCollectionChapter(entry,parentId){
   if(detailIsFolder(entry)){ openCollectionDetails(entry,parentId,true); return; }
+  await loadCustomDetailMetadata();
+  if(CUSTOM_DETAIL_METADATA[entry.id]){ openCollectionDetails({...entry,_parentId:parentId},parentId,true); return; }
   state.currentListContext=(activeCollectionDetail?.listing?.files)||[entry]; state.currentListIsLocal=false;
   return openReader(entry,undefined,parentId);
 }
