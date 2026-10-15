@@ -6,6 +6,16 @@
 <meta name="theme-color" content="#000105">
 <link rel="manifest" href="./manifest.json">
 <title>Planeta HQ</title>
+<script>
+// Android WebView já posiciona o conteúdo abaixo da barra de status em alguns APKs.
+// Identifique o WebView antes do CSS para não somar de novo o safe-area no cabeçalho.
+(function(){
+  var ua=navigator.userAgent||'';
+  var android=/Android/i.test(ua);
+  var webView=android && (/\bwv\b/i.test(ua) || /Version\/4\.0.*Chrome\//i.test(ua));
+  if(webView) document.documentElement.classList.add('android-webview');
+})();
+</script>
 
 <!-- Fontes -->
 <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -1146,6 +1156,8 @@ html,body,button,input,select,textarea{font-family:'WhizBang','Inter',sans-serif
 /* Tela de detalhes da Coleção: Demolidor */
 #collection-details-screen{position:fixed;inset:0;z-index:46;overflow:auto;background:#06080d;color:var(--paper);padding:0 0 max(28px,env(safe-area-inset-bottom));}
 .detail-screen-header{position:sticky;top:0;z-index:4;display:flex;align-items:center;gap:14px;padding:calc(12px + env(safe-area-inset-top)) 18px 12px;background:rgba(6,8,13,.96);border-bottom:1px solid rgba(255,255,255,.06);backdrop-filter:blur(12px);}
+/* No APK Android a WebView normalmente já respeita a barra de status; evita duplicar o recuo superior. Navegadores mantêm o safe-area original. */
+.android-webview .detail-screen-header{padding-top:12px;}
 .detail-screen-back{width:40px;height:40px;border:0;border-radius:50%;background:transparent;color:var(--paper);font-size:28px;line-height:1;}
 .detail-screen-title{font-size:20px;font-weight:800;letter-spacing:-.03em;}
 .detail-tabs{display:grid;grid-template-columns:1fr 1fr;gap:0;margin:0 12px;border-bottom:1px solid rgba(255,255,255,.08);}
