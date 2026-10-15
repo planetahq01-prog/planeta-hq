@@ -1159,7 +1159,7 @@ html,body,button,input,select,textarea{font-family:'WhizBang','Inter',sans-serif
 #collection-details-screen .cover{width:100%;height:100%;object-fit:contain;background:#10141c;}
 .detail-cover-fallback{position:absolute;inset:0;display:grid;place-items:center;padding:18px;color:rgba(255,255,255,.55);text-align:center;font-size:13px;font-weight:800;line-height:1.4;background:radial-gradient(circle at 50% 25%,rgba(120,228,242,.14),transparent 48%),linear-gradient(160deg,#17253c,#080b12);}
 .detail-name{margin:20px 0 4px;font-size:clamp(23px,6vw,32px);line-height:1.15;font-weight:900;letter-spacing:-.04em;}
-.detail-author{margin:2px 0 0;color:#d5d8df;font-size:16px;font-weight:700;line-height:1.4;}
+.detail-author{margin:5px 0 0;color:#c8cbd2;font-size:13px;font-weight:600;line-height:1.4;max-width:100%;}
 .detail-meta-line{margin:7px 0 0;color:var(--text-muted);font-size:12px;}
 .detail-actions{display:flex;align-items:center;justify-content:center;gap:12px;width:100%;margin:20px 0 18px;}
 .detail-primary{display:inline-flex;align-items:center;justify-content:center;gap:10px;min-width:190px;max-width:320px;min-height:54px;padding:0 24px;border:0;border-radius:999px;background:var(--accent);color:#15120a;font-size:16px;font-weight:900;box-shadow:0 7px 22px rgba(255,194,71,.18);}
@@ -3238,6 +3238,8 @@ async function warmFolderCoverMemoryCache(){
 // espera) quando: tem um override manual (URL fixa), OU já sabemos qual
 // arquivo é a capa dela E a miniatura desse arquivo já está em memória.
 function getImmediateFolderCoverSrc(folderObj){
+  const customCoverSrc=getCustomDetailCoverSrc(folderObj.id);
+  if(customCoverSrc) return customCoverSrc;
   const override = getFolderCoverOverride(folderObj.name);
   if(override) return override;
   const file = folderCoverFileMemoryCache.get(folderObj.id);
@@ -4231,6 +4233,24 @@ function buildFolderOfflineButton(folderMeta){
   return btn;
 }
 
+function isDescendantOfDetailedCollection(item, parentId){
+  if(!item) return false;
+  const ancestors=new Set();
+  if(parentId!=null) ancestors.add(String(parentId));
+  if(item._parentId!=null) ancestors.add(String(item._parentId));
+  if(item.parentId!=null) ancestors.add(String(item.parentId));
+  (Array.isArray(item._pathIds)?item._pathIds:[]).forEach(id=>{if(id!=null)ancestors.add(String(id));});
+  // Search results and local navigation may carry path names/IDs in different shapes.
+  (Array.isArray(item._path)?item._path:[]).forEach(part=>{if(part&&typeof part==='object'&&part.id!=null)ancestors.add(String(part.id));});
+  (Array.isArray(state.path)?state.path:[]).forEach(part=>{if(part&&part.id!=null&&String(part.id)!==String(item.id))ancestors.add(String(part.id));});
+  for(const id of ancestors){
+    if(id===String(item.id)) continue;
+    if(Object.prototype.hasOwnProperty.call(CUSTOM_DETAIL_METADATA,id)) return true;
+    const fichaIds=DETAIL_COLLECTION_ID_ALIASES[id];
+    if((Array.isArray(fichaIds)?fichaIds:[fichaIds]).some(fichaId=>fichaId&&Object.prototype.hasOwnProperty.call(CUSTOM_DETAIL_METADATA,fichaId))) return true;
+  }
+  return false;
+}
 function renderFolderCard(f, opts){
   opts = opts || {};
   const card = el('div','card folder');
@@ -4241,9 +4261,10 @@ function renderFolderCard(f, opts){
   // — a coleção já nasce com a capinha, em vez de esperar entrar na tela.
   const immediateSrc = getImmediateFolderCoverSrc(f);
   if(immediateSrc){
-    const img = buildCoverNode(immediateSrc);
+    const customCoverFile=getCustomDetailCoverFile(f.id);
+    const img = buildCoverNode(immediateSrc,customCoverFile||undefined);
     img.classList.add('loaded'); // sem fade: já está pronta desde o primeiro frame
-    wireImmediateFolderCoverRetry(img, f);
+    if(!customCoverFile) wireImmediateFolderCoverRetry(img, f);
     cover.appendChild(img);
     card.classList.add('has-cover','cover-immediate');
   } else {
@@ -4255,8 +4276,8 @@ function renderFolderCard(f, opts){
   card.appendChild(cover);
   card.appendChild(el('div','label', f.name));
   card.onclick = async ()=>{
-    await loadCustomDetailMetadata();
-    if(CUSTOM_DETAIL_METADATA[f.id]){
+    await loadCustomDetailMetadata(f.id);
+    if(CUSTOM_DETAIL_METADATA[f.id]&&!isDescendantOfDetailedCollection(f,f._parentId)){
       const parentId=f._parentId!=null?f._parentId:(state.path[state.path.length-1]&&state.path[state.path.length-1].id);
       openCollectionDetails({...f,_parentId:parentId},parentId); return;
     }
@@ -4284,45 +4305,2487 @@ function renderComicCard(f, opts){
   card.onclick = async ()=>{
     const pid = f._parentId!=null ? f._parentId : (state.path[state.path.length-1] && state.path[state.path.length-1].id);
     if(opts.onOpen){
-      await loadCustomDetailMetadata();
-      if(CUSTOM_DETAIL_METADATA[f.id]){ openCollectionDetails({...f,_parentId:pid},pid); return; }
+      await loadCustomDetailMetadata(f.id);
+      if(CUSTOM_DETAIL_METADATA[f.id]&&!isDescendantOfDetailedCollection(f,pid)){ openCollectionDetails({...f,_parentId:pid},pid); return; }
       await opts.onOpen(f); return;
     }
     if(card.classList.contains('loading')) return;
     card.classList.add('loading');
     try{
-      await loadCustomDetailMetadata();
-      if(CUSTOM_DETAIL_METADATA[f.id]){ openCollectionDetails({...f,_parentId:pid},pid); return; }
+      await loadCustomDetailMetadata(f.id);
+      if(CUSTOM_DETAIL_METADATA[f.id]&&!isDescendantOfDetailedCollection(f,pid)){ openCollectionDetails({...f,_parentId:pid},pid); return; }
       await openReader(f, undefined, pid);
     }finally{ card.classList.remove('loading'); }
   };
   return card;
 }
-// Metadados editoriais persistentes: lidos diretamente do Worker/KV.
-// metadata.json permanece como fallback de compatibilidade, mas não é mais necessário substituí-lo.
-let CUSTOM_DETAIL_METADATA = Object.create(null);
+// Fichas embutidas no app: 179 fichas. Coleções detalhadas não repetem ficha em seus descendentes.
+// A primeira página segue como capa padrão; esses dados locais dispensam metadata.json.
+const INLINE_CUSTOM_DETAIL_METADATA = {
+  "1xcoED6qbp6jZMcSLQIIQ1w-_nlUBTu4y": {
+    "displayTitle": "The Flash Vol.5 + Anuais",
+    "author": "Joshua Williamson (roteiro principal, 2016–2020); outros roteiristas assumem a série até 2023; artistas principais Carmine Di Giandomenico, Neil Googe, Howard Porter, Christian Duce e Scott Kolins.",
+    "publicationDate": "EUA: 2016–2023; série iniciada por Joshua Williamson, com anuais.",
+    "genres": [
+      "super-heróis",
+      "ficção científica",
+      "viagem no tempo",
+      "ação"
+    ],
+    "synopsis": "Barry Allen volta a ocupar o centro da mitologia do Flash numa fase que combina crimes supervelozes, ameaças cósmicas e conflitos entre diferentes gerações de velocistas. Ao lado de Iris, Wally, Wallace e dos demais aliados, ele enfrenta Rogues reinventados, forças elementais da velocidade e consequências cada vez maiores para Central City. Os anuais ampliam o foco para a família Flash e funcionam como pontes para eventos decisivos da era Rebirth.",
+    "period": "2016–2023"
+  },
+  "1S2bPOVASkI5CZVDv37zcxmLJmVaLwsQF": {
+    "displayTitle": "The Flash Vol.3 (Pré-Flashpoint)",
+    "author": "Geoff Johns e Scott Kolins (roteiro); Francis Manapul e Scott Kolins (arte); Brian Buccellato e Francis Manapul (cores). Fase curta de 2010–2011, encerrada no caminho para Flashpoint.",
+    "publicationDate": "EUA: The Flash (2010) #1–12 (2010–2011).",
+    "genres": [
+      "super-heróis",
+      "mistério",
+      "ficção científica",
+      "ação"
+    ],
+    "synopsis": "Barry Allen tenta reconstruir sua vida em Central City depois de retornar ao papel de Flash, mas a volta é acompanhada por crimes impossíveis e pela reorganização de sua galeria de vilões. A investigação de assassinatos e desaparecimentos conduz o herói a uma conspiração ligada à Força de Aceleração. No arco final, a realidade de Barry começa a ruir e prepara diretamente a crise temporal que dará origem a Flashpoint.",
+    "period": "2010"
+  },
+  "1Lh9TgF4fcpZIPD8vNk38SHq_IeAmnbnP": {
+    "displayTitle": "Flash Vol.2 (1987-1992)",
+    "author": "Mike Baron (roteiro inicial, #1–14, 1987–1988; Jackson Guice e Larry Mahlstedt na arte) e William Messner-Loebs (roteiro a partir de #15, 1988–1992; Greg LaRocque como principal colaborador artístico). Protagonista: Wally West.",
+    "publicationDate": "EUA: The Flash vol. 2, recorte 1987–1992 (série completa até 2009).",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "drama",
+      "ficção científica"
+    ],
+    "synopsis": "Após a perda de Barry Allen, Wally West assume o uniforme e precisa provar que pode ser o Flash por mérito próprio. A fase começa com uma abordagem mais irreverente e arriscada, acompanhando a instabilidade financeira, emocional e heroica de Wally, antes de aprofundar sua vida civil e seus vínculos com a galeria de vilões. O recorte reúne a transição entre Baron e Messner-Loebs e a consolidação do novo protagonista.",
+    "period": "1987–1992"
+  },
+  "1d9Q59MOJ7RaEiQr8nS4VpoXnsakyqZ4N": {
+    "displayTitle": "Flashpoint (2011)",
+    "author": "Geoff Johns (roteiro) e Andy Kubert (arte), com Sandra Hope e Jesse Delperdang na finalização em partes da minissérie; evento central de cinco edições.",
+    "publicationDate": "EUA: 2011; minissérie Flashpoint #1–5.",
+    "genres": [
+      "super-heróis",
+      "ficção científica",
+      "realidades alternativas",
+      "ação"
+    ],
+    "synopsis": "Barry Allen desperta numa realidade em que sua família, seus aliados e o próprio equilíbrio do mundo foram radicalmente alterados. Sem saber quem reescreveu a linha do tempo, ele busca ajuda entre heróis que ocupam papéis inesperados enquanto uma guerra ameaça destruir o planeta. Para recuperar a realidade conhecida, Barry precisa entender o preço de interferir no passado e encontrar a origem da anomalia antes que o tempo se esgote.",
+    "period": "2011"
+  },
+  "1s1L-FlMSU6lFFq8gZf8sR0gVX8JNdfwI": {
+    "displayTitle": "Flash: Renascimento (2009)",
+    "author": "Geoff Johns (roteiro) e Ethan Van Sciver (arte), com Alex Sinclair (cores); minissérie de seis edições que reintroduz Barry Allen.",
+    "publicationDate": "Brasil: 04/2020 (Panini); original EUA: The Flash: Rebirth #1–6 (2009–2010).",
+    "genres": [
+      "super-heróis",
+      "ficção científica",
+      "mistério",
+      "ação"
+    ],
+    "synopsis": "Barry Allen retorna ao mundo dos vivos e encontra um legado que floresceu durante sua ausência. Enquanto tenta compreender seu lugar entre Wally West, a Liga da Justiça e os demais velocistas, uma sequência de mortes e surtos de velocidade aponta para uma ameaça íntima à própria Força de Aceleração. A minissérie reconecta o Flash à sua história clássica e estabelece as bases conceituais para a próxima grande era da DC.",
+    "period": "2020"
+  },
+  "1l14ajqEvCqujvlYYI5Tu-T6AOwyEqWEn": {
+    "displayTitle": "Os Novos 52 - Flash",
+    "author": "Francis Manapul e Brian Buccellato (roteiro/arte e co-roteiro na fase inicial); Robert Venditti e Van Jensen (roteiros posteriores); Brett Booth e outros artistas ao longo da série The Flash (2011–2016).",
+    "publicationDate": "EUA: The Flash (2011–2016), fase Novos 52; #1 lançado em 09/2011.",
+    "genres": [
+      "super-heróis",
+      "ficção científica",
+      "ação",
+      "viagem no tempo"
+    ],
+    "synopsis": "Barry Allen investiga um novo tipo de crime em Central City enquanto aprende que sua conexão com a velocidade mudou. A fase reinventa a Força de Aceleração, apresenta ameaças como Mob Rule e Gorilla Grodd e amplia o elenco de velocistas. Mais tarde, outros roteiristas levam Barry a conflitos com os Rogues, paradoxos temporais e guerras que testam a fronteira entre sua vida de cientista forense e seu papel como o homem mais rápido do mundo.",
+    "period": "2011–2016"
+  },
+  "1iROUFmojdFg67y-U29YkNMXD8Z3GTn6K": {
+    "displayTitle": "Flash de Dois Mundos",
+    "author": "Gardner Fox (roteiro das histórias centrais e dos encontros iniciais) e John Broome (roteiro de parte do material); Carmine Infantino (desenho), Joe Giella e Sid Greene (arte-final), com Murphy Anderson na arte-final de capa/seleção.",
+    "publicationDate": "Brasil: 09/2022 (Panini); original: The Flash #123 (1961) e encontros de 1962–1967.",
+    "genres": [
+      "super-heróis",
+      "aventura",
+      "ficção científica",
+      "realidades alternativas"
+    ],
+    "synopsis": "Barry Allen altera sua frequência vibracional e chega a uma Terra paralela onde seu herói de infância, Jay Garrick, existe de verdade. O encontro dos dois Flashes transforma uma coincidência dimensional numa aliança contra vilões conhecidos e ameaças que atravessam mundos. A seleção acompanha outras reuniões entre Barry e Jay, apresentando a ideia de Terras paralelas que se tornaria uma das fundações da continuidade e do Multiverso da DC.",
+    "period": "2022"
+  },
+  "17_jMaz0MzW049hzS6eMwCNemQflphXIL": {
+    "displayTitle": "Flash - Ponto de Fuga",
+    "author": "Pat McGreal (roteiro), Norm Breyfogle (arte), Noelle Giddings e Heroic Age (cores); Raquel Arruda fez as letras na edição brasileira.",
+    "publicationDate": "Brasil: 10/2002 (Mythos); original: Flashpoint #1–3 (EUA, 1999–2000).",
+    "genres": [
+      "super-heróis",
+      "ficção científica",
+      "mistério",
+      "ação"
+    ],
+    "synopsis": "Durante uma escavação em Marte, Wallace West ativa um artefato alienígena e desencadeia uma onda de energia que o deixa entre a vida e a morte. O tetraplégico Barry Allen e Iris tentam levá-lo a um especialista, enquanto Ralph Dibny segue uma pista própria sobre o objeto. A investigação mistura viagens dimensionais, Vandal Savage e segredos da Força de Aceleração numa aventura de tom sombrio.",
+    "period": "2002"
+  },
+  "1M5bgqvjq-GNxEkpyWfXRm8vHy11tLQ_t": {
+    "displayTitle": "Flash - O Tempo Voa",
+    "author": "John Rozum (roteiro), Seth Fisher (arte) e Chris Chuckry (cores); Marcos Valério da Silva fez as letras na publicação brasileira.",
+    "publicationDate": "Brasil: 2003 (Mythos); original Flash: Time Flies (EUA, 2002; data varia por catálogo).",
+    "genres": [
+      "super-heróis",
+      "ficção científica",
+      "viagem no tempo",
+      "aventura"
+    ],
+    "synopsis": "Wally West investiga uma anomalia em que o tempo parece acelerar além do possível e acaba lançado para um futuro estranho. Lá, descobre que outro homem ligado à Força de Aceleração também atravessa épocas em velocidade impossível. Enquanto tenta entender por que os dois foram reunidos, Wally precisa escapar de forças futuristas que pretendem transformar o fenômeno temporal em instrumento de controle.",
+    "period": "2003"
+  },
+  "1iue_vG9DoOkUyFRllOgaRBylILaoLjJS": {
+    "displayTitle": "Flash - A Morte de Íris West (2023)",
+    "author": "Cary Bates (roteiro); Irv Novick, Rich Buckler, John Calnan, Alex Saviuk e Don Heck (desenho), com Frank McLaughlin, Jack Abel e Frank Chiaramonte na arte-final.",
+    "publicationDate": "Brasil: 05/2023 (Panini); original The Flash #270–284 (EUA, 1979–1980).",
+    "genres": [
+      "super-heróis",
+      "drama",
+      "mistério",
+      "ação"
+    ],
+    "synopsis": "Exausto por conciliar a carreira policial e a vida heroica, Barry Allen tenta preservar seu casamento com Iris e planeja um futuro familiar. Um crime brutal interrompe esse equilíbrio e o lança numa investigação movida por luto, raiva e senso de justiça. À medida que surgem pistas contraditórias e inimigos manipuladores, o Flash percebe que o caso tem consequências muito maiores do que uma vingança pessoal.",
+    "period": "2023"
+  },
+  "10LlVmey_x_OSAZc3r4pPzNCPvtCz2S5b": {
+    "displayTitle": "O Melhor da DC Parcerias: Perseguição Até o Fim dos Tempos",
+    "author": "Martin Pasko (roteiro de Perseguição até o fim dos tempos e Corrida até o fim dos tempos), José Luis García-López (desenho) e Dan Adkins (arte-final); a antologia também reúne Bob Haney, Jim Aparo, David Michelinie, Jack C. Harris, Len Wein, Paul Levitz e Cary Burkett.",
+    "publicationDate": "Brasil: 06/2026 (Panini, O Melhor da DC #1); histórias originais DC de 1978–1979.",
+    "genres": [
+      "super-heróis",
+      "aventura",
+      "ficção científica",
+      "ação"
+    ],
+    "synopsis": "Esta antologia reúne encontros clássicos em que Superman, Batman e outros heróis precisam combinar poderes e perspectivas. Na história que dá nome ao volume, Superman e Flash investigam uma nave alienígena e são arrastados para um conflito que ameaça a Terra e Krypton. As demais parcerias alternam mistério, crime, fantasia e viagens no tempo, oferecendo um retrato amplo do formato team-up da DC no fim dos anos 1970.",
+    "period": "2026"
+  },
+  "1gyBR07Va5IxPpCaEF6s4zFbmQ_NRuFJy": {
+    "displayTitle": "Flash de Morrison e Millar",
+    "author": "Grant Morrison e Mark Millar (roteiros); arte de Paul Ryan, Ron Wagner, Pop Mhan e outros colaboradores; coleção centrada em Wally West e na sequência de The Flash #130–141.",
+    "publicationDate": "Brasil: 10/2021 (Panini); original The Flash #130–141 e crossovers (EUA, 1997–1998).",
+    "genres": [
+      "super-heróis",
+      "ficção científica",
+      "aventura",
+      "ação"
+    ],
+    "synopsis": "Wally West enfrenta um uniforme autoconsciente que ameaça consumir a energia de quem o veste e precisa sobreviver a um plano capaz de apagar seus vínculos mais queridos. Em seguida, é lançado a uma corrida que atravessa tempo e espaço, com o destino da Terra em jogo. A dupla Morrison e Millar combina conceitos cósmicos, humor e pressão emocional numa fase curta e experimental do Flash.",
+    "period": "2021"
+  },
+  "1BmDe3OSzNjbn_wyFspE6mEJEONXIwvnR": {
+    "displayTitle": "Flash Comics #01 (1940)",
+    "author": "Gardner Fox (roteiro da estreia de Flash/Jay Garrick) e Harry Lampert (lápis, arte-final e letras da história); Sheldon Moldoff desenha outras histórias da antologia, e Sheldon Mayer é o editor.",
+    "publicationDate": "EUA: capa jan/1940 (à venda em 20/11/1939), Flash Comics #1; sem edição BR identificada.",
+    "genres": [
+      "super-heróis",
+      "aventura",
+      "ficção científica",
+      "mistério"
+    ],
+    "synopsis": "A edição antológica apresenta Jay Garrick, estudante de química que se torna o primeiro Flash depois de um acidente científico. Em sua estreia, o novo velocista precisa proteger Joan Williams e enfrentar um grupo de cientistas brilhantes envolvidos num sequestro. O número também inaugura ou desenvolve outros heróis, como Hawkman e Johnny Thunder, compondo um retrato essencial da aventura pulp da Era de Ouro.",
+    "period": "1940"
+  },
+  "1HNOKy021iIfUyf3OyWxWCzFoR96qwwMi": {
+    "displayTitle": "Homem-Aranha versus Wolverine",
+    "author": "Christopher Priest (roteiro, creditado como James C. Owsley); Mark Bright (desenho/lápis); Al Williamson (arte-final); Petra Goldberg (cores).",
+    "publicationDate": "EUA, fevereiro de 1987 (one-shot; o GCD registra venda em 11/11/1986).",
+    "genres": [
+      "super-heróis",
+      "espionagem",
+      "ação",
+      "drama"
+    ],
+    "synopsis": "Uma investigação leva Peter Parker e Wolverine à Alemanha, onde os dois perseguem pistas ligadas a uma antiga operação da KGB e à misteriosa Charlemagne. O encontro transforma uma missão jornalística em choque de métodos: a prudência improvisada do Homem-Aranha colide com a objetividade brutal do mutante. A aventura combina espionagem, luto e ação urbana, examinando a difícil parceria entre heróis que raramente concordam sobre o que significa fazer o bem.",
+    "period": "1987"
+  },
+  "1A0XMqFMcorxSO3KwY9EnIScx12Rd-EWf": {
+    "displayTitle": "Vingadores versus X-Men",
+    "author": "Brian Michael Bendis, Jason Aaron, Ed Brubaker, Jonathan Hickman e Matt Fraction (roteiros centrais do evento); equipes de arte variáveis, incluindo John Romita Jr., Olivier Coipel e Adam Kubert.",
+    "publicationDate": "Brasil: 03/12/2018 (Panini); original EUA: série iniciada em abril de 2012.",
+    "genres": [
+      "super-heróis",
+      "crossover",
+      "ficção científica",
+      "aventura",
+      "drama"
+    ],
+    "synopsis": "Quando a Força Fênix se aproxima da Terra e a esperança de sobrevivência mutante parece depender de um hospedeiro, Capitão América e seus Vingadores entram em rota de colisão com Ciclope e os X-Men. O evento alterna batalhas, alianças improváveis e disputas sobre responsabilidade e futuro. Em vez de tratar o conflito como simples duelo, a narrativa explora como medo, liderança e poder cósmico podem romper a confiança entre duas famílias heroicas.",
+    "period": "2018"
+  },
+  "12RWWzXeTk6AanuoCriC1nGmE0buLKIMo": {
+    "displayTitle": "Quarteto Fantástico: O Dia do Juízo Final",
+    "author": "Stan Lee (roteiro); Jack Kirby (desenho e co-roteiro); Joe Sinnott (arte-final, em grande parte do material).",
+    "publicationDate": "Brasil, 2016, Salvat, Coleção Oficial de Graphic Novels Marvel — Clássicos V; ISBN 9788563421135.",
+    "genres": [
+      "super-heróis",
+      "ficção científica",
+      "aventura cósmica",
+      "fantasia"
+    ],
+    "synopsis": "Convocado a Wakanda, o Quarteto Fantástico conhece o enigmático Pantera Negra e logo se vê envolvido em uma sucessão de crises. A equipe reencontra os Inumanos, enquanto o Doutor Destino transforma o sequestro do Surfista Prateado em uma ameaça de escala cósmica. Reunindo Fantastic Four #52–60, o volume percorre intriga política, ciência fantástica e confrontos com poderes quase divinos, destacando a inventividade visual da fase Lee/Kirby.",
+    "period": "2016"
+  },
+  "1f2V28Ok-QVoucvtaj0coBwmTfTpMnAhw": {
+    "displayTitle": "Homem de Ferro: Doomquest",
+    "author": "David Michelinie (roteiro e argumento); Bob Layton (argumento, arte-final e acabamento); John Romita Jr. (desenho/lápis).",
+    "publicationDate": "EUA, agosto–setembro de 1981, em Iron Man #149–150.",
+    "genres": [
+      "super-heróis",
+      "viagem no tempo",
+      "fantasia",
+      "aventura"
+    ],
+    "synopsis": "Um componente necessário à máquina do tempo de Doutor Destino está ligado à Stark International, mas Tony Stark se recusa a colaborar. O confronto entre os dois rivais blindados desencadeia uma viagem involuntária ao Camelot do rei Arthur, onde tecnologia, magia e lealdades medievais se cruzam. A história acompanha a tentativa de Iron Man e Destino de sobreviver em um passado estranho sem abandonar suas ambições nem transformar a rivalidade em aliança permanente.",
+    "period": "1981"
+  },
+  "1Oi58g4EAlJfe5RTJ20tKEyjael6QmmWB": {
+    "displayTitle": "Guerras Secretas I e II",
+    "author": "Jim Shooter (roteiro das duas sagas); Mike Zeck e Bob Layton (desenho/arte da Secret Wars original); Al Milgrom (desenho de Secret Wars II), com arte-final de Steve Leialoha nessa edição inicial.",
+    "publicationDate": "EUA: Secret Wars I (1984–1985); Secret Wars II (1985).",
+    "genres": [
+      "crossover",
+      "super-heróis",
+      "ficção científica",
+      "aventura cósmica",
+      "fantasia"
+    ],
+    "synopsis": "Na primeira minissérie, heróis e vilões da Marvel são arrancados de seus mundos e levados ao Mundo Bélico pelo enigmático Beyonder, que promete realizar o desejo dos vencedores. A continuação desloca o ser cósmico para a Terra, onde ele tenta compreender a vida humana por imitação e experimentação. Juntas, as sagas misturam espetáculo de super-heróis, sátira da cultura dos anos 1980 e dilemas sobre poder, identidade e responsabilidade.",
+    "period": "1984–1985"
+  },
+  "1e1-ojITD8lV9518--GcG9Exw1LoGBlB3": {
+    "displayTitle": "Guerras Secretas (2015)",
+    "author": "Jonathan Hickman (roteiro); Esad Ribić (desenho); Ive Svorcina (cores).",
+    "publicationDate": "EUA, 2015–2016, minissérie principal de nove edições.",
+    "genres": [
+      "crossover",
+      "super-heróis",
+      "ficção científica",
+      "fantasia",
+      "aventura"
+    ],
+    "synopsis": "À medida que incursões destroem realidades inteiras, o Universo Marvel e o Ultimate caminham para um choque final. Quando quase nada resta, Doutor Destino ergue um Battleworld feito de fragmentos de mundos, governado como uma divindade por meio de barões e versões deslocadas de heróis conhecidos. A minissérie acompanha sobreviventes que tentam compreender essa realidade artificial e desafiar sua ordem, enquanto a ideia de reconstruir o multiverso ganha peso pessoal.",
+    "period": "2015–2016"
+  },
+  "1tLmbNFyO7aLKxX0YTybNdR34yRHyVUqX": {
+    "displayTitle": "Os Livros do Destino",
+    "author": "Ed Brubaker (roteiro); Pablo Raimondi (desenho); Mark Farmer, Andrew Hennessy e Robin Riggs (arte-final em partes da minissérie).",
+    "publicationDate": "EUA: Books of Doom #1–6 (2005–2006); ano da edição BR não confirmado.",
+    "genres": [
+      "super-heróis",
+      "origem de vilão",
+      "drama",
+      "ficção científica",
+      "fantasia"
+    ],
+    "synopsis": "Victor von Doom narra, em tom de testemunho, a trajetória que o levou da infância marcada pela pobreza e pela perseguição à posição de monarca da Latvéria. Ciência, feitiçaria, trauma familiar e ambição política se entrelaçam enquanto o jovem Victor transforma perdas em um projeto de poder. A minissérie reinterpreta a origem do Doutor Destino com foco psicológico, sem reduzir o vilão a uma caricatura e mantendo a dúvida sobre a confiabilidade de seu relato.",
+    "period": "2005–2006"
+  },
+  "1yVULbQ_b98HWpgGa1x6uFu1ZhdLrB9CL": {
+    "displayTitle": "What If...? Homem de Ferro: Demônio na Armadura",
+    "author": "David Michelinie (roteiro); Bob Layton (argumento e capa); Graham Nolan (lápis) e Mark Pennington (arte-final, conforme ficha secundária da edição).",
+    "publicationDate": "EUA: 22/12/2010 (Marvel); capa impressa também catalogada como fev/2011.",
+    "genres": [
+      "universos alternativos",
+      "super-heróis",
+      "ficção científica",
+      "aventura",
+      "drama"
+    ],
+    "synopsis": "Em uma realidade alternativa, Tony Stark e Victor von Doom são colegas de faculdade quando um experimento telecinético troca suas mentes. O jovem levado à Latvéria precisa sobreviver sem as vantagens do nome Stark, enquanto o novo “Stark” assume negócios, recursos e prestígio. A premissa transforma a origem de Homem de Ferro e Doutor Destino em um estudo de identidade, ambição e ressentimento, conduzido como uma aventura de super-heróis com lógica de universo paralelo.",
+    "period": "2010"
+  },
+  "1ttKMVOQASdmyprOzsBK2sIgGGlsKlCv1": {
+    "displayTitle": "O Cerco",
+    "author": "Brian Michael Bendis (roteiro); Olivier Coipel (arte principal); Mark Morales (arte-final).",
+    "publicationDate": "Salvat BR 2015; original EUA 2010 (Siege #1–4 e Siege: The Cabal).",
+    "genres": [
+      "super-heróis",
+      "evento",
+      "ação"
+    ],
+    "synopsis": "As tensões acumuladas após Guerra Civil, Invasão Secreta e a queda dos Vingadores convergem quando Norman Osborn conduz uma força de vilões contra Asgard, instalada na Terra. Thor, Capitão América e Homem de Ferro precisam superar desconfianças e reunir aliados para defender os deuses e impedir que uma crise política se transforme em catástrofe para todo o Universo Marvel.",
+    "period": "2015"
+  },
+  "1T89Rait4VXiQXejkjze0z1Su6k0gNTzz": {
+    "displayTitle": "Invasão Secreta",
+    "author": "Brian Michael Bendis (roteiro); Leinil Francis Yu (desenho); Mark Morales (arte-final).",
+    "publicationDate": "Salvat BR 2015; original EUA 2008 (Secret Invasion #1–8).",
+    "genres": [
+      "super-heróis",
+      "ficção científica",
+      "invasão"
+    ],
+    "synopsis": "Uma nave Skrull encontrada na Terra Selvagem revela que a infiltração alienígena alcançou o coração da comunidade heroica. Sem saber em quem confiar, Vingadores, Jovens Vingadores e outros grupos enfrentam impostores, ataques coordenados e uma invasão em escala global.",
+    "period": "2015"
+  },
+  "1ivKSTTM8epq7myDZ3OHECLenoWlRs-Cr": {
+    "displayTitle": "Wolverine: O Velho Logan",
+    "author": "Mark Millar (roteiro); Steve McNiven (arte); Dexter Vines (arte-final).",
+    "publicationDate": "Salvat BR 2014; original EUA 2008–2009 (Wolverine vol. 3 #66–72 e Giant-Size Old Man Logan).",
+    "genres": [
+      "super-heróis",
+      "distopia",
+      "road movie"
+    ],
+    "synopsis": "Em um futuro devastado, quase todos os heróis desapareceram e Logan abandonou a violência. Endividado e dedicado à família, ele aceita transportar um carregamento através de uma América dominada por gangues e tiranos, acompanhado pelo velho amigo Hawkeye.",
+    "period": "2014"
+  },
+  "1l_MS5blYZn2lPvjKsFoujddngxWqyGAP": {
+    "displayTitle": "Thunderbolts: Fé em Monstros",
+    "author": "Warren Ellis (roteiro principal); Mike Deodato Jr. (arte principal); colaboradores em Civil War: Choosing Sides.",
+    "publicationDate": "Salvat BR 2014; original EUA 2007 (Thunderbolts #110–115 e Civil War: Choosing Sides).",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "política"
+    ],
+    "synopsis": "Sob a direção de Norman Osborn, os Thunderbolts tornam-se a face oficial da segurança super-humana. A equipe reúne criminosos e agentes instáveis, todos submetidos a propaganda, vigilância e missões cada vez mais brutais.",
+    "period": "2014"
+  },
+  "12l0T1G5RBUTFNQuI9wcdJyDtX8CSZR6g": {
+    "displayTitle": "Hulk: Contra o Mundo",
+    "author": "Greg Pak (roteiro); John Romita Jr. (desenho); Klaus Janson (arte-final).",
+    "publicationDate": "Salvat BR 2014; original EUA 2007 (World War Hulk #1–5).",
+    "genres": [
+      "super-heróis",
+      "ficção científica",
+      "vingança"
+    ],
+    "synopsis": "Depois de ser lançado ao espaço e perder seu mundo adotivo, Hulk retorna à Terra decidido a cobrar responsabilidade dos que o traíram. Ele chega acompanhado pelos Warbound e transforma Nova York em palco de uma campanha de vingança.",
+    "period": "2014"
+  },
+  "1MFaywhDNMu286Gf2cRHyAvKfQJ5fl217": {
+    "displayTitle": "Capitão América: A Escolha",
+    "author": "David Morrell (roteiro); Mitch Breitweiser (arte).",
+    "publicationDate": "Salvat BR 2014; original EUA 2007 (Captain America: The Chosen #1–6).",
+    "genres": [
+      "super-heróis",
+      "guerra",
+      "drama"
+    ],
+    "synopsis": "No front de uma guerra contemporânea, um soldado ferido recebe uma visita impossível: a presença espiritual do Capitão América. Entre memórias, dúvidas e o peso de uma missão quase perdida, a narrativa aproxima o símbolo patriótico de um combatente comum.",
+    "period": "2014"
+  },
+  "1meF03K3zhBCcU_1_MV9vOzzM8tuhQ6Id": {
+    "displayTitle": "Eternos",
+    "author": "Neil Gaiman (roteiro); John Romita Jr. (arte); Danny Miki (arte-final).",
+    "publicationDate": "Salvat BR 2014; original EUA 2006–2007 (Eternals #1–7).",
+    "genres": [
+      "super-heróis",
+      "mitologia",
+      "ficção científica"
+    ],
+    "synopsis": "Os Eternos vivem entre os humanos, mas suas memórias e propósitos foram obscurecidos. Quando antigas forças cósmicas voltam a se mover, Ikaris tenta despertar os demais e compreender a ligação da espécie com Deviantes e Celestiais.",
+    "period": "2014"
+  },
+  "1UKRSyxUppJv8xmK-S_gjnIL3ZuKDflrN": {
+    "displayTitle": "Doutor Estranho: O Juramento",
+    "author": "Brian K. Vaughan (roteiro); Marcos Martín (arte); Álvaro López (arte-final).",
+    "publicationDate": "Salvat BR 2014; original EUA 2006–2007 (Doctor Strange: The Oath #1–5).",
+    "genres": [
+      "super-heróis",
+      "fantasia",
+      "horror"
+    ],
+    "synopsis": "O Doutor Estranho descobre que seu amigo Wong sofre de uma doença incurável e parte em busca de uma cura impossível. A investigação rapidamente se transforma em um caso sobrenatural que envolve alquimia, dimensões estranhas e uma tentativa de assassinato muito pessoal.",
+    "period": "2014"
+  },
+  "1ONyA29hXidd_SPmyVvxfjZPaFZCOscuE": {
+    "displayTitle": "Thor: O Renascer dos Deuses",
+    "author": "J. Michael Straczynski (roteiro); Olivier Coipel (arte); Mark Morales (arte-final).",
+    "publicationDate": "Salvat BR 2013; original EUA 2007–2008 (Thor vol. 3 #1–6).",
+    "genres": [
+      "super-heróis",
+      "mitologia nórdica",
+      "fantasia"
+    ],
+    "synopsis": "Após o desaparecimento dos deuses nórdicos, Thor desperta em uma nova era e procura reconstruir Asgard no mundo dos mortais. O retorno exige que ele encontre antigos companheiros, confronte responsabilidades divinas e entenda a relação entre a cidade celestial e a comunidade humana.",
+    "period": "2013"
+  },
+  "12NP8qdGI_u5Q8-D5wxOnxFmvUvLdXtU_": {
+    "displayTitle": "Capitão América: Morre uma Lenda",
+    "author": "Jeph Loeb (roteiro); David Finch, John Romita Jr., Ed McGuinness e outros (artes, créditos variáveis).",
+    "publicationDate": "Salvat BR 2014; original EUA 2007 (Fallen Son: The Death of Captain America #1–5).",
+    "genres": [
+      "super-heróis",
+      "luto",
+      "drama"
+    ],
+    "synopsis": "A morte do Capitão América é observada através de diferentes perspectivas e estágios do luto. Homem-Aranha, Wolverine, Vingadores e outros aliados reagem de maneiras distintas à perda do símbolo, enquanto a sociedade tenta entender seu legado.",
+    "period": "2014"
+  },
+  "1Z_hRMkqOWwJIzcB7Svwh82HcBj15KY--": {
+    "displayTitle": "Guerra Civil",
+    "author": "Mark Millar (roteiro); Steve McNiven (desenho); Dexter Vines (arte-final).",
+    "publicationDate": "Salvat BR 2014; original EUA 2006–2007 (Civil War #1–7).",
+    "genres": [
+      "super-heróis",
+      "política",
+      "conflito"
+    ],
+    "synopsis": "Depois de uma tragédia causada por super-humanos, o governo propõe registrar e supervisionar todos os heróis. O Homem de Ferro apoia a medida; o Capitão América a considera uma ameaça à liberdade.",
+    "period": "2014"
+  },
+  "1wTDtSWxaylDS2NEXSziEdoXSDcWgAcQQ": {
+    "displayTitle": "Zumbis Marvel",
+    "author": "Robert Kirkman (roteiro); Sean Phillips (arte); June Chung (cores).",
+    "publicationDate": "Salvat BR 2014; original EUA 2005–2006 (Marvel Zombies #1–5).",
+    "genres": [
+      "horror",
+      "zumbis",
+      "super-heróis"
+    ],
+    "synopsis": "Uma praga transforma os maiores heróis da Terra em criaturas famintas, mas ainda conscientes de suas personalidades e poderes. Enquanto a fome se espalha, os sobreviventes tentam entender a origem da infecção e encontrar uma saída.",
+    "period": "2014"
+  },
+  "1EDR7-AhnNWwiv8jNQcEUUJmq-aOqNU4j": {
+    "displayTitle": "Quarteto Fantástico: O Fim",
+    "author": "Alan Davis (roteiro e arte); Mark Farmer (arte-final).",
+    "publicationDate": "Salvat BR 2014; original EUA 2006–2007 (Fantastic Four: The End #1–6).",
+    "genres": [
+      "super-heróis",
+      "ficção científica",
+      "família"
+    ],
+    "synopsis": "Em um futuro distante, o Quarteto Fantástico encara as marcas de uma vida dedicada à exploração cósmica e à proteção da Terra. Reed, Sue, Johnny e Ben precisam lidar com heranças familiares, ameaças interplanetárias e a possibilidade de que sua era esteja terminando.",
+    "period": "2014"
+  },
+  "1yFiLYBT89cS3xAw-Z2RJHK1nAXmwYJZH": {
+    "displayTitle": "O Incrível Hulk: Planeta Hulk — Parte 2",
+    "author": "Greg Pak (roteiro); Aaron Lopresti (arte principal); Carlo Pagulayan e outros (artes em capítulos).",
+    "publicationDate": "Salvat Brasil: 2014 (conforme catálogo); original EUA: 2007, Hulk #100–105.",
+    "genres": [
+      "ficção científica",
+      "super-heróis",
+      "aventura"
+    ],
+    "synopsis": "Em Sakaar, Hulk já não é apenas um exilado: tornou-se gladiador, líder e esperança de povos submetidos a um império cruel. A aliança com os Warbound é testada por batalhas, intrigas e pelo desejo de voltar à Terra.",
+    "period": "2014"
+  },
+  "1cLzJMbiwQfD2nSd3RT6oi7pTK0lUAH0w": {
+    "displayTitle": "O Incrível Hulk: Planeta Hulk — Parte 1",
+    "author": "Greg Pak (roteiro); Carlo Pagulayan (desenho); Jeffrey Huet (arte-final).",
+    "publicationDate": "Salvat BR 2014; original EUA 2006–2007 (The Incredible Hulk #92–99).",
+    "genres": [
+      "ficção científica",
+      "super-heróis",
+      "aventura"
+    ],
+    "synopsis": "Os Illuminati enviam Hulk para longe da Terra, mas uma sabotagem muda seu destino e o lança em Sakaar. Capturado e forçado a lutar em arenas, ele reúne companheiros improváveis entre escravos e guerreiros alienígenas.",
+    "period": "2014"
+  },
+  "1s-0x_UsmJBjhWIELdTddCgHmsYOmxOmd": {
+    "displayTitle": "Capitão América: O Soldado Invernal",
+    "author": "Ed Brubaker (roteiro); Steve Epting (desenho); Mike Perkins (arte em capítulos).",
+    "publicationDate": "Salvat BR 2014; original EUA 2005–2006 (Captain America vol. 5 #8–9 e #11–14).",
+    "genres": [
+      "super-heróis",
+      "espionagem",
+      "thriller"
+    ],
+    "synopsis": "Pesadelos e pistas sobre a Segunda Guerra Mundial levam Steve Rogers a investigar o retorno de um assassino ligado ao seu passado. A investigação envolve a S.H.I.E.L.D., conspirações da Guerra Fria e a possibilidade de que Bucky Barnes não tenha desaparecido como todos acreditavam.",
+    "period": "2014"
+  },
+  "1XHAb44gmMm0KBTo5EDnzvhPkzdDzGtqK": {
+    "displayTitle": "Capitão América: Tempo Esgotado",
+    "author": "Ed Brubaker (roteiro); Steve Epting (arte); Michael Lark (arte em partes).",
+    "publicationDate": "Salvat BR 2013; original EUA 2005 (Captain America vol. 5 #1–7).",
+    "genres": [
+      "super-heróis",
+      "espionagem",
+      "thriller"
+    ],
+    "synopsis": "Steve Rogers tenta reconstruir sua vida enquanto antigos inimigos e conspirações internacionais voltam a cercá-lo. O Capitão América é arrastado para uma trama de terrorismo, manipulação política e memórias da guerra, contando com aliados cuja lealdade nem sempre é evidente.",
+    "period": "2013"
+  },
+  "1ERBkPbjwY3ohluOBW-Eb3xPrKr7VYpOj": {
+    "displayTitle": "Homem de Ferro: Extremis",
+    "author": "Warren Ellis (roteiro); Adi Granov (arte e cores).",
+    "publicationDate": "Salvat BR 2014; original EUA 2005–2006 (Iron Man vol. 4 #1–6).",
+    "genres": [
+      "super-heróis",
+      "ficção científica",
+      "tecnologia"
+    ],
+    "synopsis": "Um terrorista com acesso a uma tecnologia biológica experimental coloca o Homem de Ferro diante de uma ameaça que não pode ser vencida apenas com armadura. Tony Stark revisita sua origem, seus limites físicos e a relação entre inovação e militarização.",
+    "period": "2014"
+  },
+  "14-aWWNqE1G5EV8-gtXjhRqlHJLjCilsT": {
+    "displayTitle": "Os Novos Vingadores: Motim",
+    "author": "Brian Michael Bendis (roteiro); David Finch (arte); Danny Miki (arte-final).",
+    "publicationDate": "Salvat BR 2014; original EUA 2005 (New Avengers #1–6).",
+    "genres": [
+      "super-heróis",
+      "equipe",
+      "ação"
+    ],
+    "synopsis": "Após a dissolução dos Vingadores tradicionais, uma fuga em massa de supervilões reúne heróis improváveis para enfrentar uma ameaça dentro da prisão. Capitão América, Homem de Ferro, Homem-Aranha, Luke Cage, Wolverine e outros formam uma equipe mais urbana e imprevisível.",
+    "period": "2014"
+  },
+  "1FqiI0rgAkcetl7up0PqKMVLdxCQEZcP8": {
+    "displayTitle": "Dinastia M: O Herdeiro",
+    "author": "David Hine (roteiro); Roy Allan Martinez (arte); Stephane Peru (cores).",
+    "publicationDate": "Salvat BR 2015; original EUA 2005–2006 (Son of M #1–6).",
+    "genres": [
+      "super-heróis",
+      "drama",
+      "política"
+    ],
+    "synopsis": "Após a alteração da realidade pela Feiticeira Escarlate, Mercúrio perde poderes, status e confiança. Tentando reparar os danos e recuperar sua posição entre os Inumanos, ele busca uma solução que pode ter consequências perigosas.",
+    "period": "2015"
+  },
+  "1t9i-7xQYyC7jqku3WL-Z4zjQTz-qLTIa": {
+    "displayTitle": "Dinastia M",
+    "author": "Brian Michael Bendis (roteiro); Olivier Coipel (arte); Tim Townsend e outros (arte-final).",
+    "publicationDate": "Salvat BR 2015; original EUA 2005 (House of M #1–8).",
+    "genres": [
+      "super-heróis",
+      "mutantes",
+      "realidade alternativa"
+    ],
+    "synopsis": "A Feiticeira Escarlate está à beira de um colapso, e os Vingadores e X-Men discutem se devem intervir. Quando a realidade é reescrita, mutantes tornam-se maioria e Magneto governa uma sociedade aparentemente perfeita.",
+    "period": "2015"
+  },
+  "1UFvCDwsgzb0P_21WfKApSis01re33D6z": {
+    "displayTitle": "Motoqueiro Fantasma: Estrada para a Danação",
+    "author": "Garth Ennis (roteiro); Clayton Crain (arte).",
+    "publicationDate": "Salvat BR 2014; original EUA 2005 (Ghost Rider vol. 4 #1–6).",
+    "genres": [
+      "horror",
+      "ação",
+      "sobrenatural"
+    ],
+    "synopsis": "Johnny Blaze está preso a um pacto infernal e percorre uma estrada sem saída, perseguido por demônios e condenados. Quando uma disputa no Inferno ameaça transbordar para o mundo mortal, ele precisa decidir se sua maldição pode ser usada contra os próprios senhores demoníacos.",
+    "period": "2014"
+  },
+  "1ff1NmhRVmwe7hDu3Z5-7pznrpjE7y7IV": {
+    "displayTitle": "Pantera Negra: Quem é o Pantera Negra?",
+    "author": "Reginald Hudlin (roteiro); John Romita Jr. (desenho); Klaus Janson (arte-final).",
+    "publicationDate": "Salvat BR 2014; original EUA 2005 (Black Panther vol. 4 #1–6).",
+    "genres": [
+      "super-heróis",
+      "política",
+      "ação"
+    ],
+    "synopsis": "T’Challa enfrenta a responsabilidade de proteger Wakanda enquanto ameaças estrangeiras e antigas rivalidades testam a estabilidade do reino. A história apresenta o Pantera Negra a leitores novos por meio de ação, intriga política e tradição, sem separar o herói do governante.",
+    "period": "2014"
+  },
+  "19jvqeR8LEOano49kLIOSb9-41BQwKNIE": {
+    "displayTitle": "Os Surpreendentes X-Men: Perigoso",
+    "author": "Joss Whedon (roteiro); John Cassaday (arte); Laura Martin (cores).",
+    "publicationDate": "Salvat BR 2014; original EUA 2005–2006 (Astonishing X-Men #7–12).",
+    "genres": [
+      "super-heróis",
+      "mutantes",
+      "ficção científica"
+    ],
+    "synopsis": "A equipe dos X-Men enfrenta uma ameaça que conhece cada fraqueza dos mutantes e transforma a própria escola em campo de batalha. Ciclope, Emma Frost, Kitty Pryde, Fera e Wolverine precisam questionar seus métodos e o legado de suas missões.",
+    "period": "2014"
+  },
+  "1QUtYbkj1vBcIDDspD_hu2bCL8wI5jQrm": {
+    "displayTitle": "Surpreendentes X-Men: Superdotados",
+    "author": "Joss Whedon (roteiro); John Cassaday (arte); Laura Martin (cores).",
+    "publicationDate": "Salvat BR 2013; original EUA 2004–2005 (Astonishing X-Men #1–6).",
+    "genres": [
+      "super-heróis",
+      "mutantes",
+      "equipe"
+    ],
+    "synopsis": "Uma nova ameaça aos mutantes surge justamente quando o Instituto Xavier tenta recuperar sua comunidade. Ciclope, Emma Frost, Wolverine, Fera e Kitty Pryde se reúnem para investigar uma cura controversa e enfrentar um inimigo que conhece os segredos da espécie.",
+    "period": "2013"
+  },
+  "1Yxo66cIol31PqmuP3oGmTGPCPd7miFoe": {
+    "displayTitle": "Guerra Secreta",
+    "author": "Brian Michael Bendis (roteiro); Gabriele Dell’Otto (arte e cores).",
+    "publicationDate": "Salvat BR 2013; original EUA 2004–2005 (Secret War #1–5).",
+    "genres": [
+      "super-heróis",
+      "espionagem",
+      "ação"
+    ],
+    "synopsis": "Nick Fury descobre que uma nação estrangeira está armando supervilões e decide agir sem autorização oficial. Ele recruta um grupo clandestino de heróis para uma missão que deveria permanecer invisível, mas as consequências retornam anos depois para assombrar todos os envolvidos.",
+    "period": "2013"
+  },
+  "1r-dQvMp5WXhTpJVaSqMCeQMNnCM7RrkZ": {
+    "displayTitle": "1602",
+    "author": "Neil Gaiman (roteiro); Andy Kubert (desenho); Richard Isanove (arte-final e cores).",
+    "publicationDate": "Salvat BR 2015; original EUA 2003–2004 (1602 #1–8).",
+    "genres": [
+      "história alternativa",
+      "super-heróis",
+      "fantasia"
+    ],
+    "synopsis": "No ano de 1602, sinais de mudanças inexplicáveis atravessam uma Europa cheia de intrigas religiosas, espionagem e exploração. Figuras que lembram heróis Marvel aparecem reimaginadas em um mundo elisabetano, enquanto Virginia Dare e o viajante Matthew Murdoch se aproximam de uma conspiração maior.",
+    "period": "2015"
+  },
+  "1UDSRQWYun0MBhSnWAdojIzS2XcJdTtjV": {
+    "displayTitle": "Quarteto Fantástico: Ações Autoritárias",
+    "author": "Mark Waid (roteiro); Mike Wieringo (arte); Karl Kesel (arte-final em partes).",
+    "publicationDate": "Salvat BR 2015; original EUA 2003–2004 (Fantastic Four #503–511).",
+    "genres": [
+      "super-heróis",
+      "família",
+      "ficção científica"
+    ],
+    "synopsis": "O Quarteto Fantástico tenta proteger a Terra enquanto antigas alianças e decisões políticas colocam a família em conflito com autoridades e ameaças cósmicas. Reed, Sue, Johnny e Ben enfrentam consequências que não podem ser resolvidas apenas com força ou tecnologia.",
+    "period": "2015"
+  },
+  "1opSWPhGTJ4_g0_LzjhG90eeiEtSsxKvG": {
+    "displayTitle": "Quarteto Fantástico: Inconcebível",
+    "author": "Mark Waid (roteiro); Mike Wieringo (arte); Karl Kesel (arte-final em partes).",
+    "publicationDate": "Salvat BR 2015; original EUA 2003–2004 (Fantastic Four vol. 3 #67–70 e Fantastic Four #500–502).",
+    "genres": [
+      "super-heróis",
+      "família",
+      "fantasia"
+    ],
+    "synopsis": "O Doutor Destino abandona a rivalidade convencional e recorre a forças místicas para atingir o Quarteto Fantástico onde ele é mais vulnerável. Reed e Sue precisam proteger a família enquanto a ameaça contorna ciência, diplomacia e combate direto.",
+    "period": "2015"
+  },
+  "1_Zlvzms_BRBMaUwRCbCbYXHEXHxhlxbI": {
+    "displayTitle": "Os Supremos: Segurança Nacional",
+    "author": "Mark Millar (roteiro); Bryan Hitch (desenho); Paul Neary (arte-final).",
+    "publicationDate": "Salvat BR 2014; original EUA 2004–2005 (The Ultimates #7–13).",
+    "genres": [
+      "super-heróis",
+      "militar",
+      "ficção científica"
+    ],
+    "synopsis": "A equipe criada para proteger os Estados Unidos é transformada em instrumento de segurança nacional, mas tensões internas e ameaças globais tornam a missão cada vez mais instável. Capitão América, Thor, Homem de Ferro e seus aliados enfrentam tecnologia militar, propaganda e rivalidades pessoais.",
+    "period": "2014"
+  },
+  "1kXrBIFDakT2b-iu8NVh5GsdZzHx4LzMB": {
+    "displayTitle": "Os Supremos: Super-Humanos",
+    "author": "Mark Millar (roteiro); Bryan Hitch (desenho); Paul Neary (arte-final).",
+    "publicationDate": "Salvat BR 2013; original EUA 2002–2004 (The Ultimates #1–6).",
+    "genres": [
+      "super-heróis",
+      "militar",
+      "ficção científica"
+    ],
+    "synopsis": "Nick Fury reúne versões reimaginadas dos maiores heróis para formar uma força de resposta global. A equipe precisa lidar com personalidades incompatíveis, ameaças tecnológicas e a pressão de ser observada como projeto militar.",
+    "period": "2013"
+  },
+  "1wrMYh94LKDuRTX_CBAPYeftOPbXrDlxV": {
+    "displayTitle": "Capitão América: O Novo Pacto",
+    "author": "John Ney Rieber (roteiro); Jae Lee (arte); June Chung (cores).",
+    "publicationDate": "Salvat BR 2015; original EUA 2002 (Captain America vol. 4 #1–6).",
+    "genres": [
+      "super-heróis",
+      "espionagem",
+      "terrorismo"
+    ],
+    "synopsis": "Steve Rogers tenta atuar em um mundo pós-traumático, onde ameaças terroristas e interesses políticos desafiam os ideais que ele representa. Sem se reduzir a um soldado obediente, o Capitão América investiga conspirações e enfrenta inimigos cuja violência é também uma batalha de narrativas.",
+    "period": "2015"
+  },
+  "1qrIcZop_yRbLoz4db0Sl2JIK0fnOLc21": {
+    "displayTitle": "Homem-Aranha: Azul",
+    "author": "Jeph Loeb (roteiro); Tim Sale (arte); Steve Buccellato (cores).",
+    "publicationDate": "Salvat BR 2015; original EUA 2002–2003 (Spider-Man: Blue #1–6).",
+    "genres": [
+      "super-heróis",
+      "romance",
+      "drama"
+    ],
+    "synopsis": "Em uma noite de lembranças, Peter Parker grava uma mensagem para Gwen Stacy e revisita os primeiros anos de sua vida como Homem-Aranha. A narrativa atravessa encontros com Mary Jane, confrontos com vilões e a sensação de que a felicidade pode ser temporária.",
+    "period": "2015"
+  },
+  "1S48TxcX1NhsgXYrs_xdFuyU3L7hT5dA3": {
+    "displayTitle": "Novos X-Men: Imperial",
+    "author": "Grant Morrison (roteiro); Frank Quitely, Igor Kordey e outros (artes, conforme capítulo).",
+    "publicationDate": "Salvat BR 2015; original EUA 2001–2002 (New X-Men #118–126).",
+    "genres": [
+      "mutantes",
+      "super-heróis",
+      "ficção científica"
+    ],
+    "synopsis": "Os X-Men lidam com conflitos internos, novas ameaças e uma sociedade que observa cada movimento mutante. A equipe enfrenta o retorno de ideias extremistas, viagens e manipulações que colocam a escola e sua missão em risco.",
+    "period": "2015"
+  },
+  "1TTx5iNM685T3Cu4hoJUyOftqdMQfm9Ji": {
+    "displayTitle": "Novos X-Men: E de Extinção",
+    "author": "Grant Morrison (roteiro); Frank Quitely (arte); Tim Townsend e outros (arte-final).",
+    "publicationDate": "Salvat BR 2014; original EUA 2001 (New X-Men #114–117).",
+    "genres": [
+      "mutantes",
+      "super-heróis",
+      "ficção científica"
+    ],
+    "synopsis": "A população mutante enfrenta um cenário de medo, preconceito e extinção, enquanto o Instituto Xavier tenta se adaptar ao novo século. Ciclope, Emma Frost, Fera e Wolverine são reunidos sob uma abordagem mais ousada, que combina escola, política e ficção científica.",
+    "period": "2014"
+  },
+  "1Tqtvyd49BFapU9jozoecMEn-UjLyLy_V": {
+    "displayTitle": "O Espetacular Homem-Aranha: Revelações & Até que as Estrelas Esfriem",
+    "author": "J. Michael Straczynski (roteiro); John Romita Jr. (arte); Scott Hanna (arte-final).",
+    "publicationDate": "Salvat BR ano não indicado; original EUA 2001–2002 (The Amazing Spider-Man vol. 2 #37–45).",
+    "genres": [
+      "super-heróis",
+      "drama",
+      "mistério"
+    ],
+    "synopsis": "Peter Parker tenta equilibrar casamento, trabalho e a responsabilidade de ser Homem-Aranha enquanto novas ameaças e revelações mexem com sua compreensão do passado. Ao lado de Mary Jane e aliados, ele enfrenta inimigos que exploram culpa, medo e segredos familiares.",
+    "period": "2001–2002"
+  },
+  "1xg2QEHHpmARAQnXeR3PGjxcTLq28RYJq": {
+    "displayTitle": "O Espetacular Homem-Aranha: De Volta ao Lar",
+    "author": "J. Michael Straczynski (roteiro); John Romita Jr. (arte); Scott Hanna (arte-final).",
+    "publicationDate": "Salvat BR 2013; original EUA 2001 (The Amazing Spider-Man vol. 2 #30–35).",
+    "genres": [
+      "super-heróis",
+      "aventura",
+      "drama"
+    ],
+    "synopsis": "Peter Parker retorna a Nova York decidido a reconstruir sua vida depois de uma fase difícil. Enquanto enfrenta ameaças urbanas e tenta entender um misterioso predador, ele também conhece uma presença ligada a tradições antigas e ao próprio sentido de responsabilidade.",
+    "period": "2013"
+  },
+  "1j7Dyb1HOXcZ0cq75095FTVUv-ZhCmSwY": {
+    "displayTitle": "Ultimate Homem-Aranha: Poder e Responsabilidade",
+    "author": "Brian Michael Bendis (roteiro); Mark Bagley (arte); Art Thibert (arte-final).",
+    "publicationDate": "Salvat BR ano não indicado; original EUA 2000–2001 (Ultimate Spider-Man #1–7).",
+    "genres": [
+      "super-heróis",
+      "adolescência",
+      "origem"
+    ],
+    "synopsis": "Peter Parker é um adolescente brilhante que ganha poderes após ser mordido por uma aranha geneticamente alterada. Inicialmente encantado com as novas habilidades, ele aprende que poder sem responsabilidade produz consequências irreversíveis.",
+    "period": "2000–2001"
+  },
+  "1fT9Cz-ZjGYXeuGtJzzttGgnOpkPj3Cly": {
+    "displayTitle": "Justiceiro: Bem-Vindo de Volta, Frank — Parte 2",
+    "author": "Garth Ennis (roteiro); Steve Dillon (arte); Chris Sotomayor (cores).",
+    "publicationDate": "Salvat BR ano não indicado; original EUA 2000–2001 (The Punisher vol. 3 #7–12).",
+    "genres": [
+      "ação",
+      "crime",
+      "thriller"
+    ],
+    "synopsis": "Frank Castle continua sua guerra particular contra organizações criminosas, usando investigação, armas e uma brutalidade calculada. Depois de recuperar espaço nas ruas, ele se vê cercado por mafiosos, policiais e inimigos que subestimam sua determinação.",
+    "period": "2000–2001"
+  },
+  "18Sa1_D2IMvKGrUHVuImW8FWxBU74TC_9": {
+    "displayTitle": "Justiceiro: Bem-Vindo de Volta, Frank — Parte 1",
+    "author": "Garth Ennis (roteiro); Steve Dillon (arte); Chris Sotomayor (cores).",
+    "publicationDate": "Salvat BR ano não indicado; original EUA 2000 (The Punisher vol. 3 #1–6).",
+    "genres": [
+      "ação",
+      "crime",
+      "thriller"
+    ],
+    "synopsis": "Frank Castle retorna a Nova York e encontra uma cidade controlada por mafiosos que acreditam poder comprar tudo, inclusive a polícia. Sem exército ou poderes, ele transforma planejamento, intimidação e precisão em armas contra o submundo.",
+    "period": "2000"
+  },
+  "126SQt9iCBsXfqAnQChpHIebljYwXjJuU": {
+    "displayTitle": "Demolidor: Diabo da Guarda",
+    "author": "Kevin Smith (roteiro); Joe Quesada (arte); Jimmy Palmiotti (arte-final).",
+    "publicationDate": "Salvat BR ano não indicado; original EUA 1998–1999 (Daredevil vol. 2 #1–8).",
+    "genres": [
+      "super-heróis",
+      "crime",
+      "drama"
+    ],
+    "synopsis": "Matt Murdock enfrenta uma crise de fé e identidade quando um bebê é entregue a ele sob circunstâncias misteriosas. Enquanto investiga a origem da criança, o Demolidor é pressionado por inimigos, culpa e dúvidas sobre sua própria missão.",
+    "period": "1998–1999"
+  },
+  "1GwMwn5X3wojB3sJ8PW3ONTQtz7Wcl6Hz": {
+    "displayTitle": "Thor: Em Busca dos Deuses",
+    "author": "Matt Fraction (roteiro); Olivier Coipel e Pasqual Ferry (artes, conforme capítulo).",
+    "publicationDate": "Salvat BR ano não indicado; original EUA 2011 (The Mighty Thor vol. 2 #1–7).",
+    "genres": [
+      "super-heróis",
+      "mitologia",
+      "fantasia"
+    ],
+    "synopsis": "Thor retorna a uma Asgard ameaçada por forças antigas e por conflitos entre deuses, mortais e entidades cósmicas. Ao procurar respostas sobre a origem e o destino de seus semelhantes, ele atravessa reinos e enfrenta adversários que não podem ser vencidos apenas com o martelo.",
+    "period": "2011"
+  },
+  "1O5HgQM9oCNJoi3p9N3uF9gtpA6VJxEHt": {
+    "displayTitle": "Vingadores Eternamente — Parte 2",
+    "author": "Kurt Busiek e Roger Stern (roteiro); Carlos Pacheco (arte); Jesús Merino (arte-final).",
+    "publicationDate": "Salvat BR ano não indicado; original EUA 1999–2000 (Avengers Forever #7–12).",
+    "genres": [
+      "super-heróis",
+      "viagem no tempo",
+      "ficção científica"
+    ],
+    "synopsis": "Vingadores de épocas diferentes continuam presos em uma guerra que atravessa linhas temporais e futuros possíveis. Para impedir uma manipulação do destino, a equipe precisa compreender a relação entre Kang, Immortus, a Inteligência Suprema e as escolhas dos próprios heróis.",
+    "period": "1999–2000"
+  },
+  "19qMQrwb09OLJ-lmEG7jLuz3NjxMywF-e": {
+    "displayTitle": "Vingadores Eternamente — Parte 1",
+    "author": "Kurt Busiek e Roger Stern (roteiro); Carlos Pacheco (arte); Jesús Merino (arte-final).",
+    "publicationDate": "Salvat BR ano não indicado; original EUA 1998–1999 (Avengers Forever #1–6).",
+    "genres": [
+      "super-heróis",
+      "viagem no tempo",
+      "ficção científica"
+    ],
+    "synopsis": "Uma ameaça à própria história dos Vingadores leva heróis de diferentes eras a uma missão impossível. Capitão América, Homem de Ferro, Vespa e outros aliados são reunidos ao lado de versões alternativas de companheiros para investigar uma guerra temporal.",
+    "period": "1998–1999"
+  },
+  "13uUzkqRKLnhCpOkAhKkpu7JzBPD5vF9S": {
+    "displayTitle": "Marvels",
+    "author": "Kurt Busiek (roteiro); Alex Ross (pintura); Steve Oliff (cores).",
+    "publicationDate": "Salvat BR ano não indicado; original EUA 1994 (Marvels #0–4).",
+    "genres": [
+      "super-heróis",
+      "história alternativa",
+      "drama"
+    ],
+    "synopsis": "Phil Sheldon é um fotógrafo comum que acompanha décadas de acontecimentos extraordinários em Nova York. De seu ponto de vista, o leitor vê o surgimento de heróis, tragédias públicas e mudanças na relação entre cidadãos e “marvels”.",
+    "period": "1994"
+  },
+  "1ejL-CksEO4O6dr0jRVFg2BvQp1w4sDSe": {
+    "displayTitle": "Wolverine: Arma X",
+    "author": "Barry Windsor-Smith (roteiro, desenho, arte-final e cores).",
+    "publicationDate": "Salvat BR ano não indicado; original EUA 1991 (Marvel Comics Presents #72–84).",
+    "genres": [
+      "super-heróis",
+      "horror",
+      "ficção científica"
+    ],
+    "synopsis": "Antes de assumir plenamente a identidade Wolverine, Logan é capturado por um programa secreto que pretende transformar seu corpo em arma. Cientistas, técnicos e agentes observam o experimento enquanto ele sofre procedimentos que alteram sua memória e seu esqueleto.",
+    "period": "1991"
+  },
+  "1eUJbL7IQSBOjHCO4zwcA5cmyedCDtk3u": {
+    "displayTitle": "O Incrível Hulk: Gritos Silenciosos",
+    "author": "Peter David (roteiro); Dale Keown (arte); Mark Farmer (arte-final).",
+    "publicationDate": "Salvat BR ano não indicado; original EUA 1990–1991 (The Incredible Hulk #370–377).",
+    "genres": [
+      "super-heróis",
+      "horror",
+      "drama"
+    ],
+    "synopsis": "O Hulk atravessa uma fase de instabilidade física e psicológica, enquanto Bruce Banner tenta entender as personalidades que disputam espaço dentro dele. Ameaças militares, monstros e conflitos pessoais pressionam a frágil convivência entre homem e criatura.",
+    "period": "1990–1991"
+  },
+  "1Jx_7WMU0R2MCQtce6KepyWSRuI9lq75n": {
+    "displayTitle": "O Espetacular Homem-Aranha: O Nascimento de Venom",
+    "author": "David Michelinie (roteiro); Todd McFarlane (arte principal); Erik Larsen e outros (artes, conforme capítulo).",
+    "publicationDate": "Salvat Brasil: ano não confirmado; original EUA: 1984–1988, Amazing Spider-Man e Web of Spider-Man.",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "horror"
+    ],
+    "synopsis": "Depois de retornar do espaço com um traje aparentemente perfeito, Peter Parker descobre que o uniforme possui vontade própria. A separação deixa um inimigo ressentido e dá origem a Venom, uma ameaça que conhece os poderes e a vida particular do Homem-Aranha.",
+    "period": "1984–1988"
+  },
+  "1jp7ejHPkjo888xJ9Z9uzCqSrriKUBNgv": {
+    "displayTitle": "O Espetacular Homem-Aranha: A Última Caçada de Kraven",
+    "author": "J. M. DeMatteis (roteiro); Mike Zeck (arte); Bob McLeod (arte-final).",
+    "publicationDate": "Salvat Brasil: ano não confirmado; original EUA: 1987, Web, Amazing e Spectacular Spider-Man.",
+    "genres": [
+      "super-heróis",
+      "thriller",
+      "horror"
+    ],
+    "synopsis": "Kraven decide provar que é superior ao Homem-Aranha através de uma caçada definitiva, marcada por obsessão e ritual. Peter Parker é levado ao limite enquanto seu inimigo tenta tomar seu lugar e construir uma vitória simbólica.",
+    "period": "1987"
+  },
+  "1vtoBRytjX9bpSJo7jPl5U4YwGN8LgW6d": {
+    "displayTitle": "Demolidor: A Queda de Murdock",
+    "author": "Frank Miller (roteiro); David Mazzucchelli (arte); Richmond Lewis (cores).",
+    "publicationDate": "Salvat BR ano não indicado; original EUA 1986 (Daredevil #227–233).",
+    "genres": [
+      "super-heróis",
+      "crime",
+      "drama"
+    ],
+    "synopsis": "A identidade secreta de Matt Murdock é descoberta e sua vida profissional, financeira e afetiva começa a desmoronar. Manipulado por um inimigo paciente, ele perde recursos e confiança, mas precisa reconstruir a própria resistência longe do uniforme.",
+    "period": "1986"
+  },
+  "1bmsIgWg9nf7P2J52rW1nib9nS1MGTw7D": {
+    "displayTitle": "Guerras Secretas — Parte 2",
+    "author": "Jim Shooter (roteiro); Mike Zeck (desenho); John Beatty (arte-final).",
+    "publicationDate": "Salvat BR ano não indicado; original EUA 1984–1985 (Marvel Super Heroes: Secret Wars #7–12).",
+    "genres": [
+      "super-heróis",
+      "ficção científica",
+      "evento"
+    ],
+    "synopsis": "Os heróis e vilões continuam presos em um planeta criado pelo Beyonder, onde desejos, alianças e rivalidades ganham escala cósmica. A convivência forçada provoca conflitos internos, enquanto a ameaça de Galactus e o poder de uma entidade quase onipotente colocam todos diante de escolhas impossíveis.",
+    "period": "1984–1985"
+  },
+  "1pnJalhGvyjUSw3S7BFwC0XR4hLLcr2-T": {
+    "displayTitle": "Guerras Secretas — Parte 1",
+    "author": "Jim Shooter (roteiro); Mike Zeck (desenho); John Beatty (arte-final).",
+    "publicationDate": "Salvat BR ano não indicado; original EUA 1984–1985 (Marvel Super Heroes: Secret Wars #1–6).",
+    "genres": [
+      "super-heróis",
+      "ficção científica",
+      "evento"
+    ],
+    "synopsis": "O Beyonder transporta os maiores heróis e vilões da Terra para um mundo artificial e promete realizar os desejos do vencedor. Sem entender as regras do experimento, Homem-Aranha, Vingadores, X-Men e outros precisam formar alianças temporárias contra inimigos conhecidos.",
+    "period": "1984–1985"
+  },
+  "1PiVd1XUxfBFKDZ8YFMRQzmKfwtkC67z6": {
+    "displayTitle": "Thor: O Último Viking",
+    "author": "Walter Simonson (roteiro e arte); John Workman (letras).",
+    "publicationDate": "Salvat BR ano não indicado; original EUA 1983–1984 (The Mighty Thor #337–343).",
+    "genres": [
+      "super-heróis",
+      "mitologia nórdica",
+      "fantasia"
+    ],
+    "synopsis": "Thor retorna a uma fase de mudanças radicais quando um guerreiro alienígena recebe a chance de erguer o martelo e assumir um novo papel. Enquanto deuses, monstros e forças cósmicas entram em choque, o asgardiano precisa lidar com honra, identidade e destino.",
+    "period": "1983–1984"
+  },
+  "12U6zDAVE7V-T3WnI1cbFg59b8ErQ9pIG": {
+    "displayTitle": "Eu, Wolverine",
+    "author": "Chris Claremont (roteiro); Frank Miller (arte); Josef Rubinstein (arte-final).",
+    "publicationDate": "Salvat BR ano não indicado; original EUA 1982 (Wolverine #1–4).",
+    "genres": [
+      "super-heróis",
+      "samurai",
+      "crime"
+    ],
+    "synopsis": "Logan viaja ao Japão para confrontar uma antiga paixão, um código de honra e a família de um poderoso criminoso. Entre duelos, ninjas e intrigas, Wolverine precisa decidir se pode viver segundo seus instintos sem ser consumido pela violência.",
+    "period": "1982"
+  },
+  "182hlxR4xDY53qbLo73DI4O2oXbLggJRv": {
+    "displayTitle": "Capitão Britânia: O Mundo Distorcido",
+    "author": "Alan Moore e Jamie Delano (roteiros, por capítulo); Alan Davis e outros (arte).",
+    "publicationDate": "Salvat Brasil: ano não confirmado; original Reino Unido: histórias de Captain Britain, 1982–1984.",
+    "genres": [
+      "super-heróis",
+      "fantasia",
+      "multiverso"
+    ],
+    "synopsis": "Brian Braddock atravessa versões estranhas da Grã-Bretanha e de si mesmo enquanto forças interdimensionais ameaçam romper as fronteiras entre mundos. Capitão Britânia enfrenta tiranos, paradoxos e aliados improváveis em histórias que misturam humor, crítica social e fantasia.",
+    "period": "1982–1984"
+  },
+  "1DzacevFyMNlwcAr9_v8NZR8PplnLeNuQ": {
+    "displayTitle": "Os Fabulosos X-Men: A Saga da Fênix Negra",
+    "author": "Chris Claremont (roteiro); John Byrne (desenho); Terry Austin (arte-final).",
+    "publicationDate": "Salvat BR ano não indicado; original EUA 1980–1981 (Uncanny X-Men #129–137).",
+    "genres": [
+      "mutantes",
+      "super-heróis",
+      "drama"
+    ],
+    "synopsis": "Jean Grey alcança um poder cósmico que ameaça apagar seus limites humanos, enquanto os X-Men enfrentam inimigos que desejam controlar a Fênix. A equipe tenta salvar Jean sem ignorar o risco que ela representa, em uma história sobre amizade, responsabilidade e sacrifício.",
+    "period": "1980–1981"
+  },
+  "1QMROdTt3orUvsNBe37nAqjJXb64u1L0q": {
+    "displayTitle": "Homem de Ferro: O Demônio na Garrafa",
+    "author": "David Michelinie e Bob Layton (roteiro); John Romita Jr. e Bob Layton (arte/arte-final).",
+    "publicationDate": "Salvat BR ano não indicado; original EUA 1979 (Iron Man #120–128).",
+    "genres": [
+      "super-heróis",
+      "drama",
+      "tecnologia"
+    ],
+    "synopsis": "Tony Stark enfrenta uma conspiração industrial que provoca falhas em sua armadura e ameaça destruir sua reputação. Ao mesmo tempo, o alcoolismo compromete relações, decisões e sua própria identidade.",
+    "period": "1979"
+  },
+  "1qfHjuIsrxH6Ih9YeHKXSpAk_p-YaZSSl": {
+    "displayTitle": "Homem-Aranha: A Volta do Sexteto Sinistro",
+    "author": "David Michelinie (roteiro); Erik Larsen (desenho); Mike Machlan e Terry Austin (arte-final); Bob Sharen (cores)",
+    "publicationDate": "14 de abril de 2021 (Brasil; Panini)",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "aventura",
+      "ficção científica"
+    ],
+    "synopsis": "Nesta aventura clássica, Peter Parker reencontra o Sexteto Sinistro, a perigosa aliança de inimigos reunida pelo Doutor Octopus. A trama combina perseguições, golpes coordenados e confrontos com Electro, Homem-Areia, Mystério, Abutre e Duende Macabro, enquanto o herói tenta proteger Mary Jane e pessoas próximas. O encadernado reúne Amazing Spider-Man #334–339, com o dinamismo visual de Erik Larsen.",
+    "period": "2021"
+  },
+  "1ZBr8TjRcxivcCWOls4s--EW7Nm-TiRWQ": {
+    "displayTitle": "Homem-Aranha por Todd McFarlane — Omnibus",
+    "author": "Todd McFarlane (roteiro e desenho; criação e condução da série Spider-Man)",
+    "publicationDate": "2022 (Brasil; Panini)",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "aventura",
+      "terror"
+    ],
+    "synopsis": "Todd McFarlane assume roteiro e arte em uma fase que redefiniu visualmente o Homem-Aranha no início dos anos 1990. O volume acompanha Peter Parker diante de uma ameaça brutal ligada ao Lagarto, passa pela saga Tormento e inclui encontros com Wolverine e a X-Force. A edição também apresenta o título Spider-Man, criado por McFarlane, reunindo suas principais histórias e material extra.",
+    "period": "2022"
+  },
+  "16HdUgcVkA9lUNE6ycKad_cW-bMgd0jDI": {
+    "displayTitle": "Homem-Aranha: Com Grandes Poderes...",
+    "author": "David Lapham (roteiro); Tony Harris (desenho); Jim Clark (arte-final); J.D. Mettler (cores)",
+    "publicationDate": "4 de dezembro de 2009 (Brasil; Panini)",
+    "genres": [
+      "super-heróis",
+      "aventura",
+      "drama",
+      "ficção científica"
+    ],
+    "synopsis": "Esta minissérie revisita os primeiros passos de Peter Parker como Homem-Aranha, antes de sua identidade heroica estar plenamente formada. Entre testes de habilidades, desafios escolares, luta livre e o aprendizado sobre responsabilidade, o jovem herói tenta conciliar a vida cotidiana com a súbita fama. David Lapham e Tony Harris combinam aventura, humor e drama em cinco capítulos ambientados na origem do personagem.",
+    "period": "2009"
+  },
+  "1VukZm-nv48b3-UpWcspMsqAJxIs39IHM": {
+    "displayTitle": "Homem-Aranha: A Origem do Duende Macabro",
+    "author": "Roger Stern (roteiro e argumento); Mike Zeck, Marie Severin, John Romita Jr., Ron Frenz e Allen Milgrom (desenho); diversos artistas (arte-final)",
+    "publicationDate": "1 de dezembro de 2020 (Brasil; Panini)",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "mistério",
+      "terror"
+    ],
+    "synopsis": "O volume acompanha uma investigação que começa com o roubo de uma toxina e conduz o Homem-Aranha a uma rede de disfarces, vingança e ameaças ligadas ao misterioso Duende Macabro. Ao longo de doze histórias, Peter cruza-se com Gatuno, Gata Negra, Mary Jane, Duende Verde e outros aliados e inimigos. Roger Stern conduz a narrativa, desenhada por diferentes artistas, incluindo John Romita Jr.",
+    "period": "2020"
+  },
+  "1dRKgLx--cI_yugrVFk228pSgQl2_HnAL": {
+    "displayTitle": "Homem-Aranha: A Saga do Devorador de Pecados",
+    "author": "Peter David (roteiro); Rich Buckler e Sal Buscema (desenho); Brett Breeding, Josef Rubinstein e Vince Colletta (arte-final)",
+    "publicationDate": "1 de fevereiro de 2021 (Brasil; Panini)",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "policial",
+      "drama"
+    ],
+    "synopsis": "Após o assassinato da capitã Jean DeWolff, um criminoso que se julga capaz de punir os pecadores espalha medo por Nova York. Homem-Aranha e Demolidor seguem pistas por uma cidade tomada por culpa, violência e desconfiança, em uma investigação de forte tom policial. O volume reúne a saga original e capítulos posteriores, com roteiros de Peter David e arte de Rich Buckler e Sal Buscema.",
+    "period": "2021"
+  },
+  "18rplXdrNEWMKZD4RJMYrnLU-OD60iKgn": {
+    "displayTitle": "Homem-Aranha: Antologia",
+    "author": "Stan Lee (roteiro); Steve Ditko, John Romita, Gil Kane, Ron Frenz, Todd McFarlane, John Romita Jr., Joe Quesada, Giuseppe Camuncoli e outros (arte); Gerry Conway, Roger Stern, David Michelinie, J. Michael Straczynski, Brian Michael Bendis e Dan Slott (roteiro)",
+    "publicationDate": "17 de novembro de 2017 (Brasil; Panini)",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "aventura",
+      "drama"
+    ],
+    "synopsis": "Esta antologia percorre diferentes eras do Homem-Aranha por meio de histórias escolhidas para mostrar sua origem, seus dilemas, seus adversários e sua relação com amigos e aliados. A seleção vai de Stan Lee e Steve Ditko a autores modernos como J. Michael Straczynski, Brian Michael Bendis e Dan Slott, passando por momentos marcantes desenhados por John Romita, Todd McFarlane e outros artistas.",
+    "period": "2017"
+  },
+  "1T53HP1lE4V81GxrtCJVJd0DabBqlmuh-": {
+    "displayTitle": "Coleção Clássica Marvel — Quarteto Fantástico",
+    "author": "Stan Lee (roteiro), Jack Kirby (arte)",
+    "publicationDate": "Estados Unidos, 1961–1964 (histórias originais); ano de publicação brasileira da série não confirmado por fonte direta acessível.",
+    "genres": [
+      "super-heróis",
+      "ficção científica",
+      "aventura"
+    ],
+    "synopsis": "Após uma missão espacial transformar seus corpos, Reed Richards, Sue Storm, Johnny Storm e Ben Grimm tentam conciliar laços familiares e poderes extraordinários. Nas aventuras reunidas nos primeiros volumes, enfrentam ameaças como Rama-Tut, o Homem-Molecular e o Doutor Destino, em histórias de exploração, invenção e perigo cósmico.",
+    "period": "Fantastic Four (1961), coleção brasileira dos primeiros volumes; o volume 5 reúne as edições originais #19–23 (1963–1964)."
+  },
+  "17PqMy3z8QT1Xq2lZF9TO0ON7Gm1u6osg": {
+    "displayTitle": "Quarteto Fantástico (1961–1973)",
+    "author": "Roteiro: Stan Lee; arte: Jack Kirby",
+    "publicationDate": "Estados Unidos: 1961–1973 (série original; início em novembro de 1961).",
+    "genres": [
+      "super-heróis",
+      "ficção científica",
+      "aventura"
+    ],
+    "synopsis": "Após uma viagem espacial marcada por raios cósmicos, Reed Richards, Sue Storm, Johnny Storm e Ben Grimm ganham poderes extraordinários e formam uma família de heróis. Juntos enfrentam ameaças terrestres e cósmicas enquanto exploram os limites da ciência e as tensões de suas próprias relações.",
+    "period": "Série original, volume 1: números regulares #1–150 (1961–1973); a coleção indica compilação desse período."
+  },
+  "18pKFgcq49HxHD4PsZNplp8o8eMpP7yrW": {
+    "displayTitle": "Quarteto Fantástico: fase Mark Millar e Bryan Hitch",
+    "author": "Mark Millar (roteiro); Bryan Hitch (arte)",
+    "publicationDate": "Estados Unidos: 2008–2009 (publicação original da fase)",
+    "genres": [
+      "super-heróis",
+      "ficção científica",
+      "aventura"
+    ],
+    "synopsis": "A Primeira Família da Marvel enfrenta ameaças que atravessam ciência, espaço e realidades alternativas enquanto Reed, Sue, Ben e Johnny lidam com novas mudanças em suas vidas. A fase combina grandes aventuras cósmicas e dilemas familiares, acompanhando o grupo em histórias que ampliam seu universo e testam sua união.",
+    "period": "Fantastic Four (1998), #554–569 (2008–2009); fase iniciada em #554"
+  },
+  "1yqJUcqLm1ip8U7qUgwcWUg9OF0yTTZmI": {
+    "displayTitle": "Quarteto Fantástico: fase Mark Waid e Mike Wieringo",
+    "author": "Roteiro: Mark Waid; arte: Mike Wieringo",
+    "publicationDate": "Estados Unidos: 2002–2005",
+    "genres": [
+      "super-heróis",
+      "ficção científica",
+      "aventura"
+    ],
+    "synopsis": "Com o Quarteto sob os holofotes, Reed, Sue, Johnny e Ben enfrentam ameaças que desafiam tanto a ciência quanto os laços da família. Entre criaturas impossíveis e confrontos com velhos inimigos, a fase combina aventura cósmica, humor e a dinâmica doméstica da Primeira Família da Marvel.",
+    "period": "Fantastic Four (1998), #60–70 e #500–524 (2002–2005)"
+  },
+  "1v6Wnbqltc55aqEdKyLbjTzS4ZAFpmNnH": {
+    "displayTitle": "Fantastic Four Epic Collection: The New Fantastic Four (Epic Collection, vol. 21)",
+    "author": "Roteiro: Walt Simonson, Tom DeFalco e outros; arte: Arthur Adams e outros",
+    "publicationDate": "Estados Unidos, 2018 (edição Epic Collection original; republicada em nova impressão em 2022)",
+    "genres": [
+      "super-heróis",
+      "aventura",
+      "ficção científica"
+    ],
+    "synopsis": "Quando os quatro integrantes clássicos ficam fora de ação, Homem-Aranha, Wolverine, Motoqueiro Fantasma e Hulk assumem o lugar do Quarteto. Entre ameaças cósmicas, conflitos em Nova York e o retorno de velhos inimigos, a formação improvável enfrenta o desafio de agir como equipe — enquanto a série atravessa uma mudança de fase criativa.",
+    "period": "Fantastic Four (1961) #347–361 e Annual #24; histórias de 1990–1992, incluindo a fase do Novo Quarteto Fantástico"
+  },
+  "174tyjquNwjzqTGDpWYyzPhdV41UBE9wl": {
+    "displayTitle": "Green Lantern (2005–2011) — vol. 4",
+    "author": "Roteiro: Geoff Johns, Dave Gibbons, Peter J. Tomasi; arte: Carlos Pacheco, Ethan Van Sciver, Ivan Reis, Patrick Gleason",
+    "publicationDate": "Estados Unidos: 2005–2011 (DC Comics)",
+    "genres": [
+      "super-heróis",
+      "ficção científica",
+      "aventura",
+      "ação"
+    ],
+    "synopsis": "De volta à Terra, Hal Jordan tenta retomar seu lugar como Lanterna Verde enquanto uma nova onda de ameaças cósmicas põe à prova o herói e a Tropa. A fase acompanha conflitos pessoais e batalhas que ampliam o universo dos Lanternas, do espaço profundo às tensões entre antigos aliados.",
+    "period": "Volume 4; série mensal #1–67 (2005–2011)"
+  },
+  "1yPBEFlorXJoJgr365kF2AwzSGQlGqdsv": {
+    "displayTitle": "Lanterna Verde, vol. 3 (1990–1993)",
+    "author": "Gerard Jones (roteiro); Pat Broderick (arte); Ron Marz (roteiro, arco final)",
+    "publicationDate": "Estados Unidos, 1990–1994 (a série começa em junho de 1990; o #50 saiu em fevereiro de 1994).",
+    "genres": [
+      "super-heróis",
+      "ficção científica",
+      "aventura"
+    ],
+    "synopsis": "Hal Jordan e outros Lanternas enfrentam ameaças que testam os limites da Tropa e o significado de proteger mundos com um anel de poder. Ao longo da fase, a série acompanha disputas cósmicas, crises pessoais e uma transformação decisiva no legado do Lanterna Verde.",
+    "period": "Terceiro volume, iniciado em junho de 1990; coleção que aparenta reunir números da série até #50, incluindo a fase anterior à mudança de equipe no arco Emerald Twilight. A série original continuou até 2004."
+  },
+  "1dtZFYNSuT_I1BTxHCRaqYNllX737c6mK": {
+    "displayTitle": "Contos da Tropa dos Lanternas Verdes",
+    "author": "Mike W. Barr (roteiro); Len Wein (roteiro); Paul Kupperberg (roteiro); Alan Moore (roteiro); Joe Staton (arte); Frank McLaughlin (arte); Gil Kane (arte); Kevin O’Neill (arte)",
+    "publicationDate": "Estados Unidos: 1981–1986 (minissérie e anuais; sem data brasileira confirmada)",
+    "genres": [
+      "super-heróis",
+      "ficção científica",
+      "aventura"
+    ],
+    "synopsis": "Histórias centradas na Tropa dos Lanternas Verdes ampliam a vida e os conflitos de seus membros pelo cosmos. A coleção reúne a minissérie de 1981 e especiais anuais posteriores, com aventuras distintas do universo de patrulheiros espaciais da DC.",
+    "period": "1981–1986; minissérie de 3 edições (1981), com anuais de 1985 e 1986 conforme os arquivos da coleção"
+  },
+  "1Sg6M8jnDGF7OHxaoxnnzlIm5vvvlNWiT": {
+    "displayTitle": "Green Lantern Corps: Edge of Oblivion (Tropa dos Lanternas Verdes: À Beira do Esquecimento)",
+    "author": "Tom Taylor (roteiro)",
+    "publicationDate": "Estados Unidos: 2016 (março–agosto; minissérie original).",
+    "genres": [
+      "super-heróis",
+      "ficção científica",
+      "aventura cósmica"
+    ],
+    "synopsis": "À medida que o universo se aproxima da entropia, a Tropa dos Lanternas Verdes luta para encontrar o caminho de volta. Em meio a mundos em ruínas e deuses moribundos, os sobreviventes dependem dos heróis para atravessar uma realidade à beira do fim.",
+    "period": "Minissérie limitada de 6 edições (#1–6), 2016; sequência de Green Lantern: The Lost Army."
+  },
+  "1u_17h6E999plvCBncunSoCVI15nH_U7e": {
+    "displayTitle": "Green Lantern: War Journal (2023–2024)",
+    "author": "Roteiro: Phillip Kennedy Johnson; arte: Montos",
+    "publicationDate": "Estados Unidos: 2023–2024; publicação original pela DC Comics. #1 lançado em 19 de setembro de 2023; #12 em 21 de agosto de 2024.",
+    "genres": [
+      "Super-heróis",
+      "Ação",
+      "Ficção científica"
+    ],
+    "synopsis": "Após uma tragédia familiar, John Stewart tenta deixar para trás a vida de Lanterna Verde. Uma ameaça ligada a Oa e a um Lanterna de outro universo o força a retomar seu papel como guerreiro, enquanto enfrenta perigos que colocam em risco sua família e a Terra.",
+    "period": "Série regular, vol. 1, #1–12 (2023–2024)"
+  },
+  "1qoJRWqhf59ZgsnRBCmoEjGlQOuDtK-9U": {
+    "displayTitle": "Lanterna Verde - O Poder do Mal",
+    "author": "Roteiro: Howard Chaykin, David Tischman; arte: Marshall Rogers, John Cebollero",
+    "publicationDate": "Original: Estados Unidos, DC Comics, 2002–2003; edição brasileira: Brasil, Mythos, 2005 (nº 1–3)",
+    "genres": [
+      "super-heróis",
+      "aventura",
+      "história alternativa"
+    ],
+    "synopsis": "Em uma Nova York alternativa dos anos 1860, Kyle Rayner recebe uma lanterna verde e desafia a influência do gângster Alan Scott. Enquanto o poder esmeralda passa a servir aos interesses de Scott e de seus aliados políticos, Kyle precisa defender os imigrantes e enfrentar uma cidade dominada pela corrupção.",
+    "period": "Minissérie completa em 3 edições; Elseworlds, universo alternativo ambientado na Nova York da década de 1860"
+  },
+  "1t_xGZeEwflZZ_FWe4n_1gMAegkZKbgNx": {
+    "displayTitle": "Lanterna Verde: Amanhecer Esmeralda I & II (Green Lantern: Emerald Dawn I & II)",
+    "author": "Roteiro: Jim Owsley, Keith Giffen, Gerard Jones; arte: M.D. Bright, Romeo Tanghal",
+    "publicationDate": "Estados Unidos: 1989–1991 (publicação original das duas minisséries).",
+    "genres": [
+      "Super-heróis",
+      "Ficção científica",
+      "Aventura"
+    ],
+    "synopsis": "Duas histórias ligadas recontam a origem de Hal Jordan e acompanham os primeiros desafios do Lanterna Verde da Terra: das circunstâncias que o conduzem ao anel e à Tropa dos Lanternas Verdes até um período de treinamento e provações que testa sua responsabilidade como herói.",
+    "period": "Duas minisséries: Emerald Dawn (1989–1990) e Emerald Dawn II (1991; 6 edições cada)."
+  },
+  "1upxGBFC-Dj16eNM3NdAIDzGfqJQd291a": {
+    "displayTitle": "Flash & Lanterna Verde: De Volta à Era de Prata",
+    "author": "Roteiro: Mark Waid, Tom Peyer; arte: Barry Kitson, Tom Grindberg",
+    "publicationDate": "Brasil: 2004 (edição Mythos); original: Estados Unidos, 1999–2000",
+    "genres": [
+      "super-heróis",
+      "aventura",
+      "ficção científica"
+    ],
+    "synopsis": "Barry Allen e Hal Jordan veem sua amizade posta à prova enquanto enfrentam ameaças que atravessam o tempo, velhos adversários e alianças improváveis. As aventuras exploram como o velocista e o Lanterna Verde construíram um vínculo capaz de superar suas diferenças.",
+    "period": "Minissérie Flash & Green Lantern: The Brave and the Bold (1999–2000), 6 números reunidos"
+  },
+  "1IS8x4NugX_Jg0bBuzEFpGqO-FX3pgPHG": {
+    "displayTitle": "Lanterna Verde: Crepúsculo Esmeralda / Novo Amanhecer",
+    "author": "Roteiro: Ron Marz; arte: Bill Willingham, Fred Haynes, Darryl Banks e colaboradores",
+    "publicationDate": "Estados Unidos, 1994 (histórias originais; #48–55). A coletânea norte-americana Green Lantern: Emerald Twilight / New Dawn foi publicada em 2003; edição brasileira catalogada pela Panini em junho de 2009.",
+    "genres": [
+      "super-heróis",
+      "ficção científica",
+      "drama",
+      "ação"
+    ],
+    "synopsis": "Após a destruição de Coast City, Hal Jordan tenta recuperar o que perdeu e cruza limites cada vez mais perigosos. Em paralelo, o Guardião Ganthet procura na Terra alguém capaz de assumir o último anel verde. A nova fase acompanha Kyle Rayner aprendendo a exercer esse legado enquanto enfrenta ameaças que testam sua coragem e responsabilidade.",
+    "period": "Green Lantern (vol. 3), #48–55 — arcos Crepúsculo Esmeralda e Novo Amanhecer"
+  },
+  "1OcpturzM-seVsOECXz1rROv7pQGc3TPT": {
+    "displayTitle": "Lanterna Verde: fase Kyle Rayner (Green Lantern, vol. 3)",
+    "author": "Roteiro: Ron Marz; arte: Darryl Banks",
+    "publicationDate": "Estados Unidos: a série Green Lantern (vol. 3) foi publicada de junho de 1990 a novembro de 2004; a fase de Kyle Rayner começa em 1994. O número 100 é de julho de 1998.",
+    "genres": [
+      "super-heróis",
+      "ficção científica",
+      "aventura"
+    ],
+    "synopsis": "Após receber o último anel de poder, o jovem artista Kyle Rayner precisa aprender a ser Lanterna Verde em meio a ameaças cósmicas e conflitos que testam sua coragem e imaginação. A fase acompanha sua construção como herói enquanto ele enfrenta as consequências de ocupar o lugar deixado por Hal Jordan.",
+    "period": "Green Lantern, vol. 3, fase Kyle Rayner; a coleção cobre ao menos os números 53–100 (1994–1998), conforme os arquivos citados."
+  },
+  "13JCngRLKFxHADZRLGvBf9DzGr7eb2-qv": {
+    "displayTitle": "Lanterna Verde: Especial de 80 Anos",
+    "author": "James Tynion IV (roteiro); Geoff Johns (roteiro); Cullen Bunn (roteiro); Denny O’Neil (roteiro); Ron Marz (roteiro); Peter J. Tomasi (roteiro); Charlotte Fullerton (roteiro); Robert Venditti (roteiro); ChrisCross (roteiro/arte)",
+    "publicationDate": "Estados Unidos, 2020 (lançamento em 23 de junho de 2020)",
+    "genres": [
+      "super-heróis",
+      "ficção científica",
+      "aventura",
+      "antologia"
+    ],
+    "synopsis": "Uma antologia comemorativa percorre diferentes eras do universo dos Lanternas Verdes: de Alan Scott a Hal Jordan, John Stewart, Guy Gardner e Kyle Rayner. Histórias curtas e artes especiais revisitam legados, dilemas e alianças da Tropa, celebrando oito décadas de aventuras cósmicas.",
+    "period": "Edição comemorativa avulsa (one-shot), reunindo histórias de diferentes décadas e fases do personagem"
+  },
+  "122_V2brXxCTlzscQqZOXBi5dEY7qYj-H": {
+    "displayTitle": "Lendas do Universo DC: Lanterna Verde / Arqueiro Verde",
+    "author": "Roteiro: Dennis O’Neil; arte: Neal Adams",
+    "publicationDate": "Brasil: 2016–2017 (edições Panini; intervalo da série conforme GCD). Originais: Estados Unidos, 1970–1972.",
+    "genres": [
+      "super-heróis",
+      "ficção científica",
+      "drama social"
+    ],
+    "synopsis": "Hal Jordan e Oliver Queen cruzam os Estados Unidos, confrontando injustiças e dilemas sociais que desafiam a visão de mundo dos dois heróis. A parceria entre o disciplinado Lanterna Verde e o contestador Arqueiro Verde transforma uma missão de combate ao crime em uma jornada de debate moral e mudança.",
+    "period": "Série brasileira em 3 volumes; reúne a fase clássica de Green Lantern #76–89 (1970–1972)."
+  },
+  "19ZCb6yGOQF3B11g878oWnXxApfzeQtBh": {
+    "displayTitle": "Wonder Woman (2006 series) — Vol. 3",
+    "author": "Roteiro: Allan Heinberg, Gail Simone, J. Michael Straczynski",
+    "publicationDate": "Estados Unidos: agosto de 2006–outubro de 2011",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "mitologia",
+      "fantasia"
+    ],
+    "synopsis": "Após afastar-se da vida heroica, Diana Prince vê o passado ressurgir quando alguém próximo é sequestrado. A série acompanha seu retorno ao mundo dos super-heróis e os desafios que colocam em jogo sua identidade, suas alianças e o lugar das amazonas entre os humanos.",
+    "period": "Vol. 3 (2006–2011): #1–44 e retomada da numeração legado em #600–614"
+  },
+  "1OF8DMBHVtDeVVlWYSmGk9urNac_r1ey6": {
+    "displayTitle": "Mulher-Maravilha (vol. 2, 1987–2006)",
+    "author": "George Pérez (roteiro/arte); Greg Rucka (roteiro); William Messner-Loebs (roteiro); Mindy Newell (roteiro)",
+    "publicationDate": "Estados Unidos, 1987–2006 (DC Comics)",
+    "genres": [
+      "super-heróis",
+      "mitologia",
+      "aventura"
+    ],
+    "synopsis": "Após a reformulação do universo DC, Diana deixa a Ilha Paraíso e passa a atuar no mundo dos homens, confrontando ameaças divinas e humanas enquanto redefine seu papel como heroína e embaixadora. A série acompanha diferentes etapas de sua vida e de seus aliados, desde a renovação de George Pérez até as histórias de Greg Rucka.",
+    "period": "Segunda série; fase pós-Crise, #1–226 (com edições adicionais/variantes catalogadas), 1987–2006"
+  },
+  "1KvyQPF-cbWvzNctZ9OrPk_g_7dam7sdX": {
+    "displayTitle": "Wonder Woman (1942 series) — Mulher-Maravilha, vol. 1",
+    "author": "William Moulton Marston (roteiro); Harry G. Peter (arte) [créditos iniciais]",
+    "publicationDate": "Estados Unidos, 1942–1986",
+    "genres": [
+      "super-heróis",
+      "aventura",
+      "fantasia",
+      "ficção científica"
+    ],
+    "synopsis": "Diana, princesa das Amazonas, deixa Themyscira para enfrentar ameaças no mundo dos homens. Ao longo desta fase clássica, suas aventuras alternam ação heroica, mistério e fantasia, acompanhando também transformações marcantes em sua vida e identidade — incluindo o período em que atua como Diana Prince.",
+    "period": "Série original, vol. 1: #1–329 (1942–1986); a coleção inclui ao menos as edições #144, #190 e #195"
+  },
+  "1ScAxuBUdJzPdy7qiSxWdTN_wFwiFmirP": {
+    "displayTitle": "Mulher Maravilha: Historia — As Amazonas",
+    "author": "Roteiro: Kelly Sue DeConnick; arte: Phil Jimenez, Gene Ha e Nicola Scott",
+    "publicationDate": "Estados Unidos: 2022–2023 (série original; 3 edições)",
+    "genres": [
+      "Fantasia mitológica",
+      "Aventura",
+      "Super-heróis"
+    ],
+    "synopsis": "Muito antes da Mulher-Maravilha, as deusas do Olimpo criam uma sociedade de amazonas longe dos homens. Quando a desesperada Hipólita cruza o caminho delas, sua trajetória desencadeia um conflito entre as amazonas e os deuses — e dá início à história que levará ao surgimento da maior guardiã da Terra.",
+    "period": "Série limitada de 3 edições (#1–3), 2021–2023; publicada nos EUA entre janeiro de 2022 e fevereiro de 2023"
+  },
+  "1J4fs-Xbria22aVJa8WMpKxQJoqyTb4Pn": {
+    "displayTitle": "Julgamento das Amazonas (Trial of the Amazons)",
+    "author": "Roteiro: Becky Cloonan, Michael W. Conrad, Jordie Bellaire, Vita Ayala, Stephanie Williams; arte: Joëlle Jones e outros",
+    "publicationDate": "Estados Unidos: 2022 (edições #1–2; publicação original de maio a junho)",
+    "genres": [
+      "super-heróis",
+      "aventura",
+      "fantasia",
+      "ação"
+    ],
+    "synopsis": "Após uma ameaça surgir da Porta da Perdição, as três nações amazônicas entram em conflito sobre o futuro de Themyscira. Para evitar que a disputa destrua sua aliança, Nubia convoca uma competição tradicional; enquanto isso, uma antiga ameaça se prepara para atingir todas as Amazonas.",
+    "period": "Minissérie limitada, vol. 1, #1–2; evento crossover de 2022"
+  },
+  "1-9IgYGpwrAwPh63xATkKmz_78S6-p_sx": {
+    "displayTitle": "JLA: A League of One",
+    "author": "Roteiro e arte: Christopher Moeller",
+    "publicationDate": "Estados Unidos, 2000 (lançamento em 29 de novembro; edição original em capa dura).",
+    "genres": [
+      "Super-heróis",
+      "Fantasia",
+      "Aventura"
+    ],
+    "synopsis": "Ao ouvir uma profecia de que a Liga da Justiça morrerá enfrentando um dragão, Diana decide confrontar seus próprios companheiros antes de encarar a criatura sozinha. A narrativa acompanha o dilema entre proteger a equipe e preservar sua confiança, em uma aventura centrada na determinação e nas escolhas da Mulher-Maravilha.",
+    "period": "Graphic novel autônoma (JLA: A League of One, 2000)"
+  },
+  "1vNJCompeKftOJIxaJaY5BgXvVcluDrgl": {
+    "displayTitle": "Mulher-Maravilha (The New 52, vol. 4; 2011–2016)",
+    "author": "Brian Azzarello (roteiro); Meredith Finch (roteiro); Cliff Chiang, David Finch (arte)",
+    "publicationDate": "Estados Unidos: 2011–2016 (DC Comics).",
+    "genres": [
+      "super-heróis",
+      "mitologia",
+      "fantasia",
+      "aventura"
+    ],
+    "synopsis": "Em uma releitura mitológica da heroína, Diana enfrenta conflitos entre os deuses do Olimpo e as próprias origens, enquanto protege as amazonas e busca seu lugar num mundo marcado por guerras divinas. A série percorre uma fase contínua de sua vida, da disputa com Hera à transformação de Diana em Deusa da Guerra.",
+    "period": "The New 52, vol. 4 (série de 2011), #1–52; publicação de novembro de 2011 a julho de 2016."
+  },
+  "1cpENCYgVZhkzyVBxMve0YIO2tz8sVORx": {
+    "displayTitle": "Homem-Aranha (Editora Abril, série 1983)",
+    "author": "Roteiro e arte: diversos",
+    "publicationDate": "Brasil: julho de 1983–2000; Editora Abril",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "aventura"
+    ],
+    "synopsis": "Ao longo de uma série de aventuras em Nova York, Peter Parker equilibra a vida cotidiana com a responsabilidade de proteger a cidade como Homem-Aranha. A coleção reúne a sequência brasileira de 205 números da Abril, publicada em formato de revista, com histórias de diferentes fases do herói.",
+    "period": "Série contínua brasileira, edições #1–#205 (1983–2000)"
+  },
+  "1EO9yDFWEsOu_mWsXg4HrSRMCglAI_4_G": {
+    "displayTitle": "O Espetacular Homem-Aranha: Renove Seus Votos",
+    "author": "Gerry Conway (roteiro); Ryan Stegman (arte) — fase 2016",
+    "publicationDate": "Estados Unidos: fase iniciada em 2016; o arco inicial Renew Your Vows saiu em 2015 (minissérie de 5 edições). Ano/intervalo da edição brasileira não confirmado em fonte direta.",
+    "genres": [
+      "Super-heróis",
+      "Ação",
+      "Aventura",
+      "Ficção científica"
+    ],
+    "synopsis": "Em uma realidade em que Peter Parker permaneceu casado com Mary Jane, a família Parker enfrenta perigos que ameaçam sua vida em comum. A chegada da filha Annie à aventura heroica altera a dinâmica do combate ao crime e leva Peter a conciliar a responsabilidade de pai com a de Homem-Aranha.",
+    "period": "Série iniciada em 2016 (catalogada pela Marvel como 2015–2018); continuidade pós-Secret Wars, com 23 edições na fase principal de 2017"
+  },
+  "1ZSUwTJ6JhEZYykOxZSKGNgzmsShyVmHQ": {
+    "displayTitle": "Spider-Man 2099 (1992)",
+    "author": "Peter David (roteiro); Rick Leonardi (arte)",
+    "publicationDate": "Estados Unidos, novembro de 1992–agosto de 1996.",
+    "genres": [
+      "super-heróis",
+      "ficção científica",
+      "ação"
+    ],
+    "synopsis": "Em um futuro dominado pela megacorporação Alchemax, o geneticista Miguel O’Hara sofre uma transformação que lhe concede poderes aracnídeos. Perseguido após desafiar os interesses da empresa, ele assume a identidade de Spider-Man e tenta proteger uma sociedade moldada por tecnologia, desigualdade e controle corporativo.",
+    "period": "Volume/série original, #1–46; inclui o título Spider-Man 2099 A.D. nos números 32–39."
+  },
+  "1aXSLCTIaeQJRn0_Fv6zFJenKv3AVeDmn": {
+    "displayTitle": "Spider-Man/Deadpool (2016–2019)",
+    "author": "Roteiro: Joe Kelly; arte: Ed McGuinness",
+    "publicationDate": "Estados Unidos, 2016–2019",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "comédia",
+      "ficção científica"
+    ],
+    "synopsis": "A parceria improvável entre o metódico Homem-Aranha e o irreverente Deadpool começa sob suspeita: Peter Parker não sabe que Wade Wilson tem motivos ocultos para se aproximar. Entre missões caóticas, provocações e conspirações, os dois precisam descobrir se conseguem trabalhar juntos sem transformar a amizade em mais um desastre.",
+    "period": "Série regular, vol. 1 (2016–2019); 50 edições numeradas, além de #0"
+  },
+  "1CoYZ_pLF4RsuUlcl6X3aC7VC4HPw88J8": {
+    "displayTitle": "O Espetacular Homem-Aranha (fase de Nick Spencer, 2018–2021)",
+    "author": "Roteiro: Nick Spencer; arte: Ryan Ottley e outros",
+    "publicationDate": "Estados Unidos, 2018–2021 (série original).",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "aventura"
+    ],
+    "synopsis": "De volta à rotina de Peter Parker, entre o trabalho, os laços com seus aliados e as responsabilidades de ser o Homem-Aranha, a fase conduz o herói por conflitos pessoais e ameaças que crescem até colocar em xeque sua vida cotidiana e seu lugar entre os heróis de Nova York.",
+    "period": "Fase de Nick Spencer em The Amazing Spider-Man (2018–2021); compilação editorial em 15 volumes conforme GCD."
+  },
+  "1DBKtMspJI1SFMTSDtD7KzWh-XLhoXQoR": {
+    "displayTitle": "The Amazing Spider-Man (2022–2025)",
+    "author": "Zeb Wells (roteiro); John Romita Jr. (desenho)",
+    "publicationDate": "Estados Unidos: 2022–2025 (Marvel Comics)",
+    "genres": [
+      "Super-heróis",
+      "Ação",
+      "Drama"
+    ],
+    "synopsis": "Após um acontecimento misterioso, Peter Parker se vê afastado dos Vingadores, do Quarteto Fantástico e até de Tia May. Enquanto tenta lidar com as consequências, Doutor Octopus o persegue e Tombstone amplia sua disputa criminosa, empurrando o Homem-Aranha para um confronto brutal.",
+    "period": "Volume 6; série mensal de 2022 a 2025"
+  },
+  "116aEQNIK5co5LSE-xHYOzb0Kdf6LzAKF": {
+    "displayTitle": "Homem-Aranha e Medula",
+    "author": "Scott Lobdell (roteiro); Alé Garza (arte)",
+    "publicationDate": "EUA, 2001 (capa datada de fevereiro; GCD registra venda em 28/12/2000). A edição brasileira indicada pelo nome do arquivo como 2007 não foi confirmada em fonte direta.",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "drama"
+    ],
+    "synopsis": "Ao conhecer Sarah Rushman, uma estudante que o admira, Peter Parker se aproxima de uma jovem com uma ligação inesperada com Marrow. Quando a mutante volta a cruzar o caminho do Homem-Aranha, uma operação secreta da SHIELD transforma o encontro em conflito e põe em xeque a vida que Sarah tentava levar.",
+    "period": "One-shot (Spidey/Marrow #1)"
+  },
+  "1Pfs0KuYhlaqEMddre8DPvF5R8bBFn0np": {
+    "displayTitle": "Spider-Man/Punisher: Family Plot",
+    "author": "Tom Lyle (roteiro); Mike Manley (arte)",
+    "publicationDate": "Estados Unidos: 1996 (fevereiro; minissérie original da Marvel)",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "crime"
+    ],
+    "synopsis": "Após os caminhos do Homem-Aranha e do Justiceiro se cruzarem em meio às disputas de uma família criminosa, Frank Castle recebe uma prova de lealdade que coloca o herói aracnídeo em sua mira. A parceria forçada entre os dois põe frente a frente métodos incompatíveis enquanto a trama familiar se fecha ao redor deles.",
+    "period": "Minissérie, vol. 1 (1996), 2 edições (#1–2)"
+  },
+  "1OW8lxQK_mOhaytb-g_T7mE8Qs2BhJRoc": {
+    "displayTitle": "Spider-Man & the X-Men (2014)",
+    "author": "Elliott Kalan (roteiro); Marco Failla (arte)",
+    "publicationDate": "Estados Unidos, 2014–2015 (publicação original)",
+    "genres": [
+      "Super-heróis",
+      "Ação",
+      "Aventura"
+    ],
+    "synopsis": "A pedido de Wolverine, Peter Parker assume o posto de conselheiro na Escola Jean Grey. Entre alunos mutantes, conflitos escolares e ameaças inesperadas, o herói precisa descobrir se suas habilidades de investigador e mentor bastam para proteger uma comunidade que não o considera um dos seus.",
+    "period": "Série limitada, vol. 1, #1–6 (2014–2015)"
+  },
+  "1IKYoqS4aB516Zwl0bFrcdAChbFzYbxjR": {
+    "displayTitle": "Spider-Men (2012–2013)",
+    "author": "Roteiro: Brian Michael Bendis; arte: Sara Pichelli",
+    "publicationDate": "Estados Unidos, 2012–2013",
+    "genres": [
+      "Super-heróis",
+      "Aventura",
+      "Ficção científica"
+    ],
+    "synopsis": "Ao perseguir Mysterio, Peter Parker é lançado no universo Ultimate, onde encontra Miles Morales, o novo Homem-Aranha. A colisão entre realidades transforma o encontro dos dois heróis em uma investigação e numa parceria improvável, enquanto cada um tenta compreender o mundo — e o outro — que surgiu diante dele.",
+    "period": "Minissérie limitada, vol. 1; 5 edições (2012–2013)"
+  },
+  "1wMX9sEwVGdFcie3tNqEkxl4M7vLXI5cI": {
+    "displayTitle": "Deadly Neighborhood Spider-Man (Malvadão da Vizinhança)",
+    "author": "Roteiro: Taboo, B. Earl; arte: Juan Ferreyra",
+    "publicationDate": "Estados Unidos: 2022–2023 (edições originais de outubro de 2022 a fevereiro de 2023)",
+    "genres": [
+      "super-herói",
+      "terror",
+      "fantasia",
+      "aventura"
+    ],
+    "synopsis": "Em Los Angeles, Peter Parker é perseguido pelo Urso Demônio, que transforma medos e inseguranças em pesadelos cada vez mais difíceis de distinguir da realidade. Enquanto tenta compreender a ameaça sobrenatural, o herói enfrenta uma jornada sombria que põe à prova sua identidade e seus limites.",
+    "period": "Minissérie Deadly Neighborhood Spider-Man (2022), 5 edições"
+  },
+  "1zxKW3Llj6AYG_9wSpcAXzHFrQg201aiN": {
+    "displayTitle": "Spider-Man Noir (2008–2009)",
+    "author": "David Hine (roteiro); Fabrice Sapolsky (roteiro); Carmine Di Giandomenico (arte)",
+    "publicationDate": "Estados Unidos: 2009 (fevereiro–maio; série catalogada pelo GCD)",
+    "genres": [
+      "super-heróis",
+      "crime",
+      "mistério",
+      "história alternativa noir"
+    ],
+    "synopsis": "Em uma Nova York reimaginada como metrópole sombria dos anos 1930, Peter Parker investiga a corrupção que cerca o chefão Norman Osborn. Após um encontro sobrenatural com aranhas, passa a combater o crime numa cidade onde informação, lealdade e justiça têm preço.",
+    "period": "Minissérie original, vol. 1: 4 edições (#1–4), 2008–2009"
+  },
+  "1ASkEvsJpe3d67uCJ8vpw2zZsBKcxUsM0": {
+    "displayTitle": "Friendly Neighborhood Spider-Man (2019–2020)",
+    "author": "Roteiro: Tom Taylor; arte: Juann Cabal, Yildiray Çinar, Marcelo Ferreira",
+    "publicationDate": "Estados Unidos: 2019–2020",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "aventura"
+    ],
+    "synopsis": "Em histórias de escala de bairro, Peter Parker enfrenta ameaças que atingem sua comunidade e as pessoas próximas, enquanto equilibra a vida de herói com os laços cotidianos que o definem. A série combina aventura urbana, humor e tensão em torno dos segredos de sua família e de seus vizinhos.",
+    "period": "Série (vol. 1), #1–14; março de 2019 a fevereiro de 2020"
+  },
+  "1l8CFXSXXysL6YOPB1BCFZMMZmdjtZVhT": {
+    "displayTitle": "Punk-Aranha: Corrida Armamentista",
+    "author": "Cody Ziglar (roteiro); Justin Mason (arte)",
+    "publicationDate": "Estados Unidos, 2024 (minissérie original); edição brasileira anunciada para novembro de 2025",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "ficção científica"
+    ],
+    "synopsis": "Em uma Terra sem Norman Osborn, Hobie Brown e sua Banda-Aranha tentam reconstruir a sociedade. A tarefa se complica quando Justin Hammer e Otto Octavius planejam lançar Sentinelas criados para caçar pessoas-aranha.",
+    "period": "Minissérie Spider-Punk: Arms Race (vol. 2024), #1–4"
+  },
+  "1-Rsx_tQMJpqI-yPFds2R7KY0ZPqAz8i8": {
+    "displayTitle": "Homem-Aranha: Sem Limites (Spider-Man Unlimited, série de 1993)",
+    "author": "Roteiro: Tom DeFalco; arte: Ron Lim (primeiras edições)",
+    "publicationDate": "Estados Unidos: 1993–1998 (original).",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "ficção científica"
+    ],
+    "synopsis": "Antologia trimestral de histórias do Homem-Aranha, com edições extensas que reúnem uma aventura principal ou contos complementares. As primeiras edições tiveram participação recorrente de Tom DeFalco e Ron Lim; a série depois alternou equipes criativas.",
+    "period": "Volume 1; série regular, 22 edições (#1–22), 1993–1998."
+  },
+  "1ysoIIdNFFldzlt_iSoHrDgq6NxplMPFb": {
+    "displayTitle": "Symbiote Spider-Man (2019)",
+    "author": "Roteiro: Peter David; arte: Greg Land, Iban Coello",
+    "publicationDate": "Estados Unidos, 2019 (série original; 5 edições).",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "ficção científica"
+    ],
+    "synopsis": "Durante o período em que Peter Parker usa o traje negro, uma amostra separada do simbionte se liga ao equipamento de Mysterio e amplia seus poderes. Enquanto tenta recuperar a parte perdida, Peter enfrenta também a influência crescente do traje sobre suas próprias ações.",
+    "period": "Minissérie de 5 edições (2019); história ambientada durante a fase original do uniforme negro, em 1986."
+  },
+  "1NkNAhsyiNwH1WuHjTAjUjr-khUalziJ2": {
+    "displayTitle": "Simbionte Homem-Aranha: Rei de Preto",
+    "author": "Peter David (roteiro); Greg Land (arte)",
+    "publicationDate": "Estados Unidos, 2021 (janeiro–maio)",
+    "genres": [
+      "Super-heróis",
+      "Aventura",
+      "Ficção científica"
+    ],
+    "synopsis": "Antes dos eventos de Rei de Preto, Peter Parker veste o traje simbionte e se vê envolvido numa antiga investida de Knull contra a Terra. Uma aventura ambientada no passado do Homem-Aranha revela como a ameaça do deus dos simbiontes já se insinuava muito antes da crise que abala o Universo Marvel.",
+    "period": "Minissérie limitada, 5 edições (#1–5)"
+  },
+  "1mQ29_Z3KqTtU3fBIbHN7u8XaMTBL9yUL": {
+    "displayTitle": "Homem-Aranha: A Sombra da Aranha (Spider-Man: Spider’s Shadow)",
+    "author": "Chip Zdarsky (roteiro); Pasqual Ferry (arte); Matt Hollingsworth (cores)",
+    "publicationDate": "Estados Unidos: 2021",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "drama",
+      "realidade alternativa"
+    ],
+    "synopsis": "Quando Peter Parker decide manter o traje alienígena que viria a se tornar Venom, seus poderes e impulsos passam a conduzi-lo por um caminho cada vez mais sombrio. Esta história alternativa acompanha as consequências dessa escolha e o confronto entre o herói e a influência crescente do simbionte.",
+    "period": "Minissérie Marvel (2021), 5 edições"
+  },
+  "1Jam8raR1P0s5osKyKljAc0Hgf5Ag6uFL": {
+    "displayTitle": "Spidey (2015–2016)",
+    "author": "Robbie Thompson (roteiro)",
+    "publicationDate": "Estados Unidos, 2015–2016 (série original); coletânea publicada em 2016.",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "comédia",
+      "amadurecimento"
+    ],
+    "synopsis": "Em histórias ambientadas nos primeiros anos de Peter Parker como Homem-Aranha, o adolescente tenta conciliar provas, amizades e vida amorosa com o combate a vilões de Nova York. A série revisita aventuras escolares do herói com tom leve e foco no equilíbrio desajeitado entre responsabilidades comuns e heroicas.",
+    "period": "Série limitada, 12 números (2015–2016); a edição coletada de 2016 reúne os números 1–6 e a coletânea seguinte os números 7–12."
+  },
+  "19-sdDCi7f3dMGaU_y82rQYWUbK1L_EXt": {
+    "displayTitle": "Homem-Aranha: Fúria Reptiliana (Spider-Man: Reptilian Rage #1)",
+    "author": "Ralph Macchio (roteiro); Christopher Allen (arte)",
+    "publicationDate": "Estados Unidos, 2019 (lançada em 26 de junho de 2019)",
+    "genres": [
+      "Super-heróis",
+      "Aventura",
+      "Ação"
+    ],
+    "synopsis": "Peter Parker tenta garantir uma vaga em um programa competitivo da Empire State University, mas a interferência de um chefão do crime num experimento do Dr. Curt Connors traz o Lagarto de volta e põe seu futuro acadêmico em rota de colisão com a responsabilidade de salvar vidas.",
+    "period": "Edição especial avulsa (one-shot), 1 edição (2019)"
+  },
+  "115iDE-O8stVVag_73n0hkdQBWes124GZ": {
+    "displayTitle": "The Sensational Spider-Man: Self-Improvement #1",
+    "author": "Peter David (roteiro); Tom DeFalco (roteiro); Ron Frenz (roteiro/arte); Rick Leonardi (arte)",
+    "publicationDate": "Estados Unidos, 2019 (Marvel Comics; lançamento em 7 de agosto de 2019)",
+    "genres": [
+      "Super-heróis",
+      "Ação",
+      "Aventura"
+    ],
+    "synopsis": "Duas histórias revisitadas exploram um capítulo pouco conhecido da trajetória do uniforme negro do Homem-Aranha: a ideia original de Randy Schueller ganha forma, enquanto Peter Parker encara uma ameaça ligada ao vilão Firebrand.",
+    "period": "Edição especial única (one-shot), 2019"
+  },
+  "1dG46iz2qRhh8zsVnjPSCjMvkzYMgfI7T": {
+    "displayTitle": "Friendly Neighborhood Spider-Man (2019) [Amigão da Vizinhança]",
+    "author": "Tom Taylor (roteiro); Juann Cabal, Marcelo Ferreira (arte)",
+    "publicationDate": "Estados Unidos: 2019–2020 (série original; estreia em 9 jan. 2019)",
+    "genres": [
+      "Super-heróis",
+      "Aventura",
+      "Drama",
+      "Ação"
+    ],
+    "synopsis": "Peter Parker tenta ser mais do que o herói que surge quando há perigo: como vizinho, ele ajuda a comunidade e enfrenta ameaças que alcançam as pessoas ao seu redor. Entre as responsabilidades cotidianas e aventuras que o levam para longe de casa, a fase explora o vínculo de Peter com seu bairro e seus moradores.",
+    "period": "Volume de 2019; série com 14 edições (#1–14), encerrada em 2020"
+  },
+  "1TH6kYfGm5w9prSX5V4B-mxTk6goeGaT3": {
+    "displayTitle": "Peter Parker: O Espetacular Homem-Aranha (2017–2018)",
+    "author": "Roteiro: Chip Zdarsky; arte: Adam Kubert, Juan Frigeri, Michael Walsh",
+    "publicationDate": "Estados Unidos, 2017–2018 (série original Marvel).",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "aventura"
+    ],
+    "synopsis": "De volta às ruas de Nova York, Peter Parker tenta equilibrar a vida cotidiana com uma nova rodada de ameaças e velhos adversários. Entre confusões que só poderiam acontecer com o azar dos Parker e decisões de herói, a série acompanha um Homem-Aranha mais próximo do bairro, sem deixar de encarar desafios de grande escala.",
+    "period": "Volume/série de 2017–2018; 23 edições, incluindo a numeração legado #297–#313."
+  },
+  "1M7eUfmYN7rDOvQaXImWrqHE311_5Ij07": {
+    "displayTitle": "Homens-Aranha",
+    "author": "Roteiro: Brian Michael Bendis; arte: Sara Pichelli",
+    "publicationDate": "Estados Unidos, 2012 (publicação original); ano da edição brasileira não confirmado por fonte direta consultável.",
+    "genres": [
+      "super-heróis",
+      "ficção científica",
+      "aventura"
+    ],
+    "synopsis": "Ao atravessar realidades durante a perseguição a um vilão, Peter Parker encontra Miles Morales, o Homem-Aranha de um universo onde Peter morreu. O encontro entre os dois heróis põe à prova suas diferentes experiências e revela conexões inesperadas entre seus mundos.",
+    "period": "Spider-Men (minissérie, 2012; 5 edições)"
+  },
+  "1BuaU-Jeqko9er0UDfzJE3_UiRxG9pBoB": {
+    "displayTitle": "O Espetacular Homem-Aranha (2014–2015) — volume 3",
+    "author": "Dan Slott (roteiro); Humberto Ramos (arte)",
+    "publicationDate": "Estados Unidos, 2014–2015 (publicação original).",
+    "genres": [
+      "super-heróis",
+      "aventura",
+      "ficção científica"
+    ],
+    "synopsis": "Peter Parker volta a assumir o controle da própria vida e da Parker Industries, mas equilibrar negócios, relações pessoais e a responsabilidade de ser o Homem-Aranha se torna um desafio. Entre ameaças tecnológicas e inimigos antigos, ele precisa provar que sua experiência pode acompanhar um mundo que mudou enquanto esteve fora do comando.",
+    "period": "Volume 3; série de 2014–2015, edições #1–20.1 (inclui 28 publicações contando numerações fracionárias)."
+  },
+  "1FXVtiDONMMX155kmYLH1HzC7QLnn5iIB": {
+    "displayTitle": "Amazing Spider-Man: Family Business (Negócios de Família)",
+    "author": "Mark Waid (roteiro); James Robinson (roteiro); Gabriele Dell’Otto (arte); Werther Dell’Edera (arte)",
+    "publicationDate": "Estados Unidos, 2014 (edição original em capa dura; lançamento em 1º de abril conforme GCD).",
+    "genres": [
+      "super-herói",
+      "ação",
+      "aventura",
+      "mistério"
+    ],
+    "synopsis": "Quando Peter Parker é levado a uma missão internacional, surge uma mulher que pode ter laços inesperados com sua família. Entre perseguições e conspirações, o herói tenta descobrir quem ela é e por que forças perigosas estão atrás dos dois.",
+    "period": "Graphic novel original independente (Marvel OGN, 2014); não é uma fase ou série periódica do Homem-Aranha."
+  },
+  "19M2Tt09pEb6gfGeXBEjvKvkkbNthuN3W": {
+    "displayTitle": "Marvel Knights: Spider-Man (2013–2014)",
+    "author": "Matt Kindt (roteiro); Marco Rudy (arte)",
+    "publicationDate": "Estados Unidos: 2013–2014; a edição #5 foi publicada em 5 de fevereiro de 2014.",
+    "genres": [
+      "Super-heróis",
+      "Aventura",
+      "Suspense",
+      "Terror psicológico"
+    ],
+    "synopsis": "Uma sucessão de situações extremas força o Homem-Aranha a atravessar cenários improváveis enquanto enfrenta ameaças e os limites da própria resistência. A narrativa combina ação e tensão psicológica, com a arte de Marco Rudy acentuando o caráter inquietante da jornada.",
+    "period": "Minissérie limitada de 5 edições (2013–2014)."
+  },
+  "18K6lc-SEJWSlclRjorYvMsRvoYNBxJxV": {
+    "displayTitle": "Superior Spider-Man (2013–2014)",
+    "author": "Dan Slott (roteiro); Ryan Stegman, Humberto Ramos e Giuseppe Camuncoli (arte)",
+    "publicationDate": "Estados Unidos: 2013–2014 (Marvel Comics)",
+    "genres": [
+      "Super-heróis",
+      "Ação",
+      "Ficção científica"
+    ],
+    "synopsis": "Após a troca de corpos que mudou o destino de Peter Parker, Otto Octavius assume o manto do Homem-Aranha e tenta provar que pode superar o antecessor. Com inteligência, métodos implacáveis e uma nova visão de responsabilidade, ele transforma a atuação do herói — enquanto enfrenta inimigos e as consequências de ocupar uma vida que não é sua.",
+    "period": "Série/fase original, vol. de 2013–2014 (33 edições)"
+  },
+  "1pjuMvWHFBjbf0KZa4oCVsmOvNNRxncd7": {
+    "displayTitle": "Homens-Aranha (Spider-Men, 2012)",
+    "author": "Roteiro: Brian Michael Bendis; arte: Sara Pichelli",
+    "publicationDate": "Estados Unidos, 2012",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "ficção científica"
+    ],
+    "synopsis": "Quando uma ruptura entre universos coloca Peter Parker no mundo Ultimate, ele encontra Miles Morales, o jovem Homem-Aranha daquela realidade. A parceria improvável vira uma investigação sobre identidades, diferenças entre mundos e as consequências pessoais de um encontro que nenhum dos dois esperava.",
+    "period": "Minissérie, 2012 (5 edições)"
+  },
+  "1m-8jx8a2EqEFd-a-3HeL_GlprzVA3dyJ": {
+    "displayTitle": "Peter Parker (2010)",
+    "author": "Roteiro: Bob Gale; arte: Patrick Olliffe",
+    "publicationDate": "Estados Unidos, 2010",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "humor"
+    ],
+    "synopsis": "Com a opinião pública contra o Homem-Aranha e J. Jonah Jameson usando o cargo de prefeito para lançar uma equipe anti-Aranha, Peter tenta equilibrar a vida pessoal e o heroísmo. O surgimento de garotas com poderes próprios e uma ameaça que altera cores vira mais um desafio numa história que acompanha os problemas cotidianos por trás da máscara.",
+    "period": "Minissérie de 5 edições (2010)"
+  },
+  "1rvmRMY_3kSMWVmqXe90R80WttGgOyerp": {
+    "displayTitle": "Amazing Spider-Man Presents: American Son",
+    "author": "Brian Reed (roteiro); Phil Briones (arte)",
+    "publicationDate": "Estados Unidos: 2010 (julho–outubro)",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "drama familiar"
+    ],
+    "synopsis": "Após a queda de Norman Osborn, Harry tenta reconstruir a própria vida e entender o legado que o pai deixou. Quando o mistério em torno da armadura American Son volta a cruzar seu caminho, o conflito entre os dois ameaça transformar uma disputa familiar em algo muito maior.",
+    "period": "Minissérie de 4 edições (#1–4), 2010"
+  },
+  "1-wTVm_K3WOs09LgG9bV2Rm6Y6uOrC0EP": {
+    "displayTitle": "Homem-Aranha: Com Grandes Poderes",
+    "author": "Roteiro: David Lapham; arte: Tony Harris",
+    "publicationDate": "Estados Unidos: 2008; edição brasileira: 2010 (registro de coleção) ",
+    "genres": [
+      "Super-heróis",
+      "Ação",
+      "Drama"
+    ],
+    "synopsis": "Antes de se tornar o herói que conhece, Peter Parker encara as consequências práticas de seus novos poderes e tenta encontrar seu lugar entre a escola, a família e o mundo adulto. A minissérie acompanha essa etapa inicial da vida do jovem, explorando escolhas e responsabilidades que moldam sua identidade como Homem-Aranha.",
+    "period": "Minissérie Spider-Man: With Great Power... (vol. 2008), #1–5"
+  },
+  "1ojcCUlLZAS4WaoPT5E4bvGUqjzuMC5Gz": {
+    "displayTitle": "Ultimate Comics Spider-Man (2009–2011)",
+    "author": "Roteiro: Brian Michael Bendis; arte: David Lafuente, Chris Samnee, Takeshi Miyazawa, Sara Pichelli, Mark Bagley",
+    "publicationDate": "Estados Unidos, 2009–2011.",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "ficção científica"
+    ],
+    "synopsis": "Após a devastação de Ultimatum, Peter Parker tenta retomar a vida escolar e heroica em uma Nova York transformada. Novas relações, ameaças e mudanças no cenário Ultimate desafiam sua identidade e colocam em questão o futuro do Homem-Aranha.",
+    "period": "Série/volume iniciado em 2009; fase até 2011 (26 edições, #1–#15 como Ultimate Comics Spider-Man e continuação da numeração até #160 sob o título Ultimate Spider-Man)."
+  },
+  "1Ub1nomi-UJAIc5W5ymmpBGyLC0Ltu_OF": {
+    "displayTitle": "Spider-Man: The Clone Saga (2009–2010)",
+    "author": "Roteiro: Tom DeFalco, Howard Mackie; arte: Todd Nauck, Pasqual Ferry, ChrisCross, Sana Takeda",
+    "publicationDate": "Estados Unidos, 2009–2010 (setembro de 2009 a fevereiro de 2010)",
+    "genres": [
+      "Super-heróis",
+      "Aventura",
+      "Ficção científica"
+    ],
+    "synopsis": "Peter Parker volta a encarar as consequências de sua antiga história de clones quando uma nova crise o coloca frente a frente com Ben Reilly. Entre experimentos, identidades duplicadas e uma ameaça ligada ao passado, os dois precisam descobrir quem está por trás dos acontecimentos antes que a situação saia do controle.",
+    "period": "Minissérie de 6 edições (#1–6)"
+  },
+  "1Af4tSOWoTQx7fEwEj0Nte1JI8MAVc4Pl": {
+    "displayTitle": "Homem-Aranha: O Reino (Spider-Man: Reign)",
+    "author": "Kaare Andrews (roteiro e arte)",
+    "publicationDate": "Estados Unidos: 2007 (minissérie serializada de fevereiro a maio)",
+    "genres": [
+      "super-heróis",
+      "ficção científica",
+      "distopia",
+      "drama"
+    ],
+    "synopsis": "Em uma Nova York submetida a um regime autoritário, Peter Parker vive afastado da vida heroica e assombrado pela perda de Mary Jane. A escalada da opressão e a lembrança de seus antigos ideais o colocam diante da possibilidade de voltar a vestir o uniforme — e enfrentar o custo de recuperar seu lugar como Homem-Aranha.",
+    "period": "Minissérie Spider-Man: Reign (2006–2007), 4 edições"
+  },
+  "17cG8d93EO_cIaAJIk0MpPohWyiAl4SZ9": {
+    "displayTitle": "The Amazing Spider-Man (volume 2)",
+    "author": "Roteiro: J. Michael Straczynski; arte: Ron Garney",
+    "publicationDate": "Estados Unidos: janeiro de 1999–fevereiro de 2014 (série, conforme GCD).",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "aventura"
+    ],
+    "synopsis": "Em meio às pressões da vida adulta e às ameaças que cercam Nova York, Peter Parker tenta equilibrar responsabilidades pessoais com a missão de proteger a cidade como Homem-Aranha. Esta fase acompanha novas alianças e conflitos que ampliam o alcance de suas aventuras.",
+    "period": "Volume 2 da série americana, 1999–2014; o nome do arquivo com ano 2006 pode apontar para conteúdo dessa fase, mas não determina por si só uma edição específica."
+  },
+  "14_RHsKR7AnEHArDxl4FvHvthyjdoLl6g": {
+    "displayTitle": "Homem-Aranha e Tocha Humana (2005)",
+    "author": "Dan Slott (roteiro); Ty Templeton (arte)",
+    "publicationDate": "Estados Unidos, 2005 (números publicados entre janeiro e junho; datas de capa março–julho)",
+    "genres": [
+      "Super-heróis",
+      "Aventura",
+      "Comédia"
+    ],
+    "synopsis": "Em cinco encontros espalhados pela trajetória dos heróis, Peter Parker e Johnny Storm alternam provocações, rivalidade e parceria. A minissérie revisita momentos de sua amizade e mostra como o fotógrafo mais azarado de Nova York e o impulsivo Tocha Humana acabam se metendo juntos em confusões — e aprendendo a confiar um no outro.",
+    "period": "Minissérie limitada, vol. 1 (#1–5)"
+  },
+  "1AY0K7G3MqCnKk5YhriFwBBpehtfT1grg": {
+    "displayTitle": "Friendly Neighborhood Spider-Man (2005–2007)",
+    "author": "Peter David (roteiro); Mike Wieringo, Todd Nauck, Roger Cruz, Scot Eaton (arte)",
+    "publicationDate": "Estados Unidos: 2005–2007 (publicação original da Marvel).",
+    "genres": [
+      "super-heróis",
+      "aventura",
+      "ação"
+    ],
+    "synopsis": "Entre a vida de Peter Parker e o combate ao crime, o Amigão da Vizinhança enfrenta adversários extravagantes enquanto antigos vínculos e conflitos pessoais voltam a complicar seu cotidiano. A série acompanha aventuras urbanas do herói em uma fase própria, combinando ação mascarada com os desafios de sua vida comum.",
+    "period": "Volume/série de 2005, encerrada em 2007 (24 edições)."
+  },
+  "1fgGmHyfyZC9XCNLIJwFeac2sHEPdbMDW": {
+    "displayTitle": "Marvel Knights: Spider-Man (2004)",
+    "author": "Roteiro: Mark Millar; arte: Terry Dodson",
+    "publicationDate": "Estados Unidos, 2004–2006 (publicação original).",
+    "genres": [
+      "Super-heróis",
+      "Ação",
+      "Mistério",
+      "Aventura"
+    ],
+    "synopsis": "Peter Parker enfrenta uma conspiração que atinge sua vida pessoal e o coloca diante de adversários ligados a segredos de seu passado. Enquanto tenta descobrir quem está por trás dos ataques, precisa proteger os que ama e lidar com uma ameaça que cresce a cada confronto.",
+    "period": "Série regular Marvel Knights Spider-Man (vol. 1), #1–22 (2004–2006); depois continuada em Sensational Spider-Man #23."
+  },
+  "1ZuQ9kh9ZNzKGZ9xnGfxVnjacISFIYakb": {
+    "displayTitle": "Homem-Aranha/Doutor Octopus: Fora de Alcance",
+    "author": "Colin Mitchell (roteiro); Keron Grant, Derec Aucoin (arte)",
+    "publicationDate": "Estados Unidos: 2004 (edições originais #1–5, janeiro–maio)",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "ficção científica"
+    ],
+    "synopsis": "Quando o Doutor Octopus recruta um jovem prodígio científico como protegido, o Homem-Aranha precisa impedir que a ambição dos dois transforme uma disputa de inteligência em uma ameaça de grandes proporções.",
+    "period": "Minissérie Spider-Man/Doctor Octopus: Out of Reach (vol. 1), #1–5 (2004)"
+  },
+  "1UpEG7N367j_y4AOGFrbyT1I8R67wIqkW": {
+    "displayTitle": "Spider-Man and Wolverine (2003): Stuff of Legends",
+    "author": "Brett Matthews (roteiro); Vatche Mavlian (arte)",
+    "publicationDate": "Estados Unidos, 2003 (edições #1–4)",
+    "genres": [
+      "Super-heróis",
+      "Aventura",
+      "Ação"
+    ],
+    "synopsis": "Após receber de Nick Fury a missão de resgatar Wolverine numa ilha japonesa, o Homem-Aranha é lançado numa operação de alto risco. A parceria improvável entre os heróis precisa sobreviver a uma conspiração ligada à SHIELD e a um experimento que ameaça sair do controle.",
+    "period": "Minissérie Marvel Knights, 4 edições (#1–4); arco “Stuff of Legends”"
+  },
+  "1J0QqgTQp6i5iASt7t-CSw_aOODlaqpbH": {
+    "displayTitle": "Homem-Aranha & Gata Negra: O Mal no Coração dos Homens",
+    "author": "Roteiro: Kevin Smith; arte: Terry e Rachel Dodson",
+    "publicationDate": "Estados Unidos: minissérie publicada originalmente entre 2002 e 2006; edição coletada em 2007.",
+    "genres": [
+      "Super-heróis",
+      "Ação",
+      "Drama criminal"
+    ],
+    "synopsis": "O reencontro de Peter Parker e Felicia Hardy se transforma em investigação quando uma amiga desaparece e uma sequência de overdoses suspeitas aponta para um esquema criminoso. À medida que os dois seguem as pistas pelas ruas de Nova York, a antiga parceria entre o Homem-Aranha e a Gata Negra volta a ser posta à prova.",
+    "period": "Spider-Man/Black Cat: The Evil That Men Do (2002–2006), minissérie de 6 números"
+  },
+  "19k0xJHuWhC2pdQG4aBlRI9fQBhryKq8X": {
+    "displayTitle": "Homem-Aranha: Azul (Spider-Man: Blue)",
+    "author": "Jeph Loeb (roteiro); Tim Sale (arte)",
+    "publicationDate": "Estados Unidos: 2002–2003 (minissérie original).",
+    "genres": [
+      "Super-heróis",
+      "Drama",
+      "Romance"
+    ],
+    "synopsis": "Em uma gravação íntima, Peter Parker revisita os primeiros anos como Homem-Aranha e sua vida afetiva, relembrando os desafios de equilibrar perdas, responsabilidades e os vínculos que moldaram sua juventude.",
+    "period": "Minissérie limitada, vol. 1, #1–6 (2002–2003)"
+  },
+  "1xWjBOke8LAT_U2uKMM4b9uanpOSRVrgq": {
+    "displayTitle": "Spider-Man: The Mysterio Manifesto",
+    "author": "Tom DeFalco (roteiro); Lee Weeks (arte); Bob McLeod (arte-final)",
+    "publicationDate": "Estados Unidos: 2000–2001 (Marvel Comics)",
+    "genres": [
+      "Super-heróis",
+      "Aventura",
+      "Mistério"
+    ],
+    "synopsis": "Quando sinais contraditórios sugerem que Mysterio pode estar vivo, Spider-Man e Daredevil investigam uma série de ameaças e ilusões. A trama põe em dúvida o que é real enquanto antigos perigos ressurgem, sem esclarecer de imediato quem está por trás dos acontecimentos.",
+    "period": "Minissérie limitada, vol. 1, 3 edições (2000–2001)"
+  },
+  "1IZZcuDXe4xX1H_VwLHJkzPwZaT83H7Zw": {
+    "displayTitle": "Homem-Aranha Ultimate (Ultimate Spider-Man, 2000–2009)",
+    "author": "Roteiro: Brian Michael Bendis; arte: Mark Bagley, Stuart Immonen",
+    "publicationDate": "Estados Unidos, 2000–2009 (série original).",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "ficção científica"
+    ],
+    "synopsis": "Nesta versão do universo Marvel, Peter Parker é um adolescente do século XXI que precisa conciliar a vida escolar e familiar com os riscos e responsabilidades de seus novos poderes. A série reconstrói sua origem e seus primeiros confrontos em uma continuidade própria, apresentando personagens clássicos sob uma perspectiva contemporânea.",
+    "period": "Série Ultimate Spider-Man (2000–2009), #1–#133; uma reimaginação de Peter Parker na linha Ultimate."
+  },
+  "1OaOW4nhn99lB8yOl1kaROLb2g0OwtCxV": {
+    "displayTitle": "Homem-Aranha: Destino e Morte",
+    "author": "Lee Weeks (roteiro e arte)",
+    "publicationDate": "Estados Unidos: 2000 (publicação original de agosto a outubro)",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "drama",
+      "aventura"
+    ],
+    "synopsis": "Após um confronto com criminosos, Peter Parker se vê puxado de volta a uma tragédia que marcou seu passado. Enquanto o Doutor Octopus volta a ameaçar pessoas próximas, o Homem-Aranha precisa enfrentar as consequências de antigas perdas e decidir como seguir adiante.",
+    "period": "Minissérie Spider-Man: Death and Destiny (vol. 1), #1–3"
+  },
+  "18lDBVlo-xv4G5NGXL7L7njvQ6FfJlezn": {
+    "displayTitle": "A Reunião dos Cinco (The Gathering of Five)",
+    "author": "Roteiro: John Byrne, Todd Dezago, Howard Mackie",
+    "publicationDate": "Estados Unidos, 1998 (história original); coletânea em inglês publicada pela Marvel em 18 de dezembro de 2013.",
+    "genres": [
+      "Super-heróis",
+      "Aventura",
+      "Drama",
+      "Fantasia"
+    ],
+    "synopsis": "Norman Osborn reúne cinco participantes em um ritual que promete conceder poder, imortalidade ou sabedoria — mas reserva consequências sombrias. Enquanto a cerimônia se aproxima, Peter Parker enfrenta ameaças ligadas ao plano e precisa lidar com o retorno de Osborn à sua vida.",
+    "period": "Saga crossover de Homem-Aranha, 1998; os cinco capítulos de The Gathering of Five integram a continuidade dos títulos regulares da época."
+  },
+  "1ZmtLF5jJngOHdMAq9M4bAUSyWtYtMBBi": {
+    "displayTitle": "Batman & Spider-Man: New Age Dawning",
+    "author": "J. M. DeMatteis (roteiro); Graham Nolan (desenho); Karl Kesel (arte-final)",
+    "publicationDate": "Estados Unidos, 1997 (à venda em 27 de agosto; DC Comics, com marca DC/Marvel)",
+    "genres": [
+      "super-heróis",
+      "aventura",
+      "crossover"
+    ],
+    "synopsis": "Quando os planos de Ra’s al Ghul se cruzam com os do Rei do Crime, Batman e Homem-Aranha precisam unir métodos e habilidades para impedir uma ameaça que combina ambição criminosa e perigo em escala global.",
+    "period": "One-shot crossover (1997)"
+  },
+  "1-vj2nxlOT9mTr_-IAgo5DhB2kSffoH8m": {
+    "displayTitle": "UltraForce / Spider-Man #1",
+    "author": "Marv Wolfman (roteiro); Steven Butler, Chris Marrinan, Gabe Alberola, Shawn McManus, Gabriel Hardman (arte)",
+    "publicationDate": "Estados Unidos, 1996",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "crossover"
+    ],
+    "synopsis": "Quando o Homem-Aranha cruza o caminho da equipe UltraForce, a aventura aproxima o herói de Nova York do universo de super-heróis da Malibu, colocando personagens e estilos distintos em rota de colisão. Um encontro de mundos conduzido como história de ação e parceria improvável.",
+    "period": "Edição única #1; crossover de 1996"
+  },
+  "1XPQorHYcfu_4OZnzFDPRWJMEp2oO3HVe": {
+    "displayTitle": "Spider-Man / Gen13 #1 (1996)",
+    "author": "Roteiro: Peter David; arte: Stuart Immonen, Cam Smith, Andrew Pepoy",
+    "publicationDate": "Estados Unidos, 1996 (capa datada de novembro)",
+    "genres": [
+      "super-heróis",
+      "aventura",
+      "ficção científica",
+      "crossover"
+    ],
+    "synopsis": "Após acordar no quintal de Fairchild sem saber como chegou ali, o Homem-Aranha encontra os jovens integrantes do Gen¹³. Entre estranhamento e desconfiança, ele tenta entender a ligação entre seu desaparecimento e o grupo, enquanto uma parceria improvável começa a tomar forma.",
+    "period": "One-shot crossover (1996)"
+  },
+  "1b91haOuGB9c0K2zXe9yNjqIht163dx4J": {
+    "displayTitle": "Os Inimigos Mortais do Homem-Aranha (minissérie)",
+    "author": "Roteiro: Danny Fingeroth; arte: Al Milgrom, Kerry Gammill",
+    "publicationDate": "Estados Unidos: 1991 (maio–agosto, publicação original). Ano da edição brasileira não confirmado por fonte direta consultada.",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "aventura"
+    ],
+    "synopsis": "Quando seus adversários habituais percebem que podem ganhar mais agindo em conjunto, o Homem-Aranha enfrenta uma aliança de vilões que transforma confrontos isolados numa ameaça coordenada pelas ruas de Nova York.",
+    "period": "Minissérie original Deadly Foes of Spider-Man (1991), 4 edições"
+  },
+  "1s4vhhcGJROUQXB5tfdc6QUxkNeCiEUlK": {
+    "displayTitle": "Spider-Man: The Death of Jean DeWolff",
+    "author": "Roteiro: Peter David; arte: Rich Buckler",
+    "publicationDate": "Estados Unidos: 1990 (edição coletada; original publicado em 1985–1986).",
+    "genres": [
+      "super-heróis",
+      "mistério",
+      "crime",
+      "drama"
+    ],
+    "synopsis": "Após a morte da capitã Jean DeWolff, o Homem-Aranha segue pistas que o aproximam do Sin-Eater, um assassino que escolhe suas vítimas entre aqueles que considera pecadores. A investigação cruza-se com a de Demolidor e coloca à prova o senso de justiça de Peter Parker.",
+    "period": "Arco publicado em Peter Parker, The Spectacular Spider-Man #107–110 (1985–1986); a edição de 1990 reúne esses quatro capítulos."
+  },
+  "1c-4qAI1zZuU9acrIiWgYrsFm6gtKlF4f": {
+    "displayTitle": "Homem-Aranha: A Última Caçada de Kraven",
+    "author": "J. M. DeMatteis (roteiro); Mike Zeck (arte); Bob McLeod (arte-final)",
+    "publicationDate": "Estados Unidos, 1987",
+    "genres": [
+      "super-heróis",
+      "suspense",
+      "drama psicológico"
+    ],
+    "synopsis": "Decidido a provar que é superior ao Homem-Aranha, Kraven toma para si a identidade do herói após um confronto brutal. Enquanto o caçador tenta ocupar seu lugar, Peter Parker enfrenta uma luta íntima para retornar à superfície — e compreender o que significa ser o Homem-Aranha.",
+    "period": "Arco em seis partes (1987)"
+  },
+  "1DB2N_93o-MLKgnGan_O2DXDyTcMMy271": {
+    "displayTitle": "A Morte de Gwen Stacy",
+    "author": "Roteiro: Gerry Conway; arte: Gil Kane, John Romita e Tony Mortellaro",
+    "publicationDate": "Estados Unidos, 1973",
+    "genres": [
+      "Super-heróis",
+      "Drama",
+      "Aventura"
+    ],
+    "synopsis": "Quando Norman Osborn volta a assumir sua identidade de Duende Verde, seu conflito com o Homem-Aranha atinge Peter Parker em um ponto vulnerável. A história acompanha a escalada do confronto e suas consequências pessoais, em um arco decisivo para a trajetória do herói.",
+    "period": "The Amazing Spider-Man, vol. 1, #121–122 (1973)"
+  },
+  "1Po2TpLeScpVLAcuX-ffOGfgbeVFfIAg_": {
+    "displayTitle": "O Espantoso Homem-Aranha (The Amazing Spider-Man, 1963–1998)",
+    "author": "Roteiro: Stan Lee; arte: Steve Ditko (fase inicial)",
+    "publicationDate": "Estados Unidos: 1963–1998 (série original da Marvel)",
+    "genres": [
+      "super-heróis",
+      "aventura",
+      "ação"
+    ],
+    "synopsis": "Na série que lançou sua revista solo, Peter Parker tenta conciliar a vida cotidiana de um jovem com as responsabilidades e os perigos de ser o Homem-Aranha. Entre confrontos com criminosos e adversários extraordinários, os primeiros capítulos estabelecem o tom de aventura, humor e dilemas pessoais que sustentaria a longa trajetória do personagem.",
+    "period": "Série original, volume 1: #1–441 (março de 1963–novembro de 1998)"
+  },
+  "1gp3ccKy3hvxBt1CpTkwfZYajwwY23Uom": {
+    "displayTitle": "Amazing Fantasy (1962) #15",
+    "author": "Stan Lee (roteiro); Steve Ditko (desenhos e arte-final)",
+    "publicationDate": "Estados Unidos, 1962 (data de capa: agosto; distribuído em junho; GCD indica setembro no expediente)",
+    "genres": [
+      "super-heróis",
+      "ficção científica",
+      "aventura"
+    ],
+    "synopsis": "Peter Parker, um adolescente fascinado por ciência, ganha poderes após ser mordido por uma aranha radioativa. Uma decisão aparentemente pequena o confronta com consequências irreversíveis e dá origem ao herói que aprende a vincular poder e responsabilidade.",
+    "period": "Amazing Fantasy (série de 1962), edição #15; número final da série"
+  },
+  "1k-8caOW56M5Wxa2bkYfjK0ttSkQKZvox": {
+    "displayTitle": "Wolverine: A fase de Daken",
+    "author": "Jason Aaron (histórias de Wolverine #73–74); Daniel Way e Marjorie Liu (Dark Wolverine a partir de #75)",
+    "publicationDate": "27 de maio de 2009 (início verificável no #73); agosto de 2009–outubro de 2010 para Dark Wolverine #75–90",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "aventura",
+      "ficção científica",
+      "drama"
+    ],
+    "synopsis": "Este recorte acompanha as últimas histórias da série Wolverine de 2003 e sua continuação imediata sob o título Dark Wolverine, sem representar uma série independente de nome Wolverine Vol. 3 iniciada em 2009. Depois das histórias de Logan em #73–74, a numeração muda em #75: Daken, seu filho, assume o nome Wolverine e ganha destaque no cenário de Dark Reign, ligado aos Dark Avengers. A descrição resume apenas a passagem editorial e a premissa da fase, não afirma que a coleção corresponda à coleção de todos os títulos do personagem publicados nesses anos.",
+    "period": "Estados Unidos, Marvel Comics; recorte de coleção rotulado 2009–2010. O GCD registra Dark Wolverine #75–90 como 16 edições, de agosto de 2009 a outubro de 2010, e indica que a numeração continua Wolverine #74. Não é a série separada Wolverine: Weapon X."
+  },
+  "1qUdnyfEgzGrp9PZFxWzUktmTcqYvD93d": {
+    "displayTitle": "Wolverine: Inimigo do Estado",
+    "author": "Greg Rucka (roteiro inicial), Mark Millar (roteiro de Enemy of the State), Darick Robertson e John Romita Jr. (arte)",
+    "publicationDate": "2004–2009 (recorte indicado na coleção; a série começou em 2003)",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "aventura",
+      "drama",
+      "ficção científica"
+    ],
+    "synopsis": "Esta fase acompanha Logan em histórias solo que põem à prova sua violência, seus vínculos e o peso de seu passado. Um arco marcante iniciado em 2004, Enemy of the State, mostra Wolverine transformado em arma contra antigos aliados, levando S.H.I.E.L.D. a tentar contê-lo. A série também inclui outras histórias e equipes criativas ao longo de sua publicação; esta ficha descreve a série/recorte da coleção, não apenas esse arco.",
+    "period": "Estados Unidos, Marvel Comics, série Wolverine (2003–2009), volume 3; a coleção representa o intervalo 2004–2009 e não uma série independente iniciada em 2004."
+  },
+  "11CiePSweXdPTv3hFljICR1xNmw0VbId5": {
+    "displayTitle": "Wolverine: A fase de Greg Rucka",
+    "author": "Roteiro: Greg Rucka; arte: Darick Robertson",
+    "publicationDate": "2003-07 a 2004-09 (arco de edições #1–19; a coleção é identificada como 2003–2004)",
+    "genres": [
+      "super-herói",
+      "ação",
+      "drama criminal",
+      "aventura",
+      "suspense"
+    ],
+    "synopsis": "A fase acompanha Logan em histórias de escala mais intimista, entre violência urbana e ameaças ligadas ao seu passado. Ela começa com a morte brutal de uma garçonete que ele conhecera; decidido a descobrir quem a matou, Wolverine segue pistas que o conduzem a uma rede criminosa. Ao longo da fase, os conflitos também põem em questão sua natureza e a relação com outros personagens dos X-Men.",
+    "period": "Estados Unidos, Marvel Comics; série Wolverine (2003), vol. 3. A edição #1 saiu em julho de 2003 e a #19 em setembro de 2004. Não há confirmação de edição brasileira correspondente para esta coleção."
+  },
+  "19k30xyuI95lRHgQ4So_hoC8CsNZKq5vn": {
+    "displayTitle": "Wolverine: Aventuras solo",
+    "author": "Roteiros associados ao período: Larry Hama e Frank Tieri; arte associada: Adam Kubert. A série teve diversos outros roteiristas e artistas.",
+    "publicationDate": "Novembro de 1988 – junho de 2003 (série original; o recorte da coleção é 1998–2003).",
+    "genres": [
+      "super-herói",
+      "ação",
+      "aventura",
+      "ficção científica",
+      "drama de personagem"
+    ],
+    "synopsis": "Nesta fase da série solo, Logan se afasta dos X-Men para enfrentar ameaças e aventuras por conta própria, incluindo conflitos ligados a Madripoor, ao Japão e aos Sentinelas. As histórias também exploram o passado, a identidade e os dilemas violentos de Wolverine. A sinopse oficial da Marvel descreve a premissa geral da série; não atribui cada elemento a todos os números do recorte.",
+    "period": "1998–2003, recorte indicado pelo nome da coleção dentro da série solo Wolverine (Marvel, série de 1988); não é uma série/volume editorial distinto."
+  },
+  "1a3ctpT2YoayCnS7wAoaYMDAsWkMlJnGz": {
+    "displayTitle": "Wolverine: A fase de Larry Hama",
+    "author": "Larry Hama (roteiros na maior parte do recorte); Marc Silvestri e Adam Kubert (arte em fases distintas; Leinil Francis Yu no final).",
+    "publicationDate": "1992–1997 (intervalo indicado pelo nome da coleção; coleção dos EUA, Marvel Comics).",
+    "genres": [
+      "super-herói",
+      "ação",
+      "aventura",
+      "ficção científica",
+      "drama"
+    ],
+    "synopsis": "Logan enfrenta ameaças ligadas à sua vida como X-Man e ao passado militar e clandestino que envolve o programa Arma X, enquanto tenta viver segundo suas próprias regras. O período passa por mudanças marcantes — incluindo a perda do esqueleto de adamantium e o surgimento de garras ósseas — e culmina, já na transição de roteiristas, em uma nova perseguição ligada a um assassino que Wolverine julgava morto. A coleção designa um recorte temporal da série americana, não uma edição brasileira identificada.",
+    "period": "Recorte da série solo Wolverine (1988), a segunda série solo contínua do personagem: série original publicada de novembro de 1988 a junho de 2003. Este recorte corresponde à fase dos anos 1990, em grande parte conduzida por Larry Hama; a transição para Warren Ellis ocorre em #119, no fim de 1997. As datas da coleção não permitem fixar com segurança os números exatos incluídos."
+  },
+  "1y5FLWBYixhXW6wAIAvfMjSd24qZ94Jii": {
+    "displayTitle": "Wolverine: Patch em Madripoor",
+    "author": "Roteiro: Chris Claremont; arte: John Buscema; arte-final: Al Williamson (edição #1). Série iniciada pela dupla Claremont/Buscema; créditos variam ao longo do período.",
+    "publicationDate": "Julho de 1988 (estreia; #1 à venda em 12 jul. 1988)",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "aventura",
+      "ficção científica",
+      "drama"
+    ],
+    "synopsis": "Nos primeiros anos da série solo, Wolverine conduz aventuras próprias, afastadas por um tempo da imagem pública dos X-Men. A história inaugural leva Logan a Madripoor, onde assume o disfarce Patch e enfrenta piratas enquanto procura uma lendária espada negra. O recorte da coleção corresponde a uma fase da série original, não a uma série independente nem à minissérie de 1982.",
+    "period": "1988–1992 (intervalo indicado pela coleção; série original norte-americana iniciou em novembro de 1988 e continuou até junho de 2003)"
+  },
+  "1PhYhvSnmEwZzA74dkg3gz6pa0TjY4x4l": {
+    "displayTitle": "Wolverine: Origens",
+    "author": "Daniel Way (roteiro); Steve Dillon (desenho); Dan Kemp (cores). Créditos adicionais variam ao longo da série.",
+    "publicationDate": "19 de abril de 2006 (estreia da série); publicada até setembro de 2010.",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "aventura",
+      "drama",
+      "espionagem/conspiração"
+    ],
+    "synopsis": "Após recuperar memórias perdidas, Logan parte em uma busca violenta por respostas e por aqueles que o transformaram em uma arma. A investigação o leva a confrontar segredos de seu passado e pessoas com conhecimento de suas origens; na estreia, ele invade a Casa Branca para interrogar a Secretária de Estado, e o governo envia Nuke atrás dele. A série amplia o foco para as consequências familiares e para as conspirações ligadas à vida de Wolverine.",
+    "period": "2006–2010; série norte-americana da Marvel, 50 edições (#1–50). A coleção acompanha o intervalo indicado no nome e corresponde à série Wolverine: Origins, não à minissérie Wolverine: Origin de 2001–2002."
+  },
+  "1bwFqQqHDRP0MKcKw1GEUU8FcNRpvfxdD": {
+    "displayTitle": "Coleção Histórica Marvel: Wolverine (Panini, Brasil; 8 volumes)",
+    "author": "Chris Claremont (roteiro), John Buscema (desenhos), Klaus Janson (arte-final); coleção reúne histórias de diversos autores, entre eles Peter David, Larry Hama, John Byrne e Marc Silvestri",
+    "publicationDate": "março de 2017–agosto de 2018 (edição brasileira; oito volumes)",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "aventura",
+      "espionagem",
+      "crime"
+    ],
+    "synopsis": "Esta coleção brasileira em oito volumes compila aventuras clássicas do Wolverine, sem corresponder a uma nova série narrativa independente. Em suas primeiras histórias, Logan atua secretamente em Madripoor como Caolho, afastado dos X-Men, e enfrenta criminosos, agentes e ameaças ligadas à ilha e ao Japão. A seleção percorre a fase inicial da série mensal solo, com histórias de diferentes equipes criativas.",
+    "period": "Reúne histórias publicadas originalmente nos EUA na série Wolverine (1988) — primeira série mensal solo, iniciada em 1988 —, além de material inicial de Wolverine publicado em Marvel Comics Presents (1988). A coleção abrange ao menos Wolverine #1–44 nos volumes 1–7, conforme as fontes consultadas; não afirmo o conteúdo específico do volume 8."
+  },
+  "1o9H-fm-jE9w-lOkRaGVCdgoPasOxlS8n": {
+    "displayTitle": "Wolverine/Gambit: Victims (Vítimas)",
+    "author": "Jeph Loeb (roteiro); Tim Sale (desenhos e arte-final); Gregory Wright (cores)",
+    "publicationDate": "Setembro–dezembro de 1995 (minissérie original dos EUA; quatro edições). O arquivo indicado como Marvel Vintage não permite confirmar qual edição brasileira ou impressão contém.",
+    "genres": [
+      "super-heróis",
+      "mistério",
+      "crime",
+      "terror/suspense"
+    ],
+    "synopsis": "Gambit vai a Londres investigar assassinatos de mulheres que evocam os crimes de Jack, o Estripador, e encontra Wolverine com sangue nas garras e sem memória de como chegou ali. Os dois tentam desvendar os crimes enquanto a suspeita recai sobre Logan e a investigação os leva a uma trama de armação e manipulação.",
+    "period": "Marvel, minissérie original Wolverine/Gambit: Victims (1995), #1–4; não se deve confundir com a reedição/encadernado posterior."
+  },
+  "1I2CL9NGoVoIjGHY4XnwPjVP_vuL1fj0h": {
+    "displayTitle": "Eu, Wolverine",
+    "author": "Roteiro: Chris Claremont; desenhos: Frank Miller; arte-final: Joe Rubinstein. Créditos adicionais úteis: cores de Glynis Oliver-Wein; tradução brasileira de Fernando Lopes e Jotapê Martins.",
+    "publicationDate": "Maio de 2009 (edição brasileira Panini; data registrada pelo Guia dos Quadrinhos).",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "artes marciais",
+      "aventura",
+      "drama"
+    ],
+    "synopsis": "Ao voltar ao Japão para reencontrar Mariko Yashida, Wolverine descobre que a família dela e o pai, Shingen, estão no centro de uma disputa violenta, enquanto ninjas do Tentáculo e a mercenária Yukio cruzam seu caminho. Logan precisa enfrentar a corrupção e a violência sem perder de vista o amor por Mariko — nem a própria humanidade. A edição brasileira inclui ainda capítulos dos X-Men que continuam os acontecimentos envolvendo Wolverine, Mariko e a família Yashida.",
+    "period": "Material original norte-americano: minissérie Wolverine #1–4, publicada de setembro a dezembro de 1982; a edição brasileira de 2009 também reúne Uncanny X-Men #172–173 (1983)."
+  },
+  "10kaEeVGFTG0LOykUYz3crD0NbVB-OMq9": {
+    "displayTitle": "Wolverine: Arma X (Weapon X)",
+    "author": "Roteiro e arte: Barry Windsor-Smith",
+    "publicationDate": "1991 (serialização original em Marvel Comics Presents #72; 15 de março de 1991)",
+    "genres": [
+      "super-heróis",
+      "ficção científica",
+      "ação",
+      "drama",
+      "origem de personagem"
+    ],
+    "synopsis": "Logan é capturado por um programa secreto que pretende transformá-lo em uma arma viva, submetendo-o a procedimentos que implantam adamantium em seu esqueleto e exploram sua natureza selvagem. Narrada de modo fragmentado e intenso, a história acompanha a perda de controle e de identidade do homem que se tornará Wolverine. Trata-se do arco de Barry Windsor-Smith originalmente serializado em Marvel Comics Presents, não de outra série posterior chamada Weapon X.",
+    "period": "Arco publicado em Marvel Comics Presents #72–84; intervalo correspondente: 1991–1992. A data da edição encadernada específica do arquivo não foi confirmada."
+  },
+  "1Nrh-k2-RGASRh3GNRIGoAyvA76zcLdBc": {
+    "displayTitle": "Wolverine: Antologia",
+    "author": "Len Wein, Chris Claremont e Larry Hama (roteiristas de histórias incluídas; seleção antológica com diversos autores e artistas)",
+    "publicationDate": "16 de outubro de 2017 (edição brasileira Panini; 1ª edição)",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "aventura",
+      "ficção científica"
+    ],
+    "synopsis": "Coletânea retrospectiva de histórias marcantes de Wolverine, não uma narrativa contínua: abre com a estreia do personagem nas páginas de Incredible Hulk e reúne confrontos com Dentes-de-Sabre, aventuras ao lado dos X-Men e de outros heróis, além de episódios solo de diferentes fases. A seleção percorre décadas de publicação e inclui trabalhos de Len Wein, Chris Claremont, Larry Hama e muitos outros. A edição brasileira reúne material originalmente publicado em títulos Marvel entre 1974 e 2012.",
+    "period": "Histórias originalmente publicadas entre 1974 e 2012; coletânea brasileira lançada em 2017."
+  },
+  "1njsBqCUnJasORqZYyC_23G2knnD9rgzd": {
+    "displayTitle": "Vingadores (Clássico)",
+    "author": "Stan Lee (roteiro); Jack Kirby (arte e argumento); Dick Ayers (arte-final no nº 1). Créditos variam ao longo da série.",
+    "publicationDate": "Setembro de 1963 – setembro de 1996 (série original dos EUA).",
+    "genres": [
+      "super-heróis",
+      "aventura",
+      "ficção científica",
+      "fantasia",
+      "ação"
+    ],
+    "synopsis": "Esta coleção corresponde à série original The Avengers da Marvel, acompanhando diferentes formações dos Vingadores ao longo de mais de três décadas. Heróis como Homem de Ferro, Thor, Capitão América e outros unem forças contra ameaças que nenhum deles enfrentaria sozinho; entre os antagonistas destacados pela Marvel estão Ultron, Kang e os Mestres do Terror. A estreia, em 1963, reúne Homem de Ferro, Hulk, Homem-Formiga, Vespa e Thor contra Loki.",
+    "period": "Série norte-americana publicada de 1963 a 1996; 402 números, #1–#402, segundo o Grand Comics Database. A identificação “Vol.1” é a designação de catálogo da série original, não uma edição brasileira específica."
+  },
+  "13VfBKc1DG5V054a0qT7aGX52X352cUdf": {
+    "displayTitle": "Liga da Justiça da América (Clássico)",
+    "author": "Gardner Fox (roteiro); Mike Sekowsky (desenhos). Créditos representativos da edição #1; a equipe criativa varia ao longo da série.",
+    "publicationDate": "Outubro–novembro de 1960 (início da série; data de capa da edição #1)",
+    "genres": [
+      "super-heróis",
+      "aventura",
+      "ficção científica",
+      "fantasia",
+      "ação"
+    ],
+    "synopsis": "Ficha representativa da série original da Justice League of America, não de uma edição brasileira específica nem de um arco reunido na coleção. A equipe reúne Superman, Batman, Mulher-Maravilha, Flash, Lanterna Verde, Aquaman e Caçador de Marte em aventuras coletivas; na edição inaugural, a Liga enfrenta uma ameaça que pode fazer sua primeira aventura ser também a última, com a estreia do vilão controlador mental Despero. A premissa e os personagens variam conforme a edição ao longo da série.",
+    "period": "1960–1987 (série original norte-americana da DC, #1–#261)"
+  },
+  "1idY4SODIBFc8zZ8I9-rOsl9g4LgUFSTw": {
+    "displayTitle": "A Saga da Liga da Justiça",
+    "author": "Roteiros: Mark Waid e Grant Morrison; arte: Howard Porter (créditos principais associados às fases iniciais). Edição brasileira Panini/DC; créditos variam entre volumes.",
+    "publicationDate": "Agosto de 2022 (início da primeira série); o 10º volume saiu em maio de 2023.",
+    "genres": [
+      "super-heróis",
+      "ação",
+      "aventura",
+      "ficção científica",
+      "fantasia de super-heróis"
+    ],
+    "synopsis": "Coleção brasileira em encadernados que republica histórias da Liga da Justiça, reunindo a passagem entre diferentes fases criativas da equipe. O início destaca as histórias de Mark Waid e Grant Morrison, com a reunião dos principais heróis da DC e ameaças de escala global. Esta ficha descreve a coleção, não uma edição individual; o conteúdo e os créditos específicos mudam de volume para volume.",
+    "period": "Brasil, Panini, 2022–2023 (recorte dos dez primeiros volumes conforme a coleção). Reúne material de fases anteriores da Liga da Justiça originalmente publicado nos EUA; não é uma série inédita única."
+  }
+};
+
+// As 179 fichas deste app são locais; os metadados remotos continuam como complemento.
+// Para estes IDs, os campos embutidos vencem; valores remotos extras (como coverId) são preservados.
+function mergeCustomDetailMetadata(remoteItems){
+  const merged=Object.assign(Object.create(null),remoteItems||{});
+  for(const [id,local] of Object.entries(INLINE_CUSTOM_DETAIL_METADATA))
+    merged[id]=Object.assign({},merged[id]||{},local);
+  return merged;
+}
+// Alguns itens do catálogo são atalhos do Drive. O app navega pelo ID real
+// do destino, mas a ficha está vinculada ao ID do atalho; mapeamos ambos para
+// que a regra de não repetir fichas funcione também em coleções aninhadas.
+const DETAIL_COLLECTION_ID_ALIASES = {
+  "1KxnKamHXlpq2Lgg1eOHXzIeXWMVX0hPr": [
+    "1EO9yDFWEsOu_mWsXg4HrSRMCglAI_4_G"
+  ],
+  "1HUURlMgtd76bCPfS6_8E4AsWOs8p6Jn_": [
+    "1ZSUwTJ6JhEZYykOxZSKGNgzmsShyVmHQ"
+  ],
+  "1xtwCJ2iDF-d1OgdMHhg0I2uUDiGqZE_l": [
+    "1aXSLCTIaeQJRn0_Fv6zFJenKv3AVeDmn"
+  ],
+  "1LaJZXvpq6wTb5dA0XswWs2sCukRRKZ4Z": [
+    "1CoYZ_pLF4RsuUlcl6X3aC7VC4HPw88J8"
+  ],
+  "1z6wAIqQJWKFO0W3JNo2q5R7rZNa64jYp": [
+    "1DBKtMspJI1SFMTSDtD7KzWh-XLhoXQoR"
+  ],
+  "11b85hIeMLZNo7RdweM1ZXAfTf31zqyla": [
+    "116aEQNIK5co5LSE-xHYOzb0Kdf6LzAKF"
+  ],
+  "1buoaVYPGLCrB0kf4-7TVVsGqjwRN6oyJ": [
+    "1Pfs0KuYhlaqEMddre8DPvF5R8bBFn0np"
+  ],
+  "1JN6zghy40l5gqkB_-BKvz_fYLEkZfrtV": [
+    "1OW8lxQK_mOhaytb-g_T7mE8Qs2BhJRoc"
+  ],
+  "13-JlYIJfFI-DHiX4wB94xJJlycmVQ1Hr": [
+    "1IKYoqS4aB516Zwl0bFrcdAChbFzYbxjR"
+  ],
+  "1GtP1Olj9DV8d9MPnDOjIibKXTRI14Cza": [
+    "1wMX9sEwVGdFcie3tNqEkxl4M7vLXI5cI"
+  ],
+  "1AOQ0Cizi8TtLlPvaAaHcsfjsy0ZT18-0": [
+    "1zxKW3Llj6AYG_9wSpcAXzHFrQg201aiN"
+  ],
+  "19tSvSHCWSNyUAsQdBnoaxOX2PfbGEMeY": [
+    "1ASkEvsJpe3d67uCJ8vpw2zZsBKcxUsM0"
+  ],
+  "1jmiVeBVuROV8fqJCUm7Kx-LUMKTL9Z1-": [
+    "1l8CFXSXXysL6YOPB1BCFZMMZmdjtZVhT"
+  ],
+  "18b5aQ-_yZ9zWaNiW2_SRg8KxzmZL0cie": [
+    "1-Rsx_tQMJpqI-yPFds2R7KY0ZPqAz8i8"
+  ],
+  "1FVE_xhrFmhIRDa41-JKL-jhjorYbU0vK": [
+    "1ysoIIdNFFldzlt_iSoHrDgq6NxplMPFb"
+  ],
+  "1nlGexejr3rzaAwvh15hmTpMSMnA9TAhd": [
+    "1NkNAhsyiNwH1WuHjTAjUjr-khUalziJ2"
+  ],
+  "1p0GwRAoDxYP6f8nVvM2Q3UqpI7WoNZbD": [
+    "1mQ29_Z3KqTtU3fBIbHN7u8XaMTBL9yUL"
+  ],
+  "1RCJsjsUegFMMpVeJO_FwH61zfk0j8qpa": [
+    "1Jam8raR1P0s5osKyKljAc0Hgf5Ag6uFL"
+  ],
+  "16r9vPvLW7xQEZG6n9rryggN_WBaaaI5S": [
+    "19-sdDCi7f3dMGaU_y82rQYWUbK1L_EXt"
+  ],
+  "1FGh4Tm0tjYq5jvBli8QQYgvS53RNY-Dh": [
+    "115iDE-O8stVVag_73n0hkdQBWes124GZ"
+  ],
+  "1hPVq_CnE3-vo_yirycpN3cU7hx19PFdj": [
+    "1dG46iz2qRhh8zsVnjPSCjMvkzYMgfI7T"
+  ],
+  "1k6DidvJlZh3xL6bP-YB0BuURqhofpV7q": [
+    "1TH6kYfGm5w9prSX5V4B-mxTk6goeGaT3"
+  ],
+  "1FSJm0NRxsbBR2r2-zI4Y-tYyIORcTrYb": [
+    "1M7eUfmYN7rDOvQaXImWrqHE311_5Ij07"
+  ],
+  "1T_Qb1ER_Sai7uKMfomWgsdtOz4tLnfws": [
+    "1BuaU-Jeqko9er0UDfzJE3_UiRxG9pBoB"
+  ],
+  "1H_9lrV1bg2z31ABAISjcgPwCQTIJ8tAS": [
+    "1FXVtiDONMMX155kmYLH1HzC7QLnn5iIB"
+  ],
+  "1q29nvoUMdwtkChqFLZmlTSeh5nPCwN6-": [
+    "19M2Tt09pEb6gfGeXBEjvKvkkbNthuN3W"
+  ],
+  "1AbD4nSu7gchfZvb00c9k_Lnf0ProsFYF": [
+    "18K6lc-SEJWSlclRjorYvMsRvoYNBxJxV"
+  ],
+  "1ou7P2i-5xmNimTBmrDV2c-f3qQDXOuVV": [
+    "1pjuMvWHFBjbf0KZa4oCVsmOvNNRxncd7"
+  ],
+  "1ZN6l0o1uqBbKvXQTT4R5Smsmey1Vbxz9": [
+    "1m-8jx8a2EqEFd-a-3HeL_GlprzVA3dyJ"
+  ],
+  "1MSeqmPCA8d7k3AZ4-F60hG__2NDcMvNL": [
+    "1rvmRMY_3kSMWVmqXe90R80WttGgOyerp"
+  ],
+  "14ExUi4k-HwLKSKOVHaGNLyz0vUeNqsyu": [
+    "1-wTVm_K3WOs09LgG9bV2Rm6Y6uOrC0EP"
+  ],
+  "1-yU1uA8NSH-2L6KslKbDIHPkHW_ACwP8": [
+    "1ojcCUlLZAS4WaoPT5E4bvGUqjzuMC5Gz"
+  ],
+  "1f39ug3gyxR21OfQDPSGOJ7gqoCYR2rCI": [
+    "1Ub1nomi-UJAIc5W5ymmpBGyLC0Ltu_OF"
+  ],
+  "1H-5JY6KetNuelsGhyn6_bK36vxWLjjMT": [
+    "1Af4tSOWoTQx7fEwEj0Nte1JI8MAVc4Pl"
+  ],
+  "1kORZEeLGT6eICi1jDGGM858Z65YKM04e": [
+    "17cG8d93EO_cIaAJIk0MpPohWyiAl4SZ9"
+  ],
+  "1tee7PuMp12DIezrKmHKqNXQLIb9uiq0-": [
+    "14_RHsKR7AnEHArDxl4FvHvthyjdoLl6g"
+  ],
+  "1IDezyWbOjgFNPknYOpwNRYs__kWRO-D8": [
+    "1AY0K7G3MqCnKk5YhriFwBBpehtfT1grg"
+  ],
+  "1tOOITuoucbd61vL-FW82pYlfMR25ORn1": [
+    "1fgGmHyfyZC9XCNLIJwFeac2sHEPdbMDW"
+  ],
+  "1ow2Tcz_qUo4c_lKEv1KQ75XuF8oIlx-D": [
+    "1ZuQ9kh9ZNzKGZ9xnGfxVnjacISFIYakb"
+  ],
+  "119GfmINoX1Yl5FG67_cHZKfTfCpRlCmG": [
+    "1UpEG7N367j_y4AOGFrbyT1I8R67wIqkW"
+  ],
+  "1Zxu7lHAUrpqw98fgB_5HtSevKJNgwz-N": [
+    "1J0QqgTQp6i5iASt7t-CSw_aOODlaqpbH"
+  ],
+  "1-uTc9Bu64rCIl8_qJyMCrNGelrRf-pnX": [
+    "19k0xJHuWhC2pdQG4aBlRI9fQBhryKq8X"
+  ],
+  "1CkUiEazdQ4kMZTQPYz95solxLYRYNgtJ": [
+    "1xWjBOke8LAT_U2uKMM4b9uanpOSRVrgq"
+  ],
+  "1bA1nNuo1Sa7ZjO5IYpumrCjRJ79diM2U": [
+    "1IZZcuDXe4xX1H_VwLHJkzPwZaT83H7Zw"
+  ],
+  "10Ss0OhYQ_zNclpZuT7yHvhp1ge0xPiNs": [
+    "1OaOW4nhn99lB8yOl1kaROLb2g0OwtCxV"
+  ],
+  "1h-DkXB348VxN4x9MrwpDLhij8wV9MU1Y": [
+    "18lDBVlo-xv4G5NGXL7L7njvQ6FfJlezn"
+  ],
+  "1soFf7PoBygeLg-emsSDED8NPKgkiVhiW": [
+    "1ZmtLF5jJngOHdMAq9M4bAUSyWtYtMBBi"
+  ],
+  "1OpBiEMIxZNj3UZAXB_8CbN3jCwbdR0Bo": [
+    "1-vj2nxlOT9mTr_-IAgo5DhB2kSffoH8m"
+  ],
+  "12lox0cOMSJ_XW6TC0frIxJ-LxkW3v-P1": [
+    "1XPQorHYcfu_4OZnzFDPRWJMEp2oO3HVe"
+  ],
+  "133D7bIAM2xrY5jWhVVadBdbltWWpELQc": [
+    "1b91haOuGB9c0K2zXe9yNjqIht163dx4J"
+  ],
+  "1uZp1qPpoQ1t1YbokqYJ99JWKVxLKDVW4": [
+    "1s4vhhcGJROUQXB5tfdc6QUxkNeCiEUlK"
+  ],
+  "17UZLotZZHViINUBLy6l19fMp-ba02CxI": [
+    "1c-4qAI1zZuU9acrIiWgYrsFm6gtKlF4f"
+  ],
+  "1X4bVFdwN6VNysS3va0Pyp7RFvdndNXOR": [
+    "1DB2N_93o-MLKgnGan_O2DXDyTcMMy271"
+  ],
+  "1jUP4QgP_bys7go0N8wQwqX4VI2AY2Lo_": [
+    "1Po2TpLeScpVLAcuX-ffOGfgbeVFfIAg_"
+  ],
+  "1RWw3PRibrHfd_8_fQ1KFzT7_Aaca0xem": [
+    "1gp3ccKy3hvxBt1CpTkwfZYajwwY23Uom"
+  ]
+};
+let CUSTOM_DETAIL_METADATA = mergeCustomDetailMetadata();
 let customDetailMetadataPromise = null;
-function loadCustomDetailMetadata(){
-  if(customDetailMetadataPromise) return customDetailMetadataPromise;
-  customDetailMetadataPromise=(async()=>{
-    try{
-      const response=await fetch(`${CONFIG.proxyUrl}?detail_metadata=1`,{cache:'no-store'});
-      if(response.ok){
-        const payload=await response.json();
-        if(payload&&payload.items&&typeof payload.items==='object'&&!Array.isArray(payload.items)){
-          CUSTOM_DETAIL_METADATA=payload.items;
-          if(activeCollectionDetail) renderCollectionDetails();
-          return;
+function loadCustomDetailMetadata(itemId){
+  const hasInlineItem=itemId!=null&&Object.prototype.hasOwnProperty.call(INLINE_CUSTOM_DETAIL_METADATA,String(itemId));
+  if(!customDetailMetadataPromise){
+    customDetailMetadataPromise=(async()=>{
+      try{
+        const response=await fetch(`${CONFIG.proxyUrl}?detail_metadata=1`,{cache:'no-store'});
+        if(response.ok){
+          const payload=await response.json();
+          if(payload&&payload.items&&typeof payload.items==='object'&&!Array.isArray(payload.items)){
+            CUSTOM_DETAIL_METADATA=mergeCustomDetailMetadata(payload.items);
+            applyCustomCoversToVisibleCards();
+            if(activeCollectionDetail) renderCollectionDetails();
+            return;
+          }
         }
-      }
-    }catch(_){}
-    try{
-      const response=await fetch(new URL('./metadata.json',document.baseURI),{cache:'no-cache'});
-      if(response.ok){ const payload=await response.json(); if(payload?.items&&typeof payload.items==='object'&&!Array.isArray(payload.items)) CUSTOM_DETAIL_METADATA=payload.items; }
-    }catch(_){}
-    if(activeCollectionDetail) renderCollectionDetails();
-  })();
-  return customDetailMetadataPromise;
+      }catch(_){}
+      try{
+        const response=await fetch(new URL('./metadata.json',document.baseURI),{cache:'no-cache'});
+        if(response.ok){
+          const payload=await response.json();
+          if(payload?.items&&typeof payload.items==='object'&&!Array.isArray(payload.items)){
+            CUSTOM_DETAIL_METADATA=mergeCustomDetailMetadata(payload.items);
+            applyCustomCoversToVisibleCards();
+          }
+        }
+      }catch(_){}
+      if(activeCollectionDetail) renderCollectionDetails();
+    })();
+  }
+  // As fichas incluídas no index.html já estão prontas. Atualizações remotas
+  // continuam carregando em segundo plano para os demais itens/edições manuais.
+  return hasInlineItem?Promise.resolve():customDetailMetadataPromise;
+}
+function applyCustomCoversToVisibleCards(){
+  if(!document.body) return;
+  for(const card of document.querySelectorAll('.card[data-id],.carousel-card[data-id]')){
+    const itemId=card.dataset.id;
+    const coverFile=getCustomDetailCoverFile(itemId);
+    if(!coverFile) continue;
+    const coverBox=card.querySelector('.folder-cover,.cc-cover')||card;
+    const prior=coverBox.querySelector('img.cover');
+    if(prior?.dataset.customDetailCoverId===coverFile.id) continue;
+    const placeholder=coverBox.querySelector('.cover-placeholder,.cc-placeholder');
+    const src=detailCoverUrl(coverFile.id);
+    if(!src) continue;
+    const img=buildCoverNode(src,coverFile);
+    img.dataset.customDetailCoverId=coverFile.id;
+    card.classList.add('has-cover','cover-immediate');
+    if(prior) prior.replaceWith(img);
+    else if(placeholder) mountCoverNodeOverPlaceholder(placeholder,img);
+    else coverBox.prepend(img);
+  }
 }
 function collectionDetailMeta(item){
   const manual=CUSTOM_DETAIL_METADATA[item?.id]||{};
@@ -4361,6 +6824,23 @@ function detailVisibleAuthor(value){
   if(/^(?:equipe criativa indicada na edi[cç][aã]o|equipe indicada na edi[cç][aã]o|equipe criativa a confirmar na edi[cç][aã]o|equipe criativa varia conforme a edi[cç][aã]o|cr[eé]ditos variam conforme)/i.test(author)) return '';
   return author;
 }
+function detailAuthorCreatorNames(value){
+  let text=String(value||'').replace(/\b(?:protagonista|personagem principal)\s*:[\s\S]*$/i,'');
+  if(!text.trim()) return [];
+  const parts=text.split(/[,;]|\s+e\s+|\s+and\s+|\s*&\s*/i);
+  const names=[];
+  for(const part of parts){
+    const clean=part.trim().replace(/^\(?\s*(?:com|incluindo|roteiro|desenho|arte(?:-final)?|l[aá]pis|cores|letras|colorista|editor)\s*[:—-]?\s*/i,'');
+    const match=clean.match(/^([A-ZÀ-Ý][A-Za-zÀ-ÿ'’.-]*(?:\s+(?:[A-ZÀ-Ý][A-Za-zÀ-ÿ'’.-]*|[A-Z]\.)){1,3})\b/);
+    if(match) names.push(match[1].replace(/\s+/g,' ').trim());
+  }
+  const seen=new Set();
+  return names.filter(name=>{const key=name.toLocaleLowerCase('pt-BR');if(seen.has(key))return false;seen.add(key);return true;});
+}
+function detailAuthorCreditCount(value){
+  const count=detailAuthorCreatorNames(value).length;
+  return count || (String(value||'').trim()?1:0);
+}
 function detailDateText(value){
   const m=String(value||'').match(/\b((?:18|19|20)\d{2})(?:\s*[-–—]\s*((?:18|19|20)?\d{2}))?\b/);
   if(!m) return '';
@@ -4385,6 +6865,10 @@ function detailContributorNames(author){
   text=text.replace(/^(?:entre eles|entre os colaboradores do evento est[aã]o|incluindo|fase inicial com|fase associada a)\s*/i,'');
   const generic=/\b(?:equipe|criativa|indicada|confirmar|cr[eé]ditos|variam|varia|conforme|colaboradores?|artistas?|v[aá]rios|autores?|outros|convidados|fase|inicial|associada|evento|miniss[eé]rie|Marvel|da|do|dos|das|com|entre|eles|incluindo)\b/gi;
   return [...new Set(text.split(/[,;]|\s+e\s+|\s+and\s+|\s*&\s*/i).map(part=>part.replace(generic,' ').replace(/\s+/g,' ').trim()).filter(part=>part.split(' ').filter(Boolean).length>=2))];
+}
+function detailAuthorInlineSummary(author){
+  const names=detailAuthorCreatorNames(author);
+  return names.length?names.join(' · '):String(author||'');
 }
 function detailPersonPattern(person){
   const tokens=String(person||'').match(/[\p{L}]+(?:['’][\p{L}]+)?\.?/gu)||[];
@@ -4434,6 +6918,16 @@ function detailTitleWithDateAndCredits(name,author){
 function detailIsFolder(item){ return item && (item.mimeType==='application/vnd.google-apps.folder' || item.isFolder===true); }
 function openCollectionDetails(item, parentId, nested){
   if(!item) return;
+  // Barreira central: qualquer caminho (biblioteca, busca, Home ou capítulos)
+  // deve respeitar a ficha ancestral. Descendentes continuam abrindo conteúdo,
+  // mas nunca criam outra tela de detalhes.
+  if(isDescendantOfDetailedCollection(item,parentId)){
+    collectionDetailStack.length=0;
+    if(activeCollectionDetail) closeCollectionDetails(false);
+    if(detailIsFolder(item)) openCollectionFolder(item);
+    else openReader(item,undefined,parentId||item._parentId);
+    return;
+  }
   if(activeCollectionDetail){ collectionDetailStack.push(activeCollectionDetail); }
   activeCollectionDetail={item:{...item},parentId:parentId||item._parentId||item._collectionRoot?.id||DEMOLIDOR_COLLECTION_FOLDER_ID,listing:null,loading:false,error:null};
   collectionDetailTab='details';
@@ -4459,6 +6953,11 @@ function renderCollectionDetails(){
   if(!screen){ screen=el('section',''); screen.id='collection-details-screen'; screen.setAttribute('aria-label','Detalhes da HQ'); document.body.appendChild(screen); }
   const item=detail.item, isFolder=detailIsFolder(item), meta=collectionDetailMeta(item);
   const author=detailVisibleAuthor(meta.author);
+  const creatorNames=Array.isArray(meta.creators)?meta.creators.filter(name=>String(name||'').trim()):[];
+  const inlineAuthorText=creatorNames.length?author:detailAuthorInlineSummary(author);
+  const inlineSummaryCount=inlineAuthorText!==author?inlineAuthorText.split(' · ').length:0;
+  const creatorCount=creatorNames.length?new Set(creatorNames.map(name=>String(name).trim().toLocaleLowerCase('pt-BR'))).size:Math.max(detailAuthorCreditCount(author),inlineSummaryCount);
+  const showAuthorUnderTitle=!!author && creatorCount<=3;
   const titleInfo=detailTitleWithDateAndCredits(item.name,author);
   const title=String(meta.displayTitle||'').trim() || titleInfo.title;
   const publicationDate=meta.publicationDate || titleInfo.date || COLLECTION_PUBLICATION_DATE_OVERRIDES[item.id] || '';
@@ -4471,7 +6970,7 @@ function renderCollectionDetails(){
       <main class="detail-main"><section class="detail-hero">
         <div class="detail-cover"><div class="cover-placeholder skeleton">${ICONS.page}</div><div class="detail-cover-fallback hidden">${escapeHtml(title)}</div></div>
         <h1 class="detail-name">${escapeHtml(title)}</h1>
-        ${author?`<p class="detail-author">${escapeHtml(author)}</p>`:''}${publicationDate?`<p class="detail-meta-line">Publicação: ${escapeHtml(publicationDate)}</p>`:''}
+        ${showAuthorUnderTitle?`<p class="detail-author">${escapeHtml(inlineAuthorText)}</p>`:''}${publicationDate?`<p class="detail-meta-line">Publicação: ${escapeHtml(publicationDate)}</p>`:''}
         <div class="detail-actions"><button class="detail-primary" type="button"><span class="detail-primary-icon">▶</span><span>${isFolder?'Ver capítulos':'Ler agora'}</span></button>${isFolder?`<button class="detail-download-all" type="button" aria-label="Baixar coleção inteira para uso offline" title="Baixar coleção inteira">${ICONS.downloadArrow}</button>`:`<span class="detail-download-one" aria-label="Baixar para ler offline" title="Baixar para ler offline">${ICONS.downloadArrow}</span>`}<button class="detail-favorite" type="button" aria-label="Favoritar" title="Favoritar">♥</button></div>
         <div class="detail-stats"><div class="detail-stat"><strong data-detail-count>${countLabel}</strong><span>${isFolder?'na coleção':'leitura disponível'}</span></div><div class="detail-stat"><strong>${escapeHtml(meta.period)}</strong><span>fase / edição</span></div></div>
       </section>
@@ -4487,8 +6986,8 @@ function renderCollectionDetails(){
   if(coverSlot){
     const loadCover=async()=>{
       let coverFile=item;
-      const customCoverId=CUSTOM_DETAIL_METADATA[item.id]?.coverId;
-      if(customCoverId) coverFile={id:customCoverId,name:'capa personalizada.jpg',mimeType:'image/jpeg',_ext:'jpg',detailCover:true};
+      const customCoverFile=getCustomDetailCoverFile(item.id);
+      if(customCoverFile) coverFile=customCoverFile;
       else if(isFolder){ try{ coverFile=await resolveFolderCoverFile(item.id); }catch(e){ coverFile=null; } }
       if(!coverFile){ const fb=screen.querySelector('.detail-cover-fallback'); if(fb) fb.classList.remove('hidden'); coverSlot.remove(); return; }
       try{ await attachCoverToEl(coverSlot,coverFile); }catch(e){ const fb=screen.querySelector('.detail-cover-fallback'); if(fb) fb.classList.remove('hidden'); }
@@ -4611,8 +7110,8 @@ function buildCollectionChapterCard(entry,index,parentId){
   const placeholder=card.querySelector('.cover-placeholder');
   const loadCover=async()=>{
     let coverFile=entry;
-    const customCoverId=CUSTOM_DETAIL_METADATA[entry.id]?.coverId;
-    if(customCoverId) coverFile={id:customCoverId,name:'capa personalizada.jpg',mimeType:'image/jpeg',_ext:'jpg',detailCover:true};
+    const customCoverFile=getCustomDetailCoverFile(entry.id);
+    if(customCoverFile) coverFile=customCoverFile;
     else if(folder){ try{ coverFile=await resolveFolderCoverFile(entry.id); }catch(e){ coverFile=null; } }
     if(!coverFile){ placeholder.classList.remove('skeleton'); return; }
     try{ await attachCoverToEl(placeholder,coverFile); }catch(e){ placeholder.classList.remove('skeleton'); }
@@ -4622,8 +7121,8 @@ function buildCollectionChapterCard(entry,index,parentId){
 }
 async function openCollectionChapter(entry,parentId){
   if(detailIsFolder(entry)){ openCollectionDetails(entry,parentId,true); return; }
-  await loadCustomDetailMetadata();
-  if(CUSTOM_DETAIL_METADATA[entry.id]){ openCollectionDetails({...entry,_parentId:parentId},parentId,true); return; }
+  await loadCustomDetailMetadata(entry.id);
+  if(CUSTOM_DETAIL_METADATA[entry.id]&&!isDescendantOfDetailedCollection(entry,parentId)){ openCollectionDetails({...entry,_parentId:parentId},parentId,true); return; }
   state.currentListContext=(activeCollectionDetail?.listing?.files)||[entry]; state.currentListIsLocal=false;
   return openReader(entry,undefined,parentId);
 }
@@ -4884,6 +7383,29 @@ const COVER_CHECK_TIMEOUT_MS = 4000;
 function r2CoverUrl(fileId){
   return `${CONFIG.proxyUrl}?cover=1&id=${encodeURIComponent(fileId)}&code=${encodeURIComponent(ACCESS_CODE || '')}&device=${encodeURIComponent(getDeviceId())}&type=${encodeURIComponent(getDeviceType())}`;
 }
+function detailCoverUrl(fileId){
+  if(!CONFIG.proxyUrl||!fileId) return null;
+  return `${CONFIG.proxyUrl}?detail_cover=1&id=${encodeURIComponent(fileId)}&code=${encodeURIComponent(ACCESS_CODE || '')}&device=${encodeURIComponent(getDeviceId())}&type=${encodeURIComponent(getDeviceType())}`;
+}
+function customDetailCoverRecord(itemId){
+  const id=String(itemId??'');
+  const direct=CUSTOM_DETAIL_METADATA[id];
+  if(direct?.coverId) return direct;
+  const aliasIds=DETAIL_COLLECTION_ID_ALIASES[id];
+  for(const aliasId of (Array.isArray(aliasIds)?aliasIds:(aliasIds?[aliasIds]:[]))){
+    const record=CUSTOM_DETAIL_METADATA[aliasId];
+    if(record?.coverId) return record;
+  }
+  return null;
+}
+function getCustomDetailCoverFile(itemId){
+  const record=customDetailCoverRecord(itemId);
+  return record?.coverId?{id:String(record.coverId),name:'capa personalizada',mimeType:'image/jpeg',_ext:'jpg',detailCover:true}:null;
+}
+function getCustomDetailCoverSrc(itemId){
+  const file=getCustomDetailCoverFile(itemId);
+  return file?detailCoverUrl(file.id):null;
+}
 function isR2CoverUrl(u){
   return typeof u === 'string' && !!CONFIG.proxyUrl && u.startsWith(CONFIG.proxyUrl + '?cover=1');
 }
@@ -4910,7 +7432,9 @@ async function checkCoverInR2(fileId){
 
 async function resolveCoverSrc(f, opts){
   opts = opts || {};
-  if(f && f.detailCover && CONFIG.proxyUrl) return `${CONFIG.proxyUrl}?detail_cover=1&id=${encodeURIComponent(f.id)}&code=${encodeURIComponent(ACCESS_CODE || '')}&device=${encodeURIComponent(getDeviceId())}&type=${encodeURIComponent(getDeviceType())}`;
+  if(f && f.detailCover && CONFIG.proxyUrl) return detailCoverUrl(f.id);
+  const customCoverSrc=f&&getCustomDetailCoverSrc(f.id);
+  if(customCoverSrc) return customCoverSrc;
   if(coverMemoryCache.has(f.id)){
     const memo = coverMemoryCache.get(f.id);
     if(memo) return freshenCoverUrl(memo);
@@ -5591,6 +8115,12 @@ function getFolderCoverOverride(name){
 
 async function attachFolderCoverAsync(card, folderObj){
   const placeholder = card.querySelector('.cover-placeholder');
+  const customCoverFile=getCustomDetailCoverFile(folderObj.id);
+  if(customCoverFile){
+    card.classList.add('has-cover');
+    await attachCoverToEl(placeholder,customCoverFile);
+    return;
+  }
   const override = getFolderCoverOverride(folderObj.name);
   if(override){
     card.classList.add('has-cover');
@@ -7521,12 +10051,13 @@ function buildCarouselCard(item, opts){
   // IntersectionObserver + a busca assíncrona de novo.
   const immediateSrc = isFolder
     ? getImmediateFolderCoverSrc(item)
-    : (typeof coverMemoryCache.get(item.id) === 'string' ? coverMemoryCache.get(item.id) : null);
+    : (getCustomDetailCoverSrc(item.id) || (typeof coverMemoryCache.get(item.id) === 'string' ? coverMemoryCache.get(item.id) : null));
   let hasImmediateCover = false;
   if(immediateSrc){
-    const img = buildCoverNode(immediateSrc, isFolder ? null : item);
+    const customCoverFile=isFolder?getCustomDetailCoverFile(item.id):null;
+    const img = buildCoverNode(immediateSrc, isFolder ? (customCoverFile||null) : item);
     img.classList.add('loaded');
-    if(isFolder) wireImmediateFolderCoverRetry(img, item);
+    if(isFolder&&!customCoverFile) wireImmediateFolderCoverRetry(img, item);
     cover.appendChild(img);
     hasImmediateCover = true;
   } else {
@@ -7546,8 +10077,12 @@ function buildCarouselCard(item, opts){
     try{
       let src, coverFile;
       if(isFolder){
+        const customCoverFile=getCustomDetailCoverFile(item.id);
         const override = getFolderCoverOverride(item.name);
-        if(override){
+        if(customCoverFile){
+          coverFile=customCoverFile;
+          src=await resolveCoverSrc(coverFile,{persistOffline:true});
+        } else if(override){
           src = override;
         } else {
           coverFile = await resolveFolderCoverFile(item.id);
@@ -7578,9 +10113,9 @@ function buildCarouselCard(item, opts){
   if(!hasImmediateCover) lazyLoadCover(btn, loadCover);
 
   btn.onclick = async ()=>{
-    await loadCustomDetailMetadata();
+    await loadCustomDetailMetadata(item.id);
     const pid = item.parentId!=null ? item.parentId : (item._parentId!=null ? item._parentId : CONFIG.rootFolderId);
-    if(CUSTOM_DETAIL_METADATA[item.id]){
+    if(CUSTOM_DETAIL_METADATA[item.id]&&!isDescendantOfDetailedCollection(item,pid)){
       openCollectionDetails({...item,_parentId:pid},pid); return;
     }
     if(isFolder){ enterFolder(item.id, item.name); return; }
@@ -7740,6 +10275,7 @@ function buildHomeSection(titleHtml, items, builder, opts){
     viewAll.appendChild(el('span','section-view-arrow','›'));
     viewAll.onclick=async ev=>{
       ev.preventDefault();ev.stopPropagation();
+      if(typeof opts.onViewAll==='function'){ await opts.onViewAll(root,browseItems); return; }
       if(root){ openCollectionFolder(root); return; }
       viewAll.disabled=true;
       try{
@@ -7827,6 +10363,18 @@ const HOME_CACHE_MAX_AGE = 6*3600*1000;
 const DRIVE_CATALOG_REVALIDATE_INTERVAL = 60*1000;
 let lastSuccessfulDriveReconcileAt = 0;
 
+const HOME_CATALOG_CACHE_KEYS = [
+  ARANHA_CACHE_KEY, XMEN_CACHE_KEY, MANGA_CACHE_KEY, ALLCOMICS_CACHE_KEY,
+  ALLFOLDERS_CACHE_KEY, BATMAN_CACHE_KEY, SALVAT_CACHE_KEY, HULK_CACHE_KEY,
+  LANTERNA_CACHE_KEY, IRONMAN_CACHE_KEY, SUPERMAN_CACHE_KEY,
+  UNIVERSO_ABSOLUTO_CACHE_KEY, MULHER_MARAVILHA_CACHE_KEY, DOOMSDAY_CACHE_KEY,
+  THANOS_CACHE_KEY, DARKSEID_CACHE_KEY, QUARTETO_CACHE_KEY, DEADPOOL_CACHE_KEY,
+  WOLVERINE_CACHE_KEY, MOTOQUEIRO_CACHE_KEY
+];
+async function invalidateHomeCatalogCache(){
+  await Promise.all(HOME_CATALOG_CACHE_KEYS.map(key=>idbDelete('homeCache',key).catch(()=>false)));
+  HOME_CATALOG_CACHE_KEYS.forEach(key=>{ try{ localStorage.removeItem(key); }catch(e){} });
+}
 async function readHomeCache(key, arrProp){
   try{
     const rec = await idbGet('homeCache', key);
@@ -8788,7 +11336,11 @@ function paintHomeSectionsNow(wrap, data){
   const secClassicoAvengers = buildMixedCollectionSection(
     `Clássicos: <span class="section-logo-text hidden" data-logo-text="avengers">Avengers</span><img class="section-logo" data-logo="avengers" src="${logoSrc('avengers')}" alt="Avengers" loading="eager" decoding="async">`,
     comicsInsideNamedFolder(allComics, ['vingadores classico']),
-    {folderNames:['vingadores classico']}
+    {
+      folderNames:['vingadores classico'],
+      rootFolder:{id:'1njsBqCUnJasORqZYyC_23G2knnD9rgzd',name:'Vingadores (Clássico) Vol.1'},
+      onViewAll:()=>openCollectionDetails({id:'1njsBqCUnJasORqZYyC_23G2knnD9rgzd',name:'Vingadores (Clássico) Vol.1',mimeType:'application/vnd.google-apps.folder',_parentId:'11JGPcNE-t4R4G8NaefyATXW3cWeu2n8Y'},'11JGPcNE-t4R4G8NaefyATXW3cWeu2n8Y')
+    }
   );
   if(secClassicoAvengers){ built['classicoAvengers'] = secClassicoAvengers; wireHomeLogoFallback(secClassicoAvengers, 'avengers'); }
 
@@ -8828,7 +11380,11 @@ function paintHomeSectionsNow(wrap, data){
   const secClassicoLiga = buildMixedCollectionSection(
     `Clássicos: <span class="section-logo-text hidden" data-logo-text="liga">Liga da Justiça</span><img class="section-logo" data-logo="liga" src="${logoSrc('liga')}" alt="Liga da Justiça" loading="eager" decoding="async">`,
     comicsInsideNamedFolder(allComics, ['liga da justica da america']),
-    {folderNames:['liga da justica da america'],parentNames:['dc']}
+    {
+      folderNames:['liga da justica da america'],parentNames:['dc'],
+      rootFolder:{id:'13VfBKc1DG5V054a0qT7aGX52X352cUdf',name:'Liga da Justiça da América Vol.1'},
+      onViewAll:()=>openCollectionDetails({id:'13VfBKc1DG5V054a0qT7aGX52X352cUdf',name:'Liga da Justiça da América Vol.1',mimeType:'application/vnd.google-apps.folder',_parentId:'11JGPcNE-t4R4G8NaefyATXW3cWeu2n8Y'},'11JGPcNE-t4R4G8NaefyATXW3cWeu2n8Y')
+    }
   );
   if(secClassicoLiga){ built['classicoLiga'] = secClassicoLiga; wireHomeLogoFallback(secClassicoLiga, 'liga'); }
 
@@ -8870,7 +11426,11 @@ function paintHomeSectionsNow(wrap, data){
   const secSagaLiga = buildMixedCollectionSection(
     `A Saga da <span class="section-logo-text hidden" data-logo-text="ligasaga">Liga da Justiça</span><img class="section-logo" data-logo="ligasaga" src="${logoSrc('ligasaga')}" alt="Liga da Justiça" loading="eager" decoding="async">`,
     comicsInsideNamedFolder(allComics, ['a saga da liga da justica']),
-    {folderNames:['a saga da liga da justica'],parentNames:['dc']}
+    {
+      folderNames:['a saga da liga da justica'],parentNames:['dc'],
+      rootFolder:{id:'1idY4SODIBFc8zZ8I9-rOsl9g4LgUFSTw',name:'A Saga da Liga da Justiça'},
+      onViewAll:()=>openCollectionDetails({id:'1idY4SODIBFc8zZ8I9-rOsl9g4LgUFSTw',name:'A Saga da Liga da Justiça',mimeType:'application/vnd.google-apps.folder',_parentId:'1Qy8g2GGnMLb6PNQK55mhJa3p2QDx6PWc'},'1Qy8g2GGnMLb6PNQK55mhJa3p2QDx6PWc')
+    }
   );
   if(secSagaLiga){ built['sagaLiga'] = secSagaLiga; wireHomeLogoFallback(secSagaLiga, 'ligasaga'); }
 
@@ -9066,7 +11626,7 @@ function homeSectionsSignature({aranhaFolders, xmenFolders, mangaFolders, batman
 let lastPaintedHomeSignature = null;
 
 let homeToken = 0;
-async function renderHomeSections(forceRefresh, onProgress){
+async function renderHomeSections(forceRefresh, onProgress, {invalidatePersistentCache=false}={}){
   const wrap = $('#home-sections');
   if(!wrap) return;
   // Não revalida/reconstrói uma Home que já está visível em segundo plano.
@@ -9152,6 +11712,14 @@ async function renderHomeSections(forceRefresh, onProgress){
     lastPaintedHomeSignature = null;
   }
 
+  // No pedido manual, preservamos o que já está pintado enquanto a nova
+  // varredura começa, mas removemos o snapshot persistente para que uma
+  // falha futura não deixe este aparelho preso reutilizando o catálogo velho.
+  // Downloads, progresso, favoritos e demais stores do IndexedDB não são tocados.
+  if(invalidatePersistentCache){
+    await invalidateHomeCatalogCache();
+    if(isStale(myToken)) return;
+  }
   // 2) Busca (ou revalida) as 5 seções numa varredura ÚNICA da biblioteca
   // (ver crawlLibrarySections) — antes eram até 4 varreduras quase
   // inteiras e redundantes rodando em paralelo, o que fazia o "Atualizar"
@@ -9223,6 +11791,9 @@ async function renderHomeSections(forceRefresh, onProgress){
     errorMessage: sections.errorMessage
   };
   const freshSignature = homeSectionsSignature(freshData);
+  if(invalidatePersistentCache && sections.hadError){
+    toast('A atualização do catálogo ficou incompleta. Confira a conexão e tente novamente.');
+  }
   if(freshSignature === lastPaintedHomeSignature && !sections.hadError){
     return;
   }
@@ -9382,6 +11953,10 @@ document.addEventListener('keydown', e=>{
 
 $('#btn-refresh').onclick = async ()=>{
   closeMenu();
+  // Atualiza também as fichas remotas (inclui coverId) para que a capa escolhida
+  // no editor apareça nas telas já abertas e nas próximas listas do catálogo.
+  customDetailMetadataPromise=null;
+  void loadCustomDetailMetadata();
   coverMemoryCache.clear();
   coverFailUntil.clear();
   // IMPORTANTE: não apagamos mais o cache do localStorage (ARANHA/XMEN/
@@ -9421,7 +11996,11 @@ $('#btn-refresh').onclick = async ()=>{
   state.folderCache = {};
   const current = state.path[state.path.length-1];
   if(current) renderLibrary(current.id, true);
-  if(current && current.id === CONFIG.rootFolderId) renderHomeSections(true);
+  // Atualiza o índice completo do catálogo mesmo se a pessoa estiver dentro
+  // de uma coleção. O cache antigo é removido depois de lido para manter a
+  // Home visível durante a busca; só dados do catálogo são invalidados.
+  toast('Atualizando o catálogo do Planeta HQ...');
+  renderHomeSections(true, null, {invalidatePersistentCache:true});
 };
 $('#btn-instagram').onclick = ()=>{
   closeMenu();
