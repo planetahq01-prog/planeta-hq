@@ -1302,7 +1302,7 @@ html,body,button,input,select,textarea{font-family:'WhizBang','Inter',sans-serif
     <div class="welcome-card">
       <div class="welcome-badge">🚀</div>
       <div class="wordmark" aria-label="Planeta HQ"><span class="brand-name">PLANETA</span><span class="brand-hq"><span>HQ</span></span></div>
-      <p>Bem vindo ao Planeta HQ!<br><br>Aqui você vai poder desfrutar dos quadrinhos e mangás mais amados da cultura pop, reviver a nostalgia das revistas de vídeo-game e muito mais! Tenha uma boa leitura ⭐</p>
+      <p>Bem vindo ao Planeta HQ! Aqui você vai poder desfrutar de milhares de Histórias em Quadrinhos! Dos clássicos aos lançamentos, com direito a atualizações diárias 🚀</p>
       <button class="btn-primary" id="btn-welcome-close">Fechar</button>
     </div>
   </div>
@@ -9198,10 +9198,10 @@ async function openReader(fileMeta, forceLocal, parentId){
         // arquivo inteiro antes — e sem callback/ticker de progresso, já que
         // a tela não mostra mais porcentagem (evita trabalho extra na UI
         // enquanto o PDF carrega).
-        status.innerHTML = '<div class="spinner"></div><div>Carregando PDF...</div>';
+        status.innerHTML = '<div class="spinner"></div><div>Carregando...</div>';
         doc = await openComicPDF(driveMediaUrl(fileMeta.id), null, Number(fileMeta.size)||0, fileMeta.id, myAbort.signal);
       } else {
-        status.innerHTML = '<div class="spinner"></div><div>Baixando... <span id="reader-status-pct">0%</span></div>';
+        status.innerHTML = '<div class="spinner"></div><div>Carregando... <span id="reader-status-pct">0%</span></div>';
         const blob = await driveFetchBlob(fileMeta.id, p=>{ setPct(Math.round(p*100)); }, Number(fileMeta.size)||0, myAbort.signal);
         doc = await openComicFromBlob(fileMeta, blob);
       }
