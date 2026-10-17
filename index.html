@@ -2341,8 +2341,9 @@ async function driveListFolder(folderId){
   const fetchedAt=folderCacheFetchedAt[folderId] || 0;
   if(cached && Date.now()-fetchedAt < DRIVE_FOLDER_CACHE_TTL) return cached;
   if(folderCacheInFlight[folderId]) return folderCacheInFlight[folderId];
-  const promise = driveListFolderUncached(folderId).finally(()=>{
-    delete folderCacheInFlight[folderId];
+  let promise;
+  promise = withStallTimeout(driveListFolderUncached(folderId),30000,'A lista desta coleção excedeu o tempo limite. Tente novamente.').finally(()=>{
+    if(folderCacheInFlight[folderId]===promise) delete folderCacheInFlight[folderId];
   });
   folderCacheInFlight[folderId] = promise;
   return promise;
@@ -2370,10 +2371,19 @@ async function driveListFolderUncached(folderId){
   try{
     let files = [];
     let pageToken = null;
+    const seenPageTokens = new Set();
+    let pageCount = 0;
     do{
+      if(++pageCount > 100) throw new Error('A listagem da coleção excedeu o limite de páginas. Atualize a biblioteca e tente novamente.');
+      if(pageToken){
+        if(seenPageTokens.has(pageToken)) throw new Error('O Worker repetiu o token de paginação da coleção. Toque para tentar novamente.');
+        seenPageTokens.add(pageToken);
+      }
       const data = await driveFetchJson(()=>driveListUrl(`'${folderId}' in parents and trashed = false`, pageToken));
       files = files.concat(resolveShortcuts(data.files));
-      pageToken = data.nextPageToken || null;
+      const nextPageToken = data.nextPageToken || null;
+      if(nextPageToken && seenPageTokens.has(nextPageToken)) throw new Error('O Worker repetiu o token de paginação da coleção. Toque para tentar novamente.');
+      pageToken = nextPageToken;
     } while(pageToken);
 
     const rawFolders = files
@@ -7040,7 +7050,7 @@ function renderCollectionDetails(){
   }
   if(isFolder && !detail.listing && !detail.loading){
     detail.loading=true;
-    driveListFolder(item.id).then(listing=>{
+    withStallTimeout(driveListFolder(item.id),20000,'A lista de capítulos demorou demais para responder. Toque para tentar novamente.').then(listing=>{
       detail.listing=listing; detail.loading=false;
       if(activeCollectionDetail===detail){
         const countNode=document.querySelector('#collection-details-screen [data-detail-count]');
@@ -7069,7 +7079,7 @@ async function loadCollectionDetailChapters(){
   if(detail.listing){ renderCollectionChapterRows(detail); return; }
   if(detail.loading) return;
   detail.loading=true; detail.error=null; status.textContent='Carregando capítulos…';
-  try{ detail.listing=await driveListFolder(detail.item.id); detail.error=null; }
+  try{ detail.listing=await withStallTimeout(driveListFolder(detail.item.id),20000,'A lista de capítulos demorou demais para responder. Toque para tentar novamente.'); detail.error=null; }
   catch(e){ detail.error=e; }
   detail.loading=false;
   if(activeCollectionDetail===detail && collectionDetailTab==='chapters') renderCollectionChapterRows(detail);
