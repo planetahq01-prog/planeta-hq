@@ -1291,34 +1291,6 @@ html,body,button,input,select,textarea{font-family:'WhizBang','Inter',sans-serif
 .detail-tag-note{margin-top:8px;color:var(--text-muted);font-size:10px;line-height:1.45;}
 @media(min-width:700px){.detail-main{padding-top:32px}.detail-cover{width:150px}.detail-name{font-size:31px}.detail-synopsis{font-size:17px}}
 
-#batman-reading-guide{position:fixed;inset:0;z-index:48;overflow:auto;background:#06080d;color:var(--paper);padding-bottom:max(28px,env(safe-area-inset-bottom));}
-.batman-guide-content{width:min(760px,100%);margin:0 auto;padding:20px 16px 36px;}
-.batman-guide-intro{padding:18px;border:1px solid rgba(255,194,71,.2);border-radius:17px;background:radial-gradient(circle at 100% 0,rgba(255,194,71,.13),transparent 50%),linear-gradient(145deg,#111925,#0b0e14);}
-.batman-guide-kicker{color:var(--accent);font-size:10px;font-weight:900;letter-spacing:.12em;text-transform:uppercase;}
-.batman-guide-intro h1{margin:8px 0;font-size:clamp(23px,6vw,30px);line-height:1.12;letter-spacing:-.04em;}
-.batman-guide-intro p{margin:0;color:#c5cbd4;font-size:13px;line-height:1.55;}
-.batman-guide-group{margin:24px 0 0;}
-.batman-guide-group h2{margin:0 0 5px;font-size:17px;letter-spacing:-.02em;}
-.batman-guide-group-intro{margin:0 0 11px;color:var(--text-muted);font-size:12px;line-height:1.5;}
-.batman-guide-list{display:grid;gap:8px;}
-.batman-guide-step{display:flex;align-items:center;gap:12px;width:100%;min-height:68px;padding:11px 12px;border:1px solid rgba(255,255,255,.08);border-radius:13px;background:#10141c;color:var(--paper);text-align:left;}
-.batman-guide-step:active{border-color:rgba(255,194,71,.45);background:#151b25;}
-.batman-guide-step:disabled{opacity:.48;}
-.batman-guide-number{flex:0 0 32px;width:32px;height:32px;display:grid;place-items:center;border-radius:50%;background:rgba(255,194,71,.13);color:var(--accent);font-size:12px;font-weight:900;}
-.batman-guide-step-copy{display:flex;flex:1;min-width:0;flex-direction:column;gap:4px;}
-.batman-guide-step-copy strong{font-size:13px;line-height:1.3;}
-.batman-guide-step-copy span{color:var(--text-muted);font-size:11px;line-height:1.4;}
-.batman-guide-step-arrow{color:var(--accent);font-size:20px;}
-.batman-guide-source{margin:22px 2px 0;color:var(--text-muted);font-size:10px;line-height:1.5;}
-.batman-guide-source a{color:var(--accent);text-decoration:underline;text-underline-offset:2px;}
-.batman-guide-callout{display:flex;align-items:center;gap:11px;width:calc(100% - 28px);margin:0 14px 12px;padding:11px 13px;border:1px solid rgba(255,194,71,.22);border-radius:13px;background:linear-gradient(100deg,rgba(255,194,71,.1),rgba(255,194,71,.035));color:var(--paper);text-align:left;}
-.batman-guide-callout:active{background:rgba(255,194,71,.15);}
-.batman-guide-callout-mark{flex:0 0 34px;width:34px;height:34px;display:grid;place-items:center;border-radius:10px;background:rgba(255,194,71,.15);color:var(--accent);font-size:18px;font-weight:900;}
-.batman-guide-callout-copy{display:flex;flex:1;min-width:0;flex-direction:column;gap:3px;}
-.batman-guide-callout-copy strong{font-size:12px;}
-.batman-guide-callout-copy small{color:var(--text-muted);font-size:10px;line-height:1.35;}
-.batman-guide-callout-arrow{color:var(--accent);font-size:21px;}
-
 </style>
 </head><body>
   <div id="access-gate" class="hidden" style="position:fixed;inset:0;z-index:9999;background:#0a0e1a;display:flex;align-items:center;justify-content:center;padding:24px;">
@@ -2014,8 +1986,7 @@ function navCurrentDepth(){
   const searchOpen = !$('#view-search').classList.contains('hidden');
   const searchDepth = searchOpen ? 1 + (searchQueryNavActive ? 1 : 0) + searchFolderStack.length : 0;
   const detailDepth = activeCollectionDetail ? collectionDetailStack.length + 1 : 0;
-  const readingGuideDepth = document.getElementById('batman-reading-guide') ? 1 : 0;
-  return (readerOpen ? 1 : 0) + tabDepth + folderDepth + offlineFolderDepth + searchDepth + detailDepth + readingGuideDepth;
+  return (readerOpen ? 1 : 0) + tabDepth + folderDepth + offlineFolderDepth + searchDepth + detailDepth;
 }
 // Chamar depois de uma ação de UI que faz o usuário "voltar" (clique na
 // seta de voltar, no breadcrumb, no X do leitor, na aba biblioteca) —
@@ -2032,9 +2003,6 @@ window.addEventListener('popstate', ()=>{
   // O leitor é a camada mais profunda, mesmo quando foi aberto sobre a busca.
   if(!$('#view-reader').classList.contains('hidden')){
     closeReader();
-    consumed = true;
-  } else if(document.getElementById('batman-reading-guide')){
-    closeBatmanReadingGuide(false);
     consumed = true;
   } else if(activeCollectionDetail){
     if(collectionDetailStack.length){ activeCollectionDetail = collectionDetailStack.pop(); renderCollectionDetails(); }
@@ -7076,68 +7044,6 @@ function closeCollectionDetails(syncNav=true){
   }
   if(syncNav) navSyncAfterBack();
 }
-const BATMAN_READING_GUIDE_GROUPS = [
-  {title:'Ordem essencial para começar',intro:'A sequência cronológica curta recomendada pela DC para conhecer os primeiros anos do Batman.',ordered:true,items:[
-    {id:'1Z7dUt-bZo-eYSexXvCSTpnmV5p3ShMxg',title:'Batman: Ano Um',description:'A origem moderna de Bruce Wayne em Gotham e o começo da parceria com Jim Gordon.'},
-    {id:'1m4Sce4hkqymsOYTbsD4fjuN3Zo2NumEz',title:'Batman: O Longo Dia das Bruxas',description:'Um mistério criminal nos primeiros anos do herói; funciona como sequência espiritual de Ano Um.'},
-    {id:'1FAFA_ch_h1OD3iF5FZAWGJMnqHuL2uAI',title:'Batman: Vitória Sombria',description:'Continuação direta de O Longo Dia das Bruxas e novo capítulo na origem de Dick Grayson.'}
-  ]},
-  {title:'Histórias para ler sem uma ordem fixa',intro:'Depois da rota inicial, escolha uma história pelo tema. Elas não são etapas obrigatórias da trilogia.',ordered:false,items:[
-    {id:'1hpsDBcnv3PeHDDkLhPahNarSqUhdFkzI',title:'Batman: A Piada Mortal',description:'Uma história marcante centrada no Coringa, em Jim Gordon e nos limites entre sanidade e violência.'},
-    {id:'1NgKNYHKzoTOyq0MyLFMQsm6UVSdRu_pp',title:'Batman: Silêncio',description:'Um mistério moderno em que um inimigo desconhecido parece antecipar cada movimento de Bruce Wayne.'},
-    {id:'1L39NUnofFIT-uAvjLsOM3tDtft2_R-iQ',title:'Batman: Asilo Arkham',description:'Uma graphic novel de terror psicológico ambientada durante uma rebelião no asilo.'}
-  ]},
-  {title:'Outras linhas e universos',intro:'Estas histórias oferecem versões alternativas ou paralelas do Batman; não precisam ser encaixadas na rota essencial.',ordered:false,items:[
-    {id:'1X43QtrnU26U6V9VSyttv1mJ5dOBWnejy',title:'Batman: Ano Dois',description:'Uma história clássica dos primeiros anos, tratada aqui como caminho paralelo à rota de O Longo Dia das Bruxas.'},
-    {id:'128amRwJkGlhseZzOvuIWdlh4Qk77jpD6',title:'O Cavaleiro das Trevas (1986)',description:'Uma visão futura e distópica do herói, fora da continuidade principal.'},
-    {id:'1s6twJNNZ_hOQWg-MgvfUanPLFhRIftco',title:'Gotham 1889',description:'Uma releitura vitoriana de Batman em uma Gotham do século XIX.'},
-    {id:'18MqdKOxWUkDcuEbmrFynrI21RizHozzG',title:'Batman: Ano 100',description:'Uma história de ficção científica situada cem anos após a estreia do símbolo do Batman.'}
-  ]},
-  {title:'Uma coleção longa em volumes',intro:'A Saga do Batman reúne volumes numerados. Para acompanhar essa coleção, siga a numeração crescente; ela não é pré-requisito para a rota essencial.',ordered:false,items:[
-    {id:'1B_LfEPFyhcihLhL7MoM1t5Fiv1QWu79a',title:'A Saga do Batman — volumes 1 a 36',description:'Abra a coleção e escolha os volumes pela numeração.'}
-  ]}
-];
-function findBatmanGuideItem(id){
-  const data=homeSectionDataContext||{};
-  for(const list of [data.batmanFolders,data.allFolders,data.allComics]){
-    if(!Array.isArray(list)) continue;
-    const found=list.find(item=>String(item?.id)===String(id));
-    if(found) return found;
-  }
-  return null;
-}
-function openBatmanGuideItem(id){
-  const item=findBatmanGuideItem(id);
-  if(!item){ toast('Esta leitura não está disponível no catálogo carregado. Atualize a biblioteca e tente novamente.'); return; }
-  const guide=document.getElementById('batman-reading-guide');
-  if(guide){
-    guide.remove();
-    try{ history.replaceState({appNav:true},''); }catch(e){}
-    navPushedCount=navCurrentDepth();
-  }
-  openCollectionDetails(item,BATMAN_COLLECTION_FOLDER_ID);
-}
-function closeBatmanReadingGuide(syncNav=true){
-  const screen=document.getElementById('batman-reading-guide');
-  if(screen) screen.remove();
-  if(syncNav) navSyncAfterBack();
-}
-function openBatmanReadingGuide(){
-  if(document.getElementById('batman-reading-guide')) return;
-  const screen=el('section','');
-  screen.id='batman-reading-guide';
-  screen.setAttribute('aria-label','Guia de leitura da Coleção Batman');
-  const renderItems=(items,ordered)=>items.map((item,index)=>`<button class="batman-guide-step" type="button" data-batman-guide-item="${item.id}"><span class="batman-guide-number">${ordered?index+1:'›'}</span><span class="batman-guide-step-copy"><strong>${escapeHtml(item.title)}</strong><span>${escapeHtml(item.description)}</span></span><span class="batman-guide-step-arrow">›</span></button>`).join('');
-  screen.innerHTML=`<header class="detail-screen-header"><button class="detail-screen-back" type="button" aria-label="Voltar">‹</button><div class="detail-screen-title">Guia de leitura</div></header><main class="batman-guide-content"><section class="batman-guide-intro"><div class="batman-guide-kicker">Coleção Batman</div><h1>Por onde começar</h1><p>Você não precisa ler tudo em ordem. Comece pela rota essencial e depois escolha histórias independentes ou universos alternativos conforme seu interesse.</p></section>${BATMAN_READING_GUIDE_GROUPS.map(group=>`<section class="batman-guide-group"><h2>${escapeHtml(group.title)}</h2><p class="batman-guide-group-intro">${escapeHtml(group.intro)}</p><div class="batman-guide-list">${renderItems(group.items,group.ordered)}</div></section>`).join('')}<p class="batman-guide-source">A ordem essencial segue o <a href="https://www.dc.com/blog/2026-01-21/how-to-start-reading-batman-comics" target="_blank" rel="noopener noreferrer">guia oficial de leitura da DC</a>. As descrições dos itens correspondem às fichas da coleção no app.</p></main>`;
-  screen.querySelector('.detail-screen-back').onclick=()=>closeBatmanReadingGuide(true);
-  screen.querySelectorAll('[data-batman-guide-item]').forEach(button=>{
-    const item=findBatmanGuideItem(button.dataset.batmanGuideItem);
-    if(!item){ button.disabled=true; button.title='Indisponível no catálogo carregado'; return; }
-    button.onclick=()=>openBatmanGuideItem(button.dataset.batmanGuideItem);
-  });
-  document.body.appendChild(screen);
-  navPushLevel();
-}
 function renderCollectionDetails(){
   const detail=activeCollectionDetail;
   if(!detail) return;
@@ -11623,13 +11529,6 @@ function paintHomeSectionsNow(wrap, data){
   if(secBatman){
     built['batman'] = secBatman;
     wireHomeLogoFallback(secBatman, 'batman');
-    const guideButton=el('button','batman-guide-callout');
-    guideButton.type='button';
-    guideButton.setAttribute('aria-label','Abrir guia de leitura da Coleção Batman');
-    guideButton.innerHTML='<span class="batman-guide-callout-mark">↗</span><span class="batman-guide-callout-copy"><strong>Guia de leitura do Batman</strong><small>Uma ordem recomendada e caminhos para explorar a coleção</small></span><span class="batman-guide-callout-arrow">›</span>';
-    guideButton.onclick=()=>openBatmanReadingGuide();
-    const carousel=secBatman.querySelector('.carousel');
-    if(carousel) carousel.before(guideButton);
   }
 
   // "Coleção [logo do Homem de Ferro]": coleções de dentro da coleção
