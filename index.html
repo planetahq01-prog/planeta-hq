@@ -394,11 +394,45 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
   touch-action:pan-y;
 }
 .zoom-wrap{
-  width:100%;height:100%;overflow:hidden;
+  width:100%;height:100%;overflow:hidden;position:relative;
   display:flex;align-items:center;justify-content:center;
   touch-action:pan-x pan-y;
 }
 .zoom-wrap img{max-width:100%;max-height:100%;object-fit:contain;user-select:none;-webkit-user-drag:none;display:block;}
+.page-turn-sheet{
+  position:absolute;z-index:2;pointer-events:none;transform-style:preserve-3d;
+  backface-visibility:hidden;will-change:transform;box-shadow:0 0 18px rgba(0,0,0,.35);
+}
+.page-turn-sheet.forward{transform-origin:left center;}
+.page-turn-sheet.backward{transform-origin:right center;}
+.page-turn-sheet.turning.forward{animation:planetPageFlipForward .44s cubic-bezier(.22,.68,.16,1) both;}
+.page-turn-sheet.turning.backward{animation:planetPageFlipBackward .44s cubic-bezier(.22,.68,.16,1) both;}
+.page-turn-front,.page-turn-back{position:absolute;inset:0;overflow:hidden;backface-visibility:hidden;}
+.page-turn-image{display:block;width:100%;height:100%;object-fit:fill;user-select:none;-webkit-user-drag:none;}
+.page-turn-back{
+  transform:rotateY(180deg);
+  background:linear-gradient(90deg,#d8d4cb 0%,#f4f1e8 18%,#ece9e0 82%,#c9c5bd 100%);
+}
+.page-turn-sheet::after{
+  content:"";position:absolute;inset:0;pointer-events:none;
+  background:linear-gradient(90deg,rgba(0,0,0,.3),transparent 55%,rgba(0,0,0,.08));
+  opacity:0;
+}
+.page-turn-sheet.turning::after{animation:planetPageShade .44s ease-in-out both;}
+@keyframes planetPageFlipForward{
+  0%{transform:perspective(1200px) rotateY(0deg);}
+  48%{transform:perspective(1200px) rotateY(-96deg);}
+  100%{transform:perspective(1200px) rotateY(-180deg);}
+}
+@keyframes planetPageFlipBackward{
+  0%{transform:perspective(1200px) rotateY(0deg);}
+  48%{transform:perspective(1200px) rotateY(96deg);}
+  100%{transform:perspective(1200px) rotateY(180deg);}
+}
+@keyframes planetPageShade{
+  0%,100%{opacity:0;}
+  42%,58%{opacity:.42;}
+}
 /* Modo "Página Dupla" — pensado pra tela de computador: as duas páginas
    ficam coladas uma na outra, cada uma 100% visível (nunca cortada), mesmo
    que sobre espaço vazio em volta. Por isso cada img usa object-fit:contain
@@ -9314,13 +9348,70 @@ async function rebuildReaderView(){
   }
 }
 
-async function showPage(i){
+let readerPageTurnToken = 0;
+async function changeReaderPageImages(container, entries, direction){
+  const token = ++readerPageTurnToken;
+  document.querySelectorAll('.page-turn-sheet').forEach(node=>node.remove());
+  const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const zoomed = state.reader.mode !== 'double' && getPinchState($('#reader-img')).scale > 1.01;
+  const canTurn = direction && !reduced && !zoomed && container && container.isConnected;
+  const layers = [];
+  if(canTurn){
+    const containerRect = container.getBoundingClientRect();
+    for(const {image} of entries){
+      const oldSrc = image.currentSrc || image.getAttribute('src');
+      const rect = image.getBoundingClientRect();
+      if(!oldSrc || !rect.width || !rect.height || image.classList.contains('hidden')) continue;
+      const sheet = document.createElement('div');
+      sheet.className = `page-turn-sheet ${direction > 0 ? 'forward' : 'backward'}`;
+      sheet.style.left = `${rect.left-containerRect.left}px`;
+      sheet.style.top = `${rect.top-containerRect.top}px`;
+      sheet.style.width = `${rect.width}px`;
+      sheet.style.height = `${rect.height}px`;
+      const front = document.createElement('div');
+      front.className = 'page-turn-front';
+      const clone = document.createElement('img');
+      clone.className = 'page-turn-image';
+      clone.src = oldSrc;
+      front.appendChild(clone);
+      const back = document.createElement('div');
+      back.className = 'page-turn-back';
+      sheet.append(front, back);
+      container.appendChild(sheet);
+      layers.push(sheet);
+    }
+  }
+  for(const {image,src} of entries) image.src = src || '';
+  if(!layers.length) return;
+  await Promise.race([
+    Promise.all(entries.map(({image})=>typeof image.decode==='function' ? image.decode().catch(()=>{}) : Promise.resolve())),
+    new Promise(resolve=>setTimeout(resolve,350))
+  ]);
+  if(token !== readerPageTurnToken) return;
+  requestAnimationFrame(()=>{
+    if(token === readerPageTurnToken) layers.forEach(layer=>layer.classList.add('turning'));
+  });
+  setTimeout(()=>{
+    if(token === readerPageTurnToken) layers.forEach(layer=>layer.remove());
+  },520);
+}
+
+function readerTurnDirection(fromIndex, toIndex){
+  const advancing = toIndex > fromIndex;
+  const leftToRight = state.reader.direction !== 'rtl';
+  return advancing === leftToRight ? 1 : -1;
+}
+
+async function showPage(i, isNav){
   const doc = state.reader.doc;
   if(!doc || i<0 || i>=doc.pageCount) return;
+  const previousIndex = state.reader.pageIndex;
+  const requestToken = ++readerPageTurnToken;
   state.reader.pageIndex=i;
   syncReaderBookmarkButton();
   const url=await doc.getPage(i);
-  $('#reader-img').src = url;
+  if(requestToken !== readerPageTurnToken || doc !== state.reader.doc) return;
+  await changeReaderPageImages($('#zoom-wrap'), [{image:$('#reader-img'),src:url}], isNav && i!==previousIndex ? readerTurnDirection(previousIndex,i) : 0);
   $('#page-count').textContent = `${i+1} / ${doc.pageCount}`;
   $('#page-slider').value = i+1;
   saveProgress(state.reader.fileMeta, i, doc.pageCount);
@@ -9334,13 +9425,15 @@ async function showPage(i){
 // Modo "Página Dupla": sempre mostra um par colado (0+1, 2+3, ...). Se a
 // HQ tiver número ímpar de páginas, a última aparece sozinha (não dá pra
 // inventar uma página em branco pra completar o par). A troca de par é
-// sempre direta (sem efeito de "página virando" em 3D).
+// recebe o mesmo efeito de folha virando do modo de página única.
 async function showDoublePage(i, isNav){
   const doc = state.reader.doc;
   if(!doc) return;
+  const previousIndex = state.reader.pageIndex;
   i = Math.max(0, Math.min(i, doc.pageCount-1));
   if(i % 2 === 1) i -= 1; // normaliza pro início do par
   if(isNav && i === state.reader.pageIndex) return; // já está na ponta (não tem mais o que virar)
+  const requestToken = ++readerPageTurnToken;
   state.reader.pageIndex=i;
   syncReaderBookmarkButton();
   const hasSecond=i+1<doc.pageCount;
@@ -9348,9 +9441,13 @@ async function showDoublePage(i, isNav){
 
   imgA.classList.toggle('solo', !hasSecond);
   imgB.classList.toggle('hidden', !hasSecond);
-  imgA.src = await doc.getPage(i);
-  if(hasSecond) imgB.src = await doc.getPage(i+1);
+  const pageA = await doc.getPage(i);
+  const pageB = hasSecond ? await doc.getPage(i+1) : '';
+  if(requestToken !== readerPageTurnToken || doc !== state.reader.doc) return;
+  const pairs = [{image:imgA,src:pageA}];
+  if(hasSecond) pairs.push({image:imgB,src:pageB});
   else imgB.src = '';
+  await changeReaderPageImages($('#reader-stage'), pairs, isNav && i!==previousIndex ? readerTurnDirection(previousIndex,i) : 0);
 
   $('#page-count').textContent = hasSecond ? `${i+1}-${i+2} / ${doc.pageCount}` : `${i+1} / ${doc.pageCount}`;
   saveProgress(state.reader.fileMeta, i, doc.pageCount);
@@ -9360,11 +9457,11 @@ async function showDoublePage(i, isNav){
 }
 function nextPage(){
   if(state.reader.mode==='double') showDoublePage(state.reader.pageIndex+2, true);
-  else showPage(state.reader.pageIndex+1);
+  else showPage(state.reader.pageIndex+1, true);
 }
 function prevPage(){
   if(state.reader.mode==='double') showDoublePage(state.reader.pageIndex-2, true);
-  else showPage(state.reader.pageIndex-1);
+  else showPage(state.reader.pageIndex-1, true);
 }
 
 function applyFitAndZoom(){
@@ -9704,6 +9801,8 @@ function closeReader(){
   // deixar rodando sozinho em segundo plano gastando dados à toa.
   if(readerAbortController) readerAbortController.abort();
   readerLoadToken++;
+  readerPageTurnToken++;
+  document.querySelectorAll('.page-turn-sheet').forEach(node=>node.remove());
   if(state.reader.doc && state.reader.fileMeta){
     captureScrollReaderProgress();
     saveProgress(state.reader.fileMeta, state.reader.pageIndex, state.reader.doc.pageCount);
