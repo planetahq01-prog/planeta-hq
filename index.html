@@ -9319,65 +9319,98 @@ async function rebuildReaderView(){
 }
 
 let readerPageRequestToken = 0;
+let readerPageRenderBusy = false;
+let readerPageRenderPending = null;
+let readerPagePrefetchTimer = 0;
 function changeReaderPageImages(entries){
-  // Invalida pedidos anteriores e mostra a página de destino imediatamente.
-  readerPageRequestToken++;
   for(const {image,src} of entries) image.src = src || '';
 }
-
-async function showPage(i, isNav){
+function scheduleReaderPageRender(render){
+  const token=++readerPageRequestToken;
+  return new Promise(resolve=>{
+    if(readerPageRenderPending) readerPageRenderPending.resolve(false);
+    readerPageRenderPending={token,render,resolve};
+    void drainReaderPageRenderQueue();
+  });
+}
+async function drainReaderPageRenderQueue(){
+  if(readerPageRenderBusy) return;
+  readerPageRenderBusy=true;
+  try{
+    while(readerPageRenderPending){
+      const request=readerPageRenderPending;
+      readerPageRenderPending=null;
+      try{ request.resolve(await request.render(request.token)); }
+      catch(error){
+        if(request.token===readerPageRequestToken) toast('Não foi possível carregar esta página. Tente novamente.');
+        request.resolve(false);
+      }
+    }
+  }finally{
+    readerPageRenderBusy=false;
+    if(readerPageRenderPending) void drainReaderPageRenderQueue();
+  }
+}
+function scheduleReaderPagePrefetch(doc,index,isDouble,token){
+  clearTimeout(readerPagePrefetchTimer);
+  readerPagePrefetchTimer=setTimeout(()=>{
+    if(token!==readerPageRequestToken||doc!==state.reader.doc||readerPageRenderPending) return;
+    if(isDouble){
+      if(index+2<doc.pageCount) doc.getPage(index+2).catch(()=>{});
+      if(index+3<doc.pageCount) doc.getPage(index+3).catch(()=>{});
+    }else{
+      if(index+1<doc.pageCount) doc.getPage(index+1).catch(()=>{});
+      if(index-1>=0) doc.getPage(index-1).catch(()=>{});
+    }
+  },180);
+}
+function showPage(i, isNav){
   const doc = state.reader.doc;
-  if(!doc || i<0 || i>=doc.pageCount) return;
-  const previousIndex = state.reader.pageIndex;
+  if(!doc || i<0 || i>=doc.pageCount) return Promise.resolve(false);
   if(isNav) resetPinchZoom($('#reader-img'));
-  const requestToken = ++readerPageRequestToken;
   state.reader.pageIndex=i;
   syncReaderBookmarkButton();
-  const url=await doc.getPage(i);
-  if(requestToken !== readerPageRequestToken || doc !== state.reader.doc) return;
-  changeReaderPageImages([{image:$('#reader-img'),src:url}]);
-  $('#page-count').textContent = `${i+1} / ${doc.pageCount}`;
-  $('#page-slider').value = i+1;
-  saveProgress(state.reader.fileMeta, i, doc.pageCount);
-  // Prepara a próxima página (e mantém a anterior "quente") em segundo
-  // plano, sem bloquear a página atual — assim, na hora de virar de
-  // verdade, a imagem já está pronta no cache em vez de começar a
-  // extrair/renderizar só quando a pessoa clica em "próxima".
-  if(i+1 < doc.pageCount) doc.getPage(i+1).catch(()=>{});
-  if(i-1 >= 0) doc.getPage(i-1).catch(()=>{});
+  clearTimeout(readerPagePrefetchTimer);
+  return scheduleReaderPageRender(async token=>{
+    const url=await doc.getPage(i);
+    if(token!==readerPageRequestToken||doc!==state.reader.doc) return false;
+    changeReaderPageImages([{image:$('#reader-img'),src:url}]);
+    $('#page-count').textContent = `${i+1} / ${doc.pageCount}`;
+    $('#page-slider').value = i+1;
+    saveProgress(state.reader.fileMeta, i, doc.pageCount);
+    scheduleReaderPagePrefetch(doc,i,false,token);
+    return true;
+  });
 }
 // Modo "Página Dupla": sempre mostra um par colado (0+1, 2+3, ...). Se a
 // HQ tiver número ímpar de páginas, a última aparece sozinha (não dá pra
-// inventar uma página em branco pra completar o par). A troca de par também
-// recebe uma transição breve, sem virar cada página separadamente.
-async function showDoublePage(i, isNav){
+// inventar uma página em branco pra completar o par). Cada toque avança um par.
+function showDoublePage(i, isNav){
   const doc = state.reader.doc;
-  if(!doc) return;
+  if(!doc) return Promise.resolve(false);
   const previousIndex = state.reader.pageIndex;
   i = Math.max(0, Math.min(i, doc.pageCount-1));
   if(i % 2 === 1) i -= 1; // normaliza pro início do par
-  if(isNav && i === state.reader.pageIndex) return; // já está na ponta (não tem mais o que virar)
-  const requestToken = ++readerPageRequestToken;
+  if(isNav && i === state.reader.pageIndex) return Promise.resolve(false); // já está na ponta
   state.reader.pageIndex=i;
   syncReaderBookmarkButton();
-  const hasSecond=i+1<doc.pageCount;
-  const imgA = $('#reader-img-a'), imgB = $('#reader-img-b');
-
-  imgA.classList.toggle('solo', !hasSecond);
-  imgB.classList.toggle('hidden', !hasSecond);
-  const pageA = await doc.getPage(i);
-  const pageB = hasSecond ? await doc.getPage(i+1) : '';
-  if(requestToken !== readerPageRequestToken || doc !== state.reader.doc) return;
-  const pairs = [{image:imgA,src:pageA}];
-  if(hasSecond) pairs.push({image:imgB,src:pageB});
-  else imgB.src = '';
-  changeReaderPageImages(pairs);
-
-  $('#page-count').textContent = hasSecond ? `${i+1}-${i+2} / ${doc.pageCount}` : `${i+1} / ${doc.pageCount}`;
-  saveProgress(state.reader.fileMeta, i, doc.pageCount);
-  // Adianta o próximo par em segundo plano, igual já era feito no modo de página única.
-  if(i+2 < doc.pageCount) doc.getPage(i+2).catch(()=>{});
-  if(i+3 < doc.pageCount) doc.getPage(i+3).catch(()=>{});
+  clearTimeout(readerPagePrefetchTimer);
+  return scheduleReaderPageRender(async token=>{
+    const hasSecond=i+1<doc.pageCount;
+    const imgA=$('#reader-img-a'), imgB=$('#reader-img-b');
+    const [pageA,pageB]=await Promise.all([doc.getPage(i),hasSecond?doc.getPage(i+1):Promise.resolve('')]);
+    if(token!==readerPageRequestToken||doc!==state.reader.doc) return false;
+    imgA.classList.toggle('solo',!hasSecond);
+    imgB.classList.toggle('hidden',!hasSecond);
+    const pairs=[{image:imgA,src:pageA}];
+    if(hasSecond) pairs.push({image:imgB,src:pageB});
+    else imgB.src='';
+    changeReaderPageImages(pairs);
+    $('#page-count').textContent=hasSecond?`${i+1}-${i+2} / ${doc.pageCount}`:`${i+1} / ${doc.pageCount}`;
+    saveProgress(state.reader.fileMeta,i,doc.pageCount);
+    scheduleReaderPagePrefetch(doc,i,true,token);
+    return true;
+  });
 }
 function nextPage(){
   if(state.reader.mode==='double') showDoublePage(state.reader.pageIndex+2, true);
@@ -9723,6 +9756,8 @@ function closeReader(){
   if(readerAbortController) readerAbortController.abort();
   readerLoadToken++;
   readerPageRequestToken++;
+  clearTimeout(readerPagePrefetchTimer);
+  if(readerPageRenderPending){ readerPageRenderPending.resolve(false); readerPageRenderPending=null; }
   if(state.reader.doc && state.reader.fileMeta){
     captureScrollReaderProgress();
     saveProgress(state.reader.fileMeta, state.reader.pageIndex, state.reader.doc.pageCount);
@@ -9785,7 +9820,6 @@ $('#btn-download-reader').onclick = async ()=>{
 
 function turnLeft(){state.reader.direction==='rtl'?nextPage():prevPage();}
 function turnRight(){state.reader.direction==='rtl'?prevPage():nextPage();}
-let lastReaderSwipeAt=0;
 function bindReaderNavButton(button, action){
   let pointerHandledAt=0;
   button.addEventListener('pointerup',e=>{
@@ -9801,7 +9835,6 @@ function bindReaderNavButton(button, action){
     e.preventDefault();e.stopPropagation();
     const now=performance.now();
     if(e.detail!==0&&pointerHandledAt&&now-pointerHandledAt<200)return;
-    if(e.detail!==0&&lastReaderSwipeAt&&now-lastReaderSwipeAt<180)return;
     action();
   });
 }
@@ -9854,7 +9887,6 @@ document.addEventListener('keydown', e=>{
     const currentScale=state.reader.mode==='double'?1:getPinchState($('#reader-img')).scale;
     const isZoomGesture=hadMultiTouch||startScale>1.01||currentScale>1.01;
     if(!isZoomGesture&&Math.abs(dx)>55&&Math.abs(dx)>Math.abs(dy)*1.15){
-      lastReaderSwipeAt=performance.now();
       // Direção física explícita: esquerda avança; direita volta,
       // independentemente da configuração de leitura da coleção.
       if(dx<0)nextPage();else prevPage();
@@ -9880,12 +9912,6 @@ document.addEventListener('keydown', e=>{
   });
   root.addEventListener('touchmove', e=>{
     if(e.touches.length > 1) e.preventDefault();
-  }, {passive:false});
-  let lastTouchEnd = 0;
-  root.addEventListener('touchend', e=>{
-    const now = Date.now();
-    if(now - lastTouchEnd <= 300) e.preventDefault();
-    lastTouchEnd = now;
   }, {passive:false});
 })();
 
