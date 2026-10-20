@@ -401,15 +401,15 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 .zoom-wrap img{max-width:100%;max-height:100%;object-fit:contain;user-select:none;-webkit-user-drag:none;display:block;}
 .page-turn-sheet{
   position:absolute;z-index:2;pointer-events:none;transform-style:preserve-3d;
-  backface-visibility:hidden;will-change:transform;box-shadow:0 0 18px rgba(0,0,0,.35);
+  backface-visibility:hidden;will-change:transform,opacity;contain:paint;transform:translateZ(0);
 }
 .page-turn-sheet.forward{transform-origin:left center;}
 .page-turn-sheet.backward{transform-origin:right center;}
-.page-turn-sheet.turning.forward{animation:planetPageFlipForward .44s cubic-bezier(.22,.68,.16,1) both;}
-.page-turn-sheet.turning.backward{animation:planetPageFlipBackward .44s cubic-bezier(.22,.68,.16,1) both;}
+.page-turn-sheet.turning.forward{animation:planetPageFlipForward .5s cubic-bezier(.22,.61,.36,1) both;}
+.page-turn-sheet.turning.backward{animation:planetPageFlipBackward .5s cubic-bezier(.22,.61,.36,1) both;}
 .page-turn-sheet.spread .page-turn-back{display:none;}
-.page-turn-sheet.turning.spread.forward{animation:planetPageSpreadForward .22s ease-out both;}
-.page-turn-sheet.turning.spread.backward{animation:planetPageSpreadBackward .22s ease-out both;}
+.page-turn-sheet.turning.spread.forward{animation:planetPageSpreadForward .4s cubic-bezier(.22,.61,.36,1) both;}
+.page-turn-sheet.turning.spread.backward{animation:planetPageSpreadBackward .4s cubic-bezier(.22,.61,.36,1) both;}
 .page-turn-front,.page-turn-back{position:absolute;inset:0;overflow:hidden;backface-visibility:hidden;}
 .page-turn-image{display:block;width:100%;height:100%;object-fit:fill;user-select:none;-webkit-user-drag:none;}
 .page-turn-back{
@@ -421,7 +421,7 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
   background:linear-gradient(90deg,rgba(0,0,0,.3),transparent 55%,rgba(0,0,0,.08));
   opacity:0;
 }
-.page-turn-sheet.turning::after{animation:planetPageShade .44s ease-in-out both;}
+.page-turn-sheet.turning::after{animation:planetPageShade .5s ease-in-out both;}
 @keyframes planetPageFlipForward{
   0%{transform:perspective(1200px) rotateY(0deg);}
   48%{transform:perspective(1200px) rotateY(-96deg);}
@@ -725,8 +725,11 @@ body.theme-transitioning .tab.active{
   font-size:13px;
 }
 @media(max-width:699px){
-  /* Com 16px de margem e 10px entre cards, deixa aproximadamente 2,5
-     capas visíveis na largura da tela. */
+  /* Outras seções mantêm três capas visíveis; Lançamentos tem regra própria. */
+  .carousel-card{
+    flex-basis:calc((100vw - 44px)/3);
+    width:calc((100vw - 44px)/3);
+  }
   .home-section[data-home-key="lancamentos"] .carousel-card{
     flex-basis:calc((100vw - 52px)/2.5);
     width:calc((100vw - 52px)/2.5);
@@ -1191,7 +1194,7 @@ html,body,button,input,select,textarea{font-family:'WhizBang','Inter',sans-serif
 #direction-segmented button{font-size:10px;padding:7px 3px;}
 
 
-/* Carrosséis Home no celular: três capas inteiras visíveis; telas maiores preservam 138px. */
+/* Carrosséis Home no celular: três capas nas seções comuns; Lançamentos fica maior pela regra específica acima. */
 @media(max-width:699px){
   .carousel{gap:8px;padding-left:14px;padding-right:14px;}
   .carousel-card{flex:0 0 calc((100vw - 44px)/3);width:calc((100vw - 44px)/3);}
@@ -9393,19 +9396,30 @@ async function changeReaderPageImages(container, entries, direction){
       layers.push(sheet);
     }
   }
+  // Force a layout after inserting the old-page snapshots. This commits their
+  // initial geometry before the underlying <img> changes to the next page;
+  // otherwise some WebViews coalesce both updates and briefly paint the new
+  // page without the turning sheet.
+  if(layers.length) layers.forEach(layer=>void layer.getBoundingClientRect());
   for(const {image,src} of entries) image.src = src || '';
   if(!layers.length) return;
-  await Promise.race([
-    Promise.all(entries.map(({image})=>typeof image.decode==='function' ? image.decode().catch(()=>{}) : Promise.resolve())),
-    new Promise(resolve=>setTimeout(resolve,350))
-  ]);
-  if(token !== readerPageTurnToken) return;
+  // The snapshot uses the already-painted previous page, so never wait for
+  // decoding the destination image. Two frames guarantee WebViews paint the
+  // static snapshot once before starting its animation (no raw-page flash).
   requestAnimationFrame(()=>{
-    if(token === readerPageTurnToken) layers.forEach(layer=>layer.classList.add('turning'));
+    if(token !== readerPageTurnToken) return;
+    requestAnimationFrame(()=>{
+      if(token !== readerPageTurnToken) return;
+      layers.forEach(layer=>{
+        if(!layer.isConnected)return;
+        layer.classList.add('turning');
+        const duration=state.reader.mode==='double'?400:500;
+        const cleanup=()=>layer.remove();
+        layer.addEventListener('animationend',cleanup,{once:true});
+        setTimeout(cleanup,duration+120);
+      });
+    });
   });
-  setTimeout(()=>{
-    if(token === readerPageTurnToken) layers.forEach(layer=>layer.remove());
-  },520);
 }
 
 function readerTurnDirection(fromIndex, toIndex){
