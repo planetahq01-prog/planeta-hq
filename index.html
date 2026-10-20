@@ -399,66 +399,6 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
   touch-action:pan-x pan-y;
 }
 .zoom-wrap img{max-width:100%;max-height:100%;object-fit:contain;user-select:none;-webkit-user-drag:none;display:block;}
-.page-turn-sheet{
-  position:absolute;z-index:2;pointer-events:none;transform-style:preserve-3d;
-  backface-visibility:hidden;will-change:transform,opacity;contain:paint;transform:translateZ(0);
-}
-.page-turn-sheet.forward{transform-origin:left center;}
-.page-turn-sheet.backward{transform-origin:right center;}
-.page-turn-sheet.turning.forward{animation:planetPageFlipForward .5s cubic-bezier(.22,.61,.36,1) both;}
-.page-turn-sheet.turning.backward{animation:planetPageFlipBackward .5s cubic-bezier(.22,.61,.36,1) both;}
-.page-turn-sheet.spread .page-turn-back{display:none;}
-.page-turn-sheet.turning.spread.forward{animation:planetPageSpreadForward .4s cubic-bezier(.22,.61,.36,1) both;}
-.page-turn-sheet.turning.spread.backward{animation:planetPageSpreadBackward .4s cubic-bezier(.22,.61,.36,1) both;}
-.page-turn-front,.page-turn-back{position:absolute;inset:0;overflow:hidden;backface-visibility:hidden;}
-.page-turn-image{display:block;width:100%;height:100%;object-fit:fill;user-select:none;-webkit-user-drag:none;}
-.page-turn-back{
-  transform:rotateY(180deg);
-  background:linear-gradient(90deg,#d8d4cb 0%,#f4f1e8 18%,#ece9e0 82%,#c9c5bd 100%);
-}
-.page-turn-sheet::after{
-  content:"";position:absolute;inset:0;pointer-events:none;
-  background:linear-gradient(90deg,rgba(0,0,0,.3),transparent 55%,rgba(0,0,0,.08));
-  opacity:0;
-}
-.page-turn-sheet.turning::after{animation:planetPageShade .5s ease-in-out both;}
-@keyframes planetPageFlipForward{
-  0%{transform:perspective(1200px) rotateY(0deg);}
-  48%{transform:perspective(1200px) rotateY(-96deg);}
-  100%{transform:perspective(1200px) rotateY(-180deg);}
-}
-@keyframes planetPageFlipBackward{
-  0%{transform:perspective(1200px) rotateY(0deg);}
-  48%{transform:perspective(1200px) rotateY(96deg);}
-  100%{transform:perspective(1200px) rotateY(180deg);}
-}
-@keyframes planetPageShade{
-  0%,100%{opacity:0;}
-  42%,58%{opacity:.42;}
-}
-@keyframes planetPageSpreadForward{
-  from{opacity:1;transform:translateX(0);}
-  to{opacity:0;transform:translateX(-4%);}
-}
-@keyframes planetPageSpreadBackward{
-  from{opacity:1;transform:translateX(0);}
-  to{opacity:0;transform:translateX(4%);}
-}
-/* Android WebView: evita perspectiva/rotação 3D, sombras animadas e folhas
-   duplicadas em 3D, que elevam o custo de composição em APKs modestos. */
-.android-webview .page-turn-sheet{transform-style:flat;backface-visibility:visible;contain:strict;}
-.android-webview .page-turn-front{backface-visibility:visible;}
-.android-webview .page-turn-back,.android-webview .page-turn-sheet::after{display:none;}
-.android-webview .page-turn-sheet.turning.forward,
-.android-webview .page-turn-sheet.turning.backward,
-.android-webview .page-turn-sheet.turning.spread.forward,
-.android-webview .page-turn-sheet.turning.spread.backward{animation:planetPageTurnLite .28s cubic-bezier(.2,.7,.25,1) both;}
-.android-webview .page-turn-sheet.turning::after{animation:none;}
-@keyframes planetPageTurnLite{
-  from{opacity:1;transform:translate3d(0,0,0);}
-  to{opacity:0;transform:translate3d(var(--page-turn-shift, -5%),0,0);}
-}
-.android-webview .page-turn-sheet.backward{--page-turn-shift:5%;}
 /* Modo "Página Dupla" — pensado pra tela de computador: as duas páginas
    ficam coladas uma na outra, cada uma 100% visível (nunca cortada), mesmo
    que sobre espaço vazio em volta. Por isso cada img usa object-fit:contain
@@ -530,9 +470,6 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 }
 .rs-row{display:flex;flex-direction:column;gap:7px;margin-bottom:14px;font-size:12px;color:var(--paper-dim);}
 .rs-row:last-child{margin-bottom:0;}
-.reader-animation-toggle{display:flex;align-items:center;gap:9px;min-height:34px;color:var(--paper);font-size:12px;font-weight:700;}
-.reader-animation-toggle input{width:18px;height:18px;margin:0;accent-color:var(--accent);}
-.reader-animation-note{margin-top:-3px;color:var(--text-muted);font-size:10px;line-height:1.4;}
 .segmented{display:flex;background:var(--ink);border-radius:999px;padding:3px;gap:2px;}
 .segmented button{flex:1;border:none;background:none;color:var(--paper-dim);font-size:12px;font-weight:700;padding:7px 0;border-radius:999px;}
 .segmented button.active{background:var(--accent);color:#fff;}
@@ -1589,11 +1526,6 @@ html,body,button,input,select,textarea{font-family:'WhizBang','Inter',sans-serif
           <button data-direction="rtl">Mangá ←</button>
         </div>
       </div>
-      <div class="rs-row reader-animation-row">
-        <span>Animação ao passar páginas</span>
-        <label class="reader-animation-toggle"><input id="reader-page-turn-toggle" type="checkbox"><span>Ativar transição animada</span></label>
-        <small class="reader-animation-note">Desative se a animação ficar lenta no seu aparelho.</small>
-      </div>
       <div class="rs-row">
         <span>Marcadores desta HQ</span>
         <div id="reader-bookmark-list" class="reader-bookmark-list"></div>
@@ -1941,7 +1873,6 @@ const state = {
     fromDownload: false,
     mode: 'scroll',
     fit: 'width',
-    pageTurnAnimation: true,
     zoom: 1,
     scrollIO: null,
     siblings: [],
@@ -2048,16 +1979,14 @@ function loadReaderPrefs(){
       const p = JSON.parse(raw);
       state.reader.mode = ['paginate','double','scroll-desktop'].includes(p.mode) ? p.mode : 'scroll';
       state.reader.fit = p.fit === 'height' ? 'height' : 'width';
-      state.reader.pageTurnAnimation = p.pageTurnAnimation !== false;
       return;
     }
   }catch(e){}
   state.reader.mode = 'scroll';
   state.reader.fit = 'width';
-  state.reader.pageTurnAnimation = true;
 }
 function persistReaderPrefs(){
-  localStorage.setItem(READER_PREFS_KEY, JSON.stringify({mode: state.reader.mode, fit: state.reader.fit, pageTurnAnimation: state.reader.pageTurnAnimation}));
+  localStorage.setItem(READER_PREFS_KEY, JSON.stringify({mode: state.reader.mode, fit: state.reader.fit}));
 }
 
 const LIBRARY_PREFS_KEY = 'planetahq_library_prefs';
@@ -9389,69 +9318,11 @@ async function rebuildReaderView(){
   }
 }
 
-let readerPageTurnToken = 0;
-async function changeReaderPageImages(container, entries, direction){
-  const token = ++readerPageTurnToken;
-  document.querySelectorAll('.page-turn-sheet').forEach(node=>node.remove());
-  const reduced = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-  const zoomed = state.reader.mode !== 'double' && getPinchState($('#reader-img')).scale > 1.01;
-  const canTurn = state.reader.pageTurnAnimation && direction && !reduced && !zoomed && container && container.isConnected;
-  const androidWebView = document.documentElement.classList.contains('android-webview');
-  const layers = [];
-  if(canTurn){
-    const containerRect = container.getBoundingClientRect();
-    for(const {image} of entries){
-      const oldSrc = image.currentSrc || image.getAttribute('src');
-      const rect = image.getBoundingClientRect();
-      if(!oldSrc || !rect.width || !rect.height || image.classList.contains('hidden')) continue;
-      const sheet = document.createElement('div');
-      sheet.className = `page-turn-sheet ${direction > 0 ? 'forward' : 'backward'}${state.reader.mode === 'double' ? ' spread' : ''}`;
-      sheet.style.left = `${rect.left-containerRect.left}px`;
-      sheet.style.top = `${rect.top-containerRect.top}px`;
-      sheet.style.width = `${rect.width}px`;
-      sheet.style.height = `${rect.height}px`;
-      const front = document.createElement('div');
-      front.className = 'page-turn-front';
-      const clone = document.createElement('img');
-      clone.className = 'page-turn-image';
-      clone.src = oldSrc;
-      front.appendChild(clone);
-      const back = document.createElement('div');
-      back.className = 'page-turn-back';
-      sheet.append(front, back);
-      container.appendChild(sheet);
-      layers.push(sheet);
-    }
-  }
-  // Force a layout after inserting the old-page snapshots. This commits their
-  // initial geometry before the underlying <img> changes to the next page;
-  // otherwise some WebViews coalesce both updates and briefly paint the new
-  // page without the turning sheet.
-  if(layers.length && !androidWebView) layers.forEach(layer=>void layer.getBoundingClientRect());
+let readerPageRequestToken = 0;
+function changeReaderPageImages(entries){
+  // Invalida pedidos anteriores e mostra a página de destino imediatamente.
+  readerPageRequestToken++;
   for(const {image,src} of entries) image.src = src || '';
-  if(!layers.length) return;
-  // The snapshot uses the already-painted previous page, so never wait for
-  // decoding the destination image. Two frames guarantee WebViews paint the
-  // static snapshot once before starting its animation (no raw-page flash).
-  const startAnimation=()=>{
-    if(token !== readerPageTurnToken) return;
-    layers.forEach(layer=>{
-      if(!layer.isConnected)return;
-      layer.classList.add('turning');
-      const duration=androidWebView?280:(state.reader.mode==='double'?400:500);
-      const cleanup=()=>layer.remove();
-      layer.addEventListener('animationend',cleanup,{once:true});
-      setTimeout(cleanup,duration+120);
-    });
-  };
-  if(androidWebView) requestAnimationFrame(startAnimation);
-  else requestAnimationFrame(()=>requestAnimationFrame(startAnimation));
-}
-
-function readerTurnDirection(fromIndex, toIndex){
-  const advancing = toIndex > fromIndex;
-  const leftToRight = state.reader.direction !== 'rtl';
-  return advancing === leftToRight ? 1 : -1;
 }
 
 async function showPage(i, isNav){
@@ -9459,12 +9330,12 @@ async function showPage(i, isNav){
   if(!doc || i<0 || i>=doc.pageCount) return;
   const previousIndex = state.reader.pageIndex;
   if(isNav) resetPinchZoom($('#reader-img'));
-  const requestToken = ++readerPageTurnToken;
+  const requestToken = ++readerPageRequestToken;
   state.reader.pageIndex=i;
   syncReaderBookmarkButton();
   const url=await doc.getPage(i);
-  if(requestToken !== readerPageTurnToken || doc !== state.reader.doc) return;
-  await changeReaderPageImages($('#zoom-wrap'), [{image:$('#reader-img'),src:url}], isNav && i!==previousIndex ? readerTurnDirection(previousIndex,i) : 0);
+  if(requestToken !== readerPageRequestToken || doc !== state.reader.doc) return;
+  changeReaderPageImages([{image:$('#reader-img'),src:url}]);
   $('#page-count').textContent = `${i+1} / ${doc.pageCount}`;
   $('#page-slider').value = i+1;
   saveProgress(state.reader.fileMeta, i, doc.pageCount);
@@ -9486,7 +9357,7 @@ async function showDoublePage(i, isNav){
   i = Math.max(0, Math.min(i, doc.pageCount-1));
   if(i % 2 === 1) i -= 1; // normaliza pro início do par
   if(isNav && i === state.reader.pageIndex) return; // já está na ponta (não tem mais o que virar)
-  const requestToken = ++readerPageTurnToken;
+  const requestToken = ++readerPageRequestToken;
   state.reader.pageIndex=i;
   syncReaderBookmarkButton();
   const hasSecond=i+1<doc.pageCount;
@@ -9496,11 +9367,11 @@ async function showDoublePage(i, isNav){
   imgB.classList.toggle('hidden', !hasSecond);
   const pageA = await doc.getPage(i);
   const pageB = hasSecond ? await doc.getPage(i+1) : '';
-  if(requestToken !== readerPageTurnToken || doc !== state.reader.doc) return;
+  if(requestToken !== readerPageRequestToken || doc !== state.reader.doc) return;
   const pairs = [{image:imgA,src:pageA}];
   if(hasSecond) pairs.push({image:imgB,src:pageB});
   else imgB.src = '';
-  await changeReaderPageImages($('#reader-stage'), pairs, isNav && i!==previousIndex ? readerTurnDirection(previousIndex,i) : 0);
+  changeReaderPageImages(pairs);
 
   $('#page-count').textContent = hasSecond ? `${i+1}-${i+2} / ${doc.pageCount}` : `${i+1} / ${doc.pageCount}`;
   saveProgress(state.reader.fileMeta, i, doc.pageCount);
@@ -9851,8 +9722,7 @@ function closeReader(){
   // deixar rodando sozinho em segundo plano gastando dados à toa.
   if(readerAbortController) readerAbortController.abort();
   readerLoadToken++;
-  readerPageTurnToken++;
-  document.querySelectorAll('.page-turn-sheet').forEach(node=>node.remove());
+  readerPageRequestToken++;
   if(state.reader.doc && state.reader.fileMeta){
     captureScrollReaderProgress();
     saveProgress(state.reader.fileMeta, state.reader.pageIndex, state.reader.doc.pageCount);
@@ -10022,14 +9892,6 @@ document.addEventListener('keydown', e=>{
 $('#btn-reader-bookmark').innerHTML=ICONS.bookmark;
 $('#btn-reader-bookmark').onclick=async e=>{e.stopPropagation();await toggleReaderBookmark();};
 $('#btn-reader-settings').onclick=(e)=>{e.stopPropagation();$('#reader-settings').classList.toggle('hidden');};
-$('#reader-page-turn-toggle').addEventListener('change',e=>{
-  state.reader.pageTurnAnimation=!!e.currentTarget.checked;
-  persistReaderPrefs();
-  if(!state.reader.pageTurnAnimation){
-    readerPageTurnToken++;
-    document.querySelectorAll('.page-turn-sheet').forEach(node=>node.remove());
-  }
-});
 document.addEventListener('click', (e)=>{
   const panel = $('#reader-settings');
   if(!panel || panel.classList.contains('hidden')) return;
@@ -10060,7 +9922,6 @@ document.querySelectorAll('#direction-segmented button').forEach(btn=>{
 function syncReaderSettingsUI(){
   document.querySelectorAll('#mode-segmented button').forEach(b=>b.classList.toggle('active',b.dataset.mode===state.reader.mode));
   document.querySelectorAll('#fit-segmented button').forEach(b=>b.classList.toggle('active',b.dataset.fit===state.reader.fit));
-  $('#reader-page-turn-toggle').checked=state.reader.pageTurnAnimation;
   $('#fit-row').classList.toggle('hidden',state.reader.mode!=='paginate');
   syncReaderDirectionUI();updateReaderModeHint();
 }
