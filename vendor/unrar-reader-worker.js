@@ -1,6 +1,5 @@
-importScripts('./node-unrar-js.bundle.js');
-const createExtractorFromBlob = self.PlanetaHQUnrar.createExtractorFromBlob;
-
+importScripts('./node-unrar-js.worker.js');
+const createBlobExtractor = self.PlanetaHQUnrar.createExtractorFromBlob;
 let extractor = null;
 let pageNames = [];
 
@@ -43,7 +42,7 @@ self.addEventListener('message', async event => {
       const wasmResponse = await fetch(wasmUrl, { cache: 'no-store' });
       if (!wasmResponse.ok) throw new Error(`Não foi possível carregar o decoder RAR (${wasmResponse.status}).`);
       const wasmBinary = await wasmResponse.arrayBuffer();
-      extractor = await createExtractorFromBlob({ blob: message.blob, wasmBinary });
+      extractor = await createBlobExtractor({ blob: message.blob, wasmBinary });
       const fileList = extractor.getFileList();
       pageNames = [...fileList.fileHeaders]
         .filter(header => !header.flags.directory && /\.(jpe?g|png|webp|gif)$/i.test(header.name))
