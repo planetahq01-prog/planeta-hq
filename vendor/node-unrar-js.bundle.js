@@ -267,7 +267,15 @@ var ExtractorData = class extends Extractor {
     function* getFiles() {
       for (const file of files) {
         if (!file.fileHeader.flags.directory) {
-          file.extraction = this.dataFiles[this.getExtractedFileName(file.fileHeader.name)].file.readAll();
+          const extractedName = this.getExtractedFileName(file.fileHeader.name);
+          const extractedData = this.dataFiles[extractedName];
+          if (extractedData) {
+            file.extraction = extractedData.file.readAll();
+            // O Uint8Array entregue em `file.extraction` mantém os bytes
+            // necessários ao chamador. Remova a referência do extrator para
+            // não acumular todas as páginas visitadas na memória.
+            delete this.dataFiles[extractedName];
+          }
         }
         yield file;
       }
