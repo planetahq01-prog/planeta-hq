@@ -4,26 +4,91 @@ var DataFile = class {
     this.buffers = [];
     this.pos = 0;
     this.size = 0;
+    this.blob = null;
+    this.blobReader = null;
+    this.blobBlockSize = 2 * 1024 * 1024;
+    this.blobCacheMaxBytes = 16 * 1024 * 1024;
+    this.blobCacheBytes = 0;
+    this.blobCache = new Map();
     if (data) {
-      this.buffers.push(data);
-      this.size = data.byteLength;
+      if (typeof data.slice === "function" && typeof data.size === "number") {
+        if (typeof FileReaderSync === "undefined") {
+          throw new Error("A leitura CBR por fatias exige FileReaderSync em Dedicated Worker.");
+        }
+        this.blob = data;
+        this.blobReader = new FileReaderSync();
+        this.size = data.size;
+      } else {
+        const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
+        this.buffers.push(bytes);
+        this.size = bytes.byteLength;
+      }
       this.pos = 0;
     }
   }
   read(size) {
+    if (this.blob) return this.readBlob(size);
     this.flatten();
-    if (size + this.pos > this.size) {
+    if (size < 0 || size + this.pos > this.size) {
       return null;
     }
     const oldPos = this.pos;
     this.pos += size;
-    return this.buffers[0].slice(oldPos, this.pos);
+    return this.buffers[0].subarray(oldPos, this.pos);
+  }
+  readBlob(size) {
+    if (size < 0 || size + this.pos > this.size) return null;
+    const start = this.pos;
+    this.pos += size;
+    if (size === 0) return new Uint8Array(0);
+    const firstBlock = Math.floor(start / this.blobBlockSize);
+    const lastBlock = Math.floor((start + size - 1) / this.blobBlockSize);
+    if (firstBlock === lastBlock) {
+      const block = this.getBlobBlock(firstBlock);
+      const withinBlock = start - firstBlock * this.blobBlockSize;
+      return block.subarray(withinBlock, withinBlock + size);
+    }
+    const output = new Uint8Array(size);
+    let sourcePos = start;
+    let targetPos = 0;
+    while (targetPos < size) {
+      const blockIndex = Math.floor(sourcePos / this.blobBlockSize);
+      const block = this.getBlobBlock(blockIndex);
+      const withinBlock = sourcePos - blockIndex * this.blobBlockSize;
+      const count = Math.min(size - targetPos, block.byteLength - withinBlock);
+      output.set(block.subarray(withinBlock, withinBlock + count), targetPos);
+      sourcePos += count;
+      targetPos += count;
+    }
+    return output;
+  }
+  getBlobBlock(index) {
+    if (this.blobCache.has(index)) {
+      const hit = this.blobCache.get(index);
+      this.blobCache.delete(index);
+      this.blobCache.set(index, hit);
+      return hit;
+    }
+    const start = index * this.blobBlockSize;
+    const end = Math.min(this.size, start + this.blobBlockSize);
+    const bytes = new Uint8Array(this.blobReader.readAsArrayBuffer(this.blob.slice(start, end)));
+    this.blobCache.set(index, bytes);
+    this.blobCacheBytes += bytes.byteLength;
+    while (this.blobCacheBytes > this.blobCacheMaxBytes && this.blobCache.size > 1) {
+      const oldestKey = this.blobCache.keys().next().value;
+      const oldest = this.blobCache.get(oldestKey);
+      this.blobCache.delete(oldestKey);
+      this.blobCacheBytes -= oldest.byteLength;
+    }
+    return bytes;
   }
   readAll() {
+    if (this.blob) throw new Error("Não é permitido materializar o CBR inteiro; use leitura por faixas.");
     this.flatten();
     return this.buffers[0] || new Uint8Array();
   }
   write(data) {
+    if (this.blob) throw new Error("Não é permitido escrever no Blob RAR de origem.");
     this.buffers.push(data);
     this.size += data.byteLength;
     this.pos += data.byteLength;
@@ -48,7 +113,7 @@ var DataFile = class {
     return true;
   }
   flatten() {
-    if (this.buffers.length <= 1) {
+    if (this.blob || this.buffers.length <= 1) {
       return;
     }
     const newBuffer = new Uint8Array(this.size);
@@ -254,8 +319,11 @@ var ExtractorData = class extends Extractor {
     this.dataFiles = {};
     this.dataFileMap = {};
     this.currentFd = 1;
+    const sourceData = data && typeof data.slice === "function" && typeof data.size === "number"
+      ? data
+      : new Uint8Array(data);
     const rarFile = {
-      file: new DataFile(new Uint8Array(data)),
+      file: new DataFile(sourceData),
       fd: this.currentFd++
     };
     this._filePath = "_defaultUnrarJS_.rar";
@@ -2778,8 +2846,18 @@ async function createExtractorFromData({ wasmBinary, data, password = "" }) {
   unrar2.extractor = extractor;
   return extractor;
 }
+async function createExtractorFromBlob({ wasmBinary, blob, password = "" }) {
+  if (typeof FileReaderSync === "undefined") {
+    throw new Error("createExtractorFromBlob precisa rodar dentro de um Dedicated Worker com FileReaderSync.");
+  }
+  const unrar2 = await getUnrar(wasmBinary && { wasmBinary });
+  const extractor = new ExtractorData(unrar2, blob, password);
+  unrar2.extractor = extractor;
+  return extractor;
+}
 export {
   Extractor,
   UnrarError,
-  createExtractorFromData
+  createExtractorFromData,
+  createExtractorFromBlob
 };
