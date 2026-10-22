@@ -2855,9 +2855,4 @@ async function createExtractorFromBlob({ wasmBinary, blob, password = "" }) {
   unrar2.extractor = extractor;
   return extractor;
 }
-export {
-  Extractor,
-  UnrarError,
-  createExtractorFromData,
-  createExtractorFromBlob
-};
+self.PlanetaHQUnrar = { createExtractorFromBlob };

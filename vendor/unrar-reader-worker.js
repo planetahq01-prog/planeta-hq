@@ -1,4 +1,5 @@
-import { createExtractorFromBlob } from './node-unrar-js.bundle.js';
+importScripts('./node-unrar-js.bundle.js');
+const createExtractorFromBlob = self.PlanetaHQUnrar.createExtractorFromBlob;
 
 let extractor = null;
 let pageNames = [];
@@ -38,7 +39,7 @@ self.addEventListener('message', async event => {
       if (!message.blob || typeof message.blob.slice !== 'function') {
         throw new Error('O arquivo CBR não chegou ao worker como Blob.');
       }
-      const wasmUrl = new URL('./unrar.wasm', import.meta.url);
+      const wasmUrl = new URL('./unrar.wasm', self.location.href);
       const wasmResponse = await fetch(wasmUrl, { cache: 'no-store' });
       if (!wasmResponse.ok) throw new Error(`Não foi possível carregar o decoder RAR (${wasmResponse.status}).`);
       const wasmBinary = await wasmResponse.arrayBuffer();
