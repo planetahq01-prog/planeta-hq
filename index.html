@@ -2733,7 +2733,7 @@ async function openComicCBR(blob,signal){
   if(signal&&signal.aborted)throw new DOMException('Leitura CBR cancelada.','AbortError');
   let worker;
   try{
-    worker = new Worker(new URL('./vendor/unrar-reader-worker.js', document.baseURI), {type:'module', name:'PlanetaHQ-CBR'});
+    worker = new Worker(new URL('./vendor/unrar-reader-worker.js', document.baseURI));
   }catch(error){
     throw new Error('Este aparelho não conseguiu iniciar o leitor CBR de baixo consumo. Atualize o Android System WebView e tente novamente. ' + (error && error.message || ''));
   }
@@ -2767,7 +2767,10 @@ async function openComicCBR(blob,signal){
       item.reject(error);
     }
   };
-  worker.onerror=event=>failWorker(new Error(event.message||'Falha no worker de leitura CBR.'));
+  worker.onerror=event=>{
+    const details=[event.message,event.filename,event.lineno?`linha ${event.lineno}`:''].filter(Boolean).join(' | ');
+    failWorker(new Error(details||'Falha no worker de leitura CBR.'));
+  };
   worker.onmessageerror=()=>failWorker(new Error('Não foi possível receber os dados do worker CBR.'));
   const request=(command,payload={},timeoutMs=120000)=>new Promise((resolve,reject)=>{
     if(readerDisposed||workerFailed){reject(new Error('O worker do leitor CBR não está mais ativo.'));return;}
@@ -12568,7 +12571,7 @@ async function boot(){
 }
 
 initConnectivityEvents();
-window.PLANETAHQ_BUILD='v106';
+window.PLANETAHQ_BUILD='v107';
 let appBootComplete=false;
 let pendingSWReload=false;
 let swReloadRequested=false;
