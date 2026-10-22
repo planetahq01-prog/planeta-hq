@@ -2729,6 +2729,60 @@ async function openComicCBZ(blob){
   };
 }
 
+// HQs CBR leves continuam no caminho original e já conhecido. O Worker fica
+// reservado aos arquivos grandes, que não devem ser materializados por inteiro.
+const LEGACY_CBR_MAX_BYTES=150*1024*1024;
+let unrarAssetsPromise=null;
+function ensureRarLib(){
+  if(unrarAssetsPromise)return unrarAssetsPromise;
+  unrarAssetsPromise=(async()=>{
+    try{
+      const moduleUrl=new URL('./vendor/node-unrar-js.bundle.js',document.baseURI).href;
+      const wasmUrl=new URL('./vendor/unrar.wasm',document.baseURI).href;
+      const [mod,wasmBinary]=await Promise.all([
+        import(/* @vite-ignore */ moduleUrl),
+        fetch(wasmUrl,{cache:'no-store'}).then(r=>{if(!r.ok)throw new Error('WASM local HTTP '+r.status);return r.arrayBuffer();})
+      ]);
+      const createExtractorFromData=mod.createExtractorFromData||(mod.default&&mod.default.createExtractorFromData);
+      if(!createExtractorFromData)throw new Error('bundle local sem createExtractorFromData');
+      return {createExtractorFromData,wasmBinary};
+    }catch(e){
+      unrarAssetsPromise=null;
+      console.error('[PlanetaHQ] Falha ao carregar suporte CBR local',e);
+      throw new Error('O leitor de CBR offline não está disponível. Conecte-se à internet, atualize o app e tente novamente. '+(e&&e.message||''));
+    }
+  })();
+  return unrarAssetsPromise;
+}
+async function openComicCBRLegacy(blob){
+  const {createExtractorFromData,wasmBinary}=await ensureRarLib();
+  const data=await blob.arrayBuffer();
+  const extractor=await createExtractorFromData({data,wasmBinary});
+  const list=extractor.getFileList();
+  const names=[...list.fileHeaders]
+    .filter(h=>!h.flags.directory&&/\.(jpe?g|png|webp|gif)$/i.test(h.name))
+    .map(h=>h.name)
+    .sort(naturalSort);
+  if(names.length===0)throw new Error('Nenhuma imagem encontrada dentro do CBR.');
+  const cache=createPageCache(24);
+  return {
+    pageCount:names.length,
+    async getPage(i){
+      const cached=cache.get(i);
+      if(cached)return cached;
+      const name=names[i];
+      const extracted=extractor.extract({files:[name]});
+      const first=[...extracted.files][0];
+      if(!first||!first.extraction)throw new Error('Falha ao extrair página do CBR: '+name);
+      const mime=/\.png$/i.test(name)?'image/png':/\.webp$/i.test(name)?'image/webp':/\.gif$/i.test(name)?'image/gif':'image/jpeg';
+      const url=URL.createObjectURL(new Blob([first.extraction],{type:mime}));
+      cache.set(i,url,true);
+      return url;
+    },
+    dispose(){cache.disposeAll();}
+  };
+}
+
 async function openComicCBR(blob,signal){
   if(signal&&signal.aborted)throw new DOMException('Leitura CBR cancelada.','AbortError');
   let worker;
@@ -3037,6 +3091,7 @@ async function openComicFromBlob(fileObj, blob, signal){
   }
   if(ext === 'cbz') return openComicCBZ(blob);
   if(ext === 'cbr'){
+    if(blob.size<=LEGACY_CBR_MAX_BYTES)return openComicCBRLegacy(blob);
     const opening = openComicCBR(blob,signal);
     blob = null;
     return opening;
@@ -12571,7 +12626,7 @@ async function boot(){
 }
 
 initConnectivityEvents();
-window.PLANETAHQ_BUILD='v107';
+window.PLANETAHQ_BUILD='v108';
 let appBootComplete=false;
 let pendingSWReload=false;
 let swReloadRequested=false;

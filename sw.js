@@ -607,7 +607,7 @@
   sobe pra os aparelhos buscarem o index.html novo.
 */
 /* v85: index.html agora monta as seções como mistas e inclui a logo Flash; o cache da Home também reconstrói o índice pai/filho. */
-const CACHE_VERSION = 'v143';
+const CACHE_VERSION = 'v144';
 // Cache das capas: separado do da casca do app e mantido entre versões.
 const COVERS_CACHE = 'planeta-hq-covers-v1';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
@@ -813,9 +813,10 @@ const APP_SHELL = [
   // baixado na aba "Baixados") falha assim que o aparelho está offline, com
   // o erro "Setting up fake worker failed: Cannot load script at: ...".
   'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js',
-  // Suporte a CBR local (bundle ESM + WASM): indispensáveis para abrir
-  // HQs .cbr totalmente offline, sem buscar código em CDN.
+  // Leitor ESM original para CBRs leves e bundle do Worker para CBRs grandes;
+  // ambos com WASM local para funcionar também sem rede.
   './vendor/node-unrar-js.bundle.js',
+  './vendor/node-unrar-js.worker.js',
   './vendor/unrar-reader-worker.js',
   './vendor/unrar.wasm',
   ...PDF_CMAP_FILES.map((name) => `./vendor/pdfjs/cmaps/${name}`),
