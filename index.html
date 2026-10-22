@@ -2178,6 +2178,27 @@ async function idbAll(store){
     };
     req.onerror = ()=>reject(req.error);
   });
+}
+// Lista apenas metadados de downloads: nunca retenha os Blobs de HQ na tela
+// de Baixados. Cada arquivo só é lido do IndexedDB quando a pessoa o abre.
+async function idbAllDownloadMetadata(){
+  const db = await openDB();
+  return new Promise((resolve,reject)=>{
+    const items=[];
+    const req=db.transaction('downloads','readonly').objectStore('downloads').openCursor();
+    req.onsuccess=event=>{
+      const cursor=event.target.result;
+      if(!cursor){resolve(items);return;}
+      const value=cursor.value;
+      items.push({
+        id:value.id,name:value.name,size:value.size,ext:value.ext,mimeType:value.mimeType,
+        path:value.path,savedAt:value.savedAt,downloadedIndividually:value.downloadedIndividually,
+        folderGroups:value.folderGroups,folderOwnedBy:value.folderOwnedBy
+      });
+      cursor.continue();
+    };
+    req.onerror=()=>reject(req.error);
+  });
 }/* ---------------------------------------------------------------------
    3) Google Drive API (somente leitura, via API key — coleção pública)
    --------------------------------------------------------------------- */
@@ -2466,6 +2487,10 @@ async function driveFetchBlob(fileId, onProgress, knownSize, signal){
       }
       const total = Number(res.headers.get('Content-Length')) || Number(knownSize) || 0;
       const reader = res.body.getReader();
+      // Guarde cada bloco como Blob imutável. Assim, ao montar o Blob final,
+      // o navegador pode compor as partes sem manter o arquivo inteiro como
+      // um array de Uint8Array e depois duplicá-lo na conversão — pico que
+      // pode derrubar WebViews Android em HQs grandes.
       const chunks = [];
       let received = 0;
       let lastPct = -1;
@@ -2473,14 +2498,15 @@ async function driveFetchBlob(fileId, onProgress, knownSize, signal){
         if(signal && signal.aborted) throw new DOMException('Download cancelado.','AbortError');
         const {done,value} = await withStallTimeout(reader.read(),30000,'A conexão travou no meio do download.');
         if(done) break;
-        chunks.push(value);
+        chunks.push(new Blob([value]));
         received += value.length;
         if(onProgress && total){
           const pct=Math.min(99,Math.max(1,Math.round((received/total)*100)));
           if(pct!==lastPct){lastPct=pct;onProgress(pct/100);}
         }
       }
-      if(onProgress) onProgress(1);
+      // Não anuncie 100% aqui: ainda falta compor o Blob (e, no download,
+      // gravá-lo no IndexedDB). O chamador confirma conclusão só após isso.
       return new Blob(chunks);
     }catch(err){
       ctrl.abort();
@@ -2519,7 +2545,9 @@ async function driveFetchBlob(fileId, onProgress, knownSize, signal){
    --------------------------------------------------------------------- */
 const activeDownloads = new Map(); // fileId -> task with queue status, progress, listeners, AbortController
 const recentCompletedDownloads=[];
-const MAX_PARALLEL_COMIC_DOWNLOADS=2;
+// Arquivos de HQ podem ter centenas de MiB. Serializar os downloads evita
+// manter dois arquivos grandes simultaneamente na memória do WebView Android.
+const MAX_PARALLEL_COMIC_DOWNLOADS=1;
 let downloadManagerGroups=[];
 function rememberCompletedDownload(entry){
   const id=entry.fileMeta.id;
@@ -2571,10 +2599,9 @@ async function runBackgroundDownload(entry){
     entry.status='done';entry.progress=1;entry.error=null;
     rememberCompletedDownload(entry);
     toast(`"${entry.fileMeta.name.replace(/\.(pdf|cbz|cbr)$/i,'')}" disponível offline`);
-    const EAGER_COVER_MAX_SIZE=60*1024*1024;
-    if((Number(entry.fileMeta.size)||0)<EAGER_COVER_MAX_SIZE){
-      openComicFromBlob(entry.fileMeta,blob).then(doc=>{cacheCoverFromDoc(entry.fileMeta.id,doc);doc.dispose&&doc.dispose();}).catch(()=>{});
-    }
+    // Não reabra/decodifique a HQ imediatamente após salvá-la: em aparelhos
+    // Android com pouca memória, gerar a capa nesse ponto concorria com a
+    // gravação do Blob. A capa será gerada sob demanda pelo fallback normal.
   }catch(err){
     if(entry.pauseRequested){entry.status='paused';entry.error=null;}
     else if(entry.cancelRequested || err.name==='AbortError'){entry.status='cancelled';entry.error=null;}
@@ -2735,22 +2762,29 @@ function ensureRarLib(){
 async function openComicCBR(blob){
   const { createExtractorFromData, wasmBinary } = await ensureRarLib();
   const data = await blob.arrayBuffer();
+  // O leitor atual precisa do arquivo RAR completo como ArrayBuffer; solte a
+  // referência ao Blob logo após a conversão para não manter as duas formas
+  // do arquivo vivas durante a inicialização do extrator.
+  blob = null;
   // wasmBinary é reaproveitado (já baixado uma vez), mas cada HQ aberta
   // precisa do seu próprio extractor — não dá pra reaproveitar entre
   // arquivos RAR diferentes.
-  const extractor = await createExtractorFromData({ data, wasmBinary });
+  let extractor = await createExtractorFromData({ data, wasmBinary });
   const list = extractor.getFileList();
   const names = [...list.fileHeaders]
     .filter(h=>!h.flags.directory && /\.(jpe?g|png|webp|gif)$/i.test(h.name))
     .map(h=>h.name)
     .sort(naturalSort);
   if(names.length === 0) throw new Error('Nenhuma imagem encontrada dentro do CBR.');
-  const cache = createPageCache(24);
+  // CBR pode exigir buffers grandes durante a descompressão; manter oito
+  // páginas recentes basta para navegação normal e limita memória em móveis.
+  const cache = createPageCache(8);
   return {
     pageCount: names.length,
     async getPage(i){
       const cached = cache.get(i);
       if(cached) return cached;
+      if(!extractor) throw new Error('O leitor CBR já foi fechado.');
       const name = names[i];
       // Extrai só a página pedida, uma de cada vez (igual ao CBZ) — evita
       // guardar o gibi inteiro descompactado na memória ao mesmo tempo.
@@ -2758,13 +2792,23 @@ async function openComicCBR(blob){
       const first = [...extracted.files][0];
       if(!first || !first.extraction) throw new Error('Falha ao extrair página do CBR: ' + name);
       const mime = /\.png$/i.test(name) ? 'image/png' : /\.webp$/i.test(name) ? 'image/webp' : /\.gif$/i.test(name) ? 'image/gif' : 'image/jpeg';
-      const pageBlob = new Blob([first.extraction], { type: mime });
+      const pageBytes = first.extraction;
+      const pageBlob = new Blob([pageBytes], { type: mime });
+      first.extraction = null;
       const url = URL.createObjectURL(pageBlob);
       cache.set(i, url, true);
       return url;
     },
     dispose(){
       cache.disposeAll();
+      const activeExtractor = extractor;
+      extractor = null;
+      if(!activeExtractor) return;
+      try{ if(activeExtractor._archive) activeExtractor.closeArc(); }catch(e){}
+      // O extrator mantém o ArrayBuffer RAR original e tabelas de arquivos.
+      // Ao fechar, solte essas referências para não sobrepor HQs abertas.
+      try{ activeExtractor.dataFiles = Object.create(null); }catch(e){}
+      try{ activeExtractor.dataFileMap = Object.create(null); }catch(e){}
     }
   };
 }
@@ -2970,7 +3014,11 @@ async function openComicFromBlob(fileObj, blob){
     }
   }
   if(ext === 'cbz') return openComicCBZ(blob);
-  if(ext === 'cbr') return openComicCBR(blob);
+  if(ext === 'cbr'){
+    const opening = openComicCBR(blob);
+    blob = null;
+    return opening;
+  }
   if(ext === 'pdf') return openComicPDF(blob);
   throw new Error('Formato não suportado: ' + ext);
 }
@@ -8724,7 +8772,7 @@ async function renderDownloads(){
   const grid=$('#grid-downloads');
   if(grid&&!grid.children.length)renderAppState(grid,{type:'loading',icon:'<div class="spinner" aria-hidden="true"></div>',title:'Abrindo seus downloads',message:'Lendo o conteúdo salvo neste aparelho…'});
   let items,loadedGroups;
-  try{[items,loadedGroups]=await Promise.all([idbAll('downloads'),idbAll('downloadFolders')]);}
+  try{[items,loadedGroups]=await Promise.all([idbAllDownloadMetadata(),idbAll('downloadFolders')]);}
   catch(err){
     logWarn('[PlanetaHQ] falha ao ler os downloads locais',err);
     state.currentListContext=[];state.currentListIsLocal=true;
@@ -9197,7 +9245,11 @@ async function openReader(fileMeta, forceLocal, parentId){
     let doc;
     if(local){
       state.reader.fromDownload = true;
-      doc = await openComicFromBlob({...fileMeta, _ext: fileMeta._ext || local.ext}, local.blob);
+      let localBlob = local.blob;
+      const opening = openComicFromBlob({...fileMeta, _ext: fileMeta._ext || local.ext}, localBlob);
+      localBlob = null;
+      local.blob = null;
+      doc = await opening;
     } else {
       if(forceLocal || navigator.onLine===false) throw new Error('Esta HQ não foi encontrada nos downloads deste aparelho. Sem internet, só é possível abrir arquivos que aparecem na aba Baixados.');
       state.reader.fromDownload = false;
@@ -9216,8 +9268,10 @@ async function openReader(fileMeta, forceLocal, parentId){
         doc = await openComicPDF(driveMediaUrl(fileMeta.id), null, Number(fileMeta.size)||0, fileMeta.id, myAbort.signal);
       } else {
         status.innerHTML = '<div class="spinner"></div><div>Carregando... <span id="reader-status-pct">0%</span></div>';
-        const blob = await driveFetchBlob(fileMeta.id, p=>{ setPct(Math.round(p*100)); }, Number(fileMeta.size)||0, myAbort.signal);
-        doc = await openComicFromBlob(fileMeta, blob);
+        let blob = await driveFetchBlob(fileMeta.id, p=>{ setPct(Math.round(p*100)); }, Number(fileMeta.size)||0, myAbort.signal);
+        const opening = openComicFromBlob(fileMeta, blob);
+        blob = null;
+        doc = await opening;
       }
     }
     // Se, enquanto isto tudo baixava/abria, a pessoa já saiu pra outra HQ
@@ -12495,7 +12549,7 @@ async function boot(){
 }
 
 initConnectivityEvents();
-window.PLANETAHQ_BUILD='v100';
+window.PLANETAHQ_BUILD='v103';
 let appBootComplete=false;
 let pendingSWReload=false;
 let swReloadRequested=false;
