@@ -2759,9 +2759,41 @@ function ensureRarLib(){
   return unrarAssetsPromise;
 }
 
+// Alguns Android WebViews falham com NotReadableError ao materializar um
+// Blob grande em uma única chamada arrayBuffer(). Leia fatias pequenas e
+// copie para o buffer contínuo exigido pelo WASM do unrar-js. Cada fatia usa
+// arrayBuffer() quando disponível e FileReader como compatibilidade/fallback.
+async function readBlobAsArrayBufferInChunks(blob, chunkSize=4*1024*1024){
+  if(!blob || typeof blob.slice!=='function') throw new TypeError('Arquivo CBR inválido.');
+  const size=Number(blob.size);
+  if(!Number.isSafeInteger(size)||size<=0) throw new Error('Arquivo CBR vazio ou com tamanho inválido.');
+  const output=new Uint8Array(size);
+  const readSlice=async slice=>{
+    try{
+      return await slice.arrayBuffer();
+    }catch(arrayBufferError){
+      if(typeof FileReader==='undefined') throw arrayBufferError;
+      return await new Promise((resolve,reject)=>{
+        const reader=new FileReader();
+        reader.onload=()=>resolve(reader.result);
+        reader.onerror=()=>reject(reader.error||arrayBufferError);
+        reader.onabort=()=>reject(new DOMException('Leitura do arquivo cancelada.','AbortError'));
+        reader.readAsArrayBuffer(slice);
+      });
+    }
+  };
+  for(let offset=0;offset<size;offset+=chunkSize){
+    const end=Math.min(size,offset+chunkSize);
+    const part=await readSlice(blob.slice(offset,end));
+    if(!part||part.byteLength!==end-offset) throw new Error(`Leitura incompleta do arquivo CBR (byte ${offset}).`);
+    output.set(new Uint8Array(part),offset);
+  }
+  return output.buffer;
+}
+
 async function openComicCBR(blob){
   const { createExtractorFromData, wasmBinary } = await ensureRarLib();
-  const data = await blob.arrayBuffer();
+  const data = await readBlobAsArrayBufferInChunks(blob);
   // O leitor atual precisa do arquivo RAR completo como ArrayBuffer; solte a
   // referência ao Blob logo após a conversão para não manter as duas formas
   // do arquivo vivas durante a inicialização do extrator.
@@ -12549,7 +12581,7 @@ async function boot(){
 }
 
 initConnectivityEvents();
-window.PLANETAHQ_BUILD='v103';
+window.PLANETAHQ_BUILD='v104';
 let appBootComplete=false;
 let pendingSWReload=false;
 let swReloadRequested=false;
