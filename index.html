@@ -2457,7 +2457,7 @@ function driveMediaUrl(fileId){
   return `${CONFIG.proxyUrl}?id=${encodeURIComponent(fileId)}&code=${encodeURIComponent(ACCESS_CODE || '')}&device=${encodeURIComponent(getDeviceId())}&type=${encodeURIComponent(getDeviceType())}`;
 }
 
-async function driveFetchBlob(fileId, onProgress, knownSize, signal){
+async function driveFetchPayload(fileId, onProgress, knownSize, signal, outputKind='blob'){
   const url = driveMediaUrl(fileId);
   const MAX_ATTEMPTS = 4;
   const RETRYABLE_HTTP = new Set([408,425,429,500,502,503,504]);
@@ -2487,10 +2487,10 @@ async function driveFetchBlob(fileId, onProgress, knownSize, signal){
       }
       const total = Number(res.headers.get('Content-Length')) || Number(knownSize) || 0;
       const reader = res.body.getReader();
-      // Guarde cada bloco como Blob imutável. Assim, ao montar o Blob final,
-      // o navegador pode compor as partes sem manter o arquivo inteiro como
-      // um array de Uint8Array e depois duplicá-lo na conversão — pico que
-      // pode derrubar WebViews Android em HQs grandes.
+      // Para CBR, reserve uma única saída contígua e copie os blocos da rede
+      // diretamente nela. Isso evita criar um Blob grande e depois materializar
+      // outro buffer inteiro para o extrator RAR (pico de RAM no Android).
+      let outputBuffer=outputKind==='arraybuffer'&&total?new Uint8Array(total):null;
       const chunks = [];
       let received = 0;
       let lastPct = -1;
@@ -2498,7 +2498,11 @@ async function driveFetchBlob(fileId, onProgress, knownSize, signal){
         if(signal && signal.aborted) throw new DOMException('Download cancelado.','AbortError');
         const {done,value} = await withStallTimeout(reader.read(),30000,'A conexão travou no meio do download.');
         if(done) break;
-        chunks.push(new Blob([value]));
+        if(outputBuffer){
+          if(received+value.length>outputBuffer.length) throw new Error('O tamanho recebido da HQ excede o tamanho informado pelo servidor.');
+          outputBuffer.set(value,received);
+        }else if(outputKind==='blob') chunks.push(new Blob([value]));
+        else chunks.push(value);
         received += value.length;
         if(onProgress && total){
           const pct=Math.min(99,Math.max(1,Math.round((received/total)*100)));
@@ -2507,6 +2511,17 @@ async function driveFetchBlob(fileId, onProgress, knownSize, signal){
       }
       // Não anuncie 100% aqui: ainda falta compor o Blob (e, no download,
       // gravá-lo no IndexedDB). O chamador confirma conclusão só após isso.
+      if(outputKind==='arraybuffer'){
+        if(outputBuffer){
+          if(received!==outputBuffer.length) throw new Error(`Download incompleto: recebidos ${received} de ${outputBuffer.length} bytes.`);
+          return outputBuffer.buffer;
+        }
+        // Fallback apenas quando o servidor e os metadados não informam tamanho.
+        outputBuffer=new Uint8Array(received);
+        let offset=0;
+        for(const chunk of chunks){outputBuffer.set(chunk,offset);offset+=chunk.length;}
+        return outputBuffer.buffer;
+      }
       return new Blob(chunks);
     }catch(err){
       ctrl.abort();
@@ -2526,6 +2541,12 @@ async function driveFetchBlob(fileId, onProgress, knownSize, signal){
     }
   }
   throw lastError || new Error('Não foi possível baixar a HQ. Tente novamente.');
+}
+async function driveFetchBlob(fileId,onProgress,knownSize,signal){
+  return driveFetchPayload(fileId,onProgress,knownSize,signal,'blob');
+}
+async function driveFetchArrayBuffer(fileId,onProgress,knownSize,signal){
+  return driveFetchPayload(fileId,onProgress,knownSize,signal,'arraybuffer');
 }
 
 /* ---------------------------------------------------------------------
@@ -2792,12 +2813,16 @@ async function readBlobAsArrayBufferInChunks(blob, chunkSize=4*1024*1024){
 }
 
 async function openComicCBR(blob){
-  const { createExtractorFromData, wasmBinary } = await ensureRarLib();
   const data = await readBlobAsArrayBufferInChunks(blob);
   // O leitor atual precisa do arquivo RAR completo como ArrayBuffer; solte a
   // referência ao Blob logo após a conversão para não manter as duas formas
   // do arquivo vivas durante a inicialização do extrator.
   blob = null;
+  return openComicCBRData(data);
+}
+
+async function openComicCBRData(data){
+  const { createExtractorFromData, wasmBinary } = await ensureRarLib();
   // wasmBinary é reaproveitado (já baixado uma vez), mas cada HQ aberta
   // precisa do seu próprio extractor — não dá pra reaproveitar entre
   // arquivos RAR diferentes.
@@ -3029,9 +3054,17 @@ async function openComicPDF(source, onProgress, knownSize, fileId, signal){
 async function sniffArchiveKind(blob){
   try{
     const head = new Uint8Array(await blob.slice(0, 8).arrayBuffer());
-    if(head[0]===0x50 && head[1]===0x4B) return 'cbz'; // "PK"
-    if(head[0]===0x52 && head[1]===0x61 && head[2]===0x72 && head[3]===0x21) return 'cbr'; // "Rar!"
+    return sniffArchiveKindFromBytes(head);
   }catch(e){}
+  return null;
+}
+function sniffArchiveKindFromArrayBuffer(buffer){
+  if(!(buffer instanceof ArrayBuffer)||buffer.byteLength<4)return null;
+  return sniffArchiveKindFromBytes(new Uint8Array(buffer,0,Math.min(8,buffer.byteLength)));
+}
+function sniffArchiveKindFromBytes(head){
+  if(head[0]===0x50 && head[1]===0x4B) return 'cbz'; // "PK"
+  if(head[0]===0x52 && head[1]===0x61 && head[2]===0x72 && head[3]===0x21) return 'cbr'; // "Rar!"
   return null;
 }
 
@@ -9291,7 +9324,15 @@ async function openReader(fileMeta, forceLocal, parentId){
         const pctEl = document.getElementById('reader-status-pct');
         if(pctEl) pctEl.textContent = `${v}%`;
       };
-      if(ext === 'pdf'){
+      if(ext === 'cbr'){
+        status.innerHTML = '<div class="spinner"></div><div>Carregando... <span id="reader-status-pct">0%</span></div>';
+        const data=await driveFetchArrayBuffer(fileMeta.id,p=>{setPct(Math.round(p*100));},Number(fileMeta.size)||0,myAbort.signal);
+        if(myAbort.signal.aborted) throw new DOMException('Carregamento cancelado.','AbortError');
+        const actualKind=sniffArchiveKindFromArrayBuffer(data);
+        if(actualKind==='cbr') doc=await openComicCBRData(data);
+        else if(actualKind==='cbz') doc=await openComicCBZ(new Blob([data]));
+        else throw new Error('O arquivo recebido não parece ser um CBR/RAR válido.');
+      } else if(ext === 'pdf'){
         // Abre o PDF por partes (range requests), sob demanda, sem baixar o
         // arquivo inteiro antes — e sem callback/ticker de progresso, já que
         // a tela não mostra mais porcentagem (evita trabalho extra na UI
@@ -12581,7 +12622,7 @@ async function boot(){
 }
 
 initConnectivityEvents();
-window.PLANETAHQ_BUILD='v104';
+window.PLANETAHQ_BUILD='v105';
 let appBootComplete=false;
 let pendingSWReload=false;
 let swReloadRequested=false;
