@@ -607,7 +607,7 @@
   sobe pra os aparelhos buscarem o index.html novo.
 */
 /* v85: index.html agora monta as seções como mistas e inclui a logo Flash; o cache da Home também reconstrói o índice pai/filho. */
-const CACHE_VERSION = 'v141';
+const CACHE_VERSION = 'v142';
 // Cache das capas: separado do da casca do app e mantido entre versões.
 const COVERS_CACHE = 'planeta-hq-covers-v1';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
@@ -816,6 +816,7 @@ const APP_SHELL = [
   // Suporte a CBR local (bundle ESM + WASM): indispensáveis para abrir
   // HQs .cbr totalmente offline, sem buscar código em CDN.
   './vendor/node-unrar-js.bundle.js',
+  './vendor/unrar-reader-worker.js',
   './vendor/unrar.wasm',
   ...PDF_CMAP_FILES.map((name) => `./vendor/pdfjs/cmaps/${name}`),
   'https://fonts.googleapis.com/css2?family=Anton&family=Inter:wght@400;500;600;700;800&display=swap',
