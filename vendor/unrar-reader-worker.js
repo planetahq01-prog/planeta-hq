@@ -1,4 +1,4 @@
-importScripts('./node-unrar-js.worker.js');
+importScripts('./node-unrar-js.worker.js?v=111');
 const createBlobExtractor = self.PlanetaHQUnrar.createExtractorFromBlob;
 let extractor = null;
 let pageNames = [];
