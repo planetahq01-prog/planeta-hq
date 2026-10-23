@@ -2729,6 +2729,197 @@ async function openComicCBZ(blob){
   };
 }
 
+const LARGE_COMIC_RANGE_MIN_BYTES=400*1000*1000; // 400 MB decimais
+
+function readZipU64(view,offset){
+  const value=view.getUint32(offset,true)+view.getUint32(offset+4,true)*4294967296;
+  if(!Number.isSafeInteger(value))throw new Error('Este ZIP usa um offset maior que o navegador consegue representar com segurança.');
+  return value;
+}
+
+async function readCBZRange(source,size,start,end,signal){
+  if(signal&&signal.aborted)throw new DOMException('Leitura CBZ cancelada.','AbortError');
+  if(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start<0||end<start||end>=size)throw new RangeError('Faixa inválida no arquivo CBZ.');
+  const expected=end-start+1;
+  if(source instanceof Blob){
+    const bytes=new Uint8Array(await source.slice(start,end+1).arrayBuffer());
+    if(signal&&signal.aborted)throw new DOMException('Leitura CBZ cancelada.','AbortError');
+    if(bytes.length!==expected)throw new Error('A faixa local do CBZ veio incompleta.');
+    return bytes;
+  }
+  const controller=new AbortController();
+  const abortRequest=()=>controller.abort();
+  if(signal){
+    if(signal.aborted)throw new DOMException('Leitura CBZ cancelada.','AbortError');
+    signal.addEventListener('abort',abortRequest,{once:true});
+  }
+  try{
+    const response=await withStallTimeout(fetch(source,{cache:'no-store',headers:{Range:`bytes=${start}-${end}`},signal:controller.signal}),20000,'A conexão demorou para iniciar uma faixa do CBZ.');
+    if(response.status!==206){
+      if(response.body)await response.body.cancel().catch(()=>{});
+      throw new Error(`O servidor não aceitou a leitura por faixas do CBZ (HTTP ${response.status}).`);
+    }
+    const bytes=new Uint8Array(await withStallTimeout(response.arrayBuffer(),60000,'A leitura de uma faixa do CBZ excedeu o tempo limite.'));
+    if(bytes.length!==expected)throw new Error('O servidor retornou uma faixa CBZ incompleta.');
+    const contentRange=response.headers.get('Content-Range');
+    const match=contentRange&&contentRange.match(/^bytes\s+(\d+)-(\d+)\//i);
+    if(match&&(Number(match[1])!==start||Number(match[2])!==end))throw new Error('O servidor retornou uma faixa CBZ diferente da solicitada.');
+    return bytes;
+  }catch(error){
+    controller.abort();
+    throw error;
+  }finally{
+    if(signal)signal.removeEventListener('abort',abortRequest);
+  }
+}
+
+function readZip64Extra(extra,uncompressedSize,compressedSize,localOffset,diskStart){
+  let cursor=0,found=false;
+  const view=new DataView(extra.buffer,extra.byteOffset,extra.byteLength);
+  while(cursor+4<=extra.length){
+    const id=view.getUint16(cursor,true),length=view.getUint16(cursor+2,true),data=cursor+4,end=data+length;
+    if(end>extra.length)break;
+    if(id===0x0001){
+      found=true;
+      let p=data;
+      if(uncompressedSize===0xffffffff){uncompressedSize=readZipU64(view,p);p+=8;}
+      if(compressedSize===0xffffffff){compressedSize=readZipU64(view,p);p+=8;}
+      if(localOffset===0xffffffff){localOffset=readZipU64(view,p);p+=8;}
+      if(diskStart===0xffff){diskStart=view.getUint32(p,true);p+=4;}
+      break;
+    }
+    cursor=end;
+  }
+  if((uncompressedSize===0xffffffff||compressedSize===0xffffffff||localOffset===0xffffffff||diskStart===0xffff)&&!found)throw new Error('O diretório ZIP64 está incompleto.');
+  return {uncompressedSize,compressedSize,localOffset,diskStart};
+}
+
+async function readCBZDirectory(source,size,signal){
+  if(!Number.isSafeInteger(size)||size<22)throw new Error('O tamanho do CBZ é inválido.');
+  const tailLength=Math.min(size,65557),tailStart=size-tailLength;
+  const tail=await readCBZRange(source,size,tailStart,size-1,signal);
+  const tailView=new DataView(tail.buffer,tail.byteOffset,tail.byteLength);
+  let eocd=-1;
+  for(let i=tail.length-22;i>=0;i--){
+    if(tailView.getUint32(i,true)===0x06054b50&&i+22+tailView.getUint16(i+20,true)<=tail.length){eocd=i;break;}
+  }
+  if(eocd<0)throw new Error('Não foi possível localizar o diretório central deste CBZ.');
+  const eocdAbsolute=tailStart+eocd;
+  const disk=tailView.getUint16(eocd+4,true),directoryDisk=tailView.getUint16(eocd+6,true);
+  let entryCount=tailView.getUint16(eocd+10,true),directorySize=tailView.getUint32(eocd+12,true),directoryOffset=tailView.getUint32(eocd+16,true);
+  if(entryCount===0xffff||directorySize===0xffffffff||directoryOffset===0xffffffff){
+    if(eocdAbsolute<20)throw new Error('O localizador ZIP64 está ausente.');
+    const locator=await readCBZRange(source,size,eocdAbsolute-20,eocdAbsolute-1,signal);
+    const locatorView=new DataView(locator.buffer,locator.byteOffset,locator.byteLength);
+    if(locatorView.getUint32(0,true)!==0x07064b50)throw new Error('O localizador ZIP64 é inválido.');
+    const zip64Offset=readZipU64(locatorView,8);
+    const record=await readCBZRange(source,size,zip64Offset,zip64Offset+55,signal);
+    const recordView=new DataView(record.buffer,record.byteOffset,record.byteLength);
+    if(recordView.getUint32(0,true)!==0x06064b50)throw new Error('O registro ZIP64 é inválido.');
+    entryCount=readZipU64(recordView,32);
+    directorySize=readZipU64(recordView,40);
+    directoryOffset=readZipU64(recordView,48);
+  }
+  if(disk!==0||directoryDisk!==0)throw new Error('CBZ dividido em vários volumes não é suportado.');
+  if(!entryCount||entryCount>100000||directorySize<=0||directorySize>128*1024*1024||directoryOffset+directorySize>size)throw new Error('Os limites do diretório CBZ são inválidos.');
+  const directory=await readCBZRange(source,size,directoryOffset,directoryOffset+directorySize-1,signal);
+  const view=new DataView(directory.buffer,directory.byteOffset,directory.byteLength);
+  const pages=[];
+  let cursor=0,parsed=0;
+  while(parsed<entryCount){
+    if(cursor+46>directory.length||view.getUint32(cursor,true)!==0x02014b50)throw new Error('Uma entrada do diretório central CBZ é inválida.');
+    const flags=view.getUint16(cursor+8,true),method=view.getUint16(cursor+10,true),crc32=view.getUint32(cursor+16,true);
+    let compressedSize=view.getUint32(cursor+20,true),uncompressedSize=view.getUint32(cursor+24,true);
+    const nameLength=view.getUint16(cursor+28,true),extraLength=view.getUint16(cursor+30,true),commentLength=view.getUint16(cursor+32,true);
+    let diskStart=view.getUint16(cursor+34,true),localOffset=view.getUint32(cursor+42,true);
+    const variableStart=cursor+46,entryEnd=variableStart+nameLength+extraLength+commentLength;
+    if(entryEnd>directory.length)throw new Error('Uma entrada CBZ ultrapassa o diretório central.');
+    const extra=directory.subarray(variableStart+nameLength,variableStart+nameLength+extraLength);
+    if(compressedSize===0xffffffff||uncompressedSize===0xffffffff||localOffset===0xffffffff||diskStart===0xffff){
+      const resolved=readZip64Extra(extra,uncompressedSize,compressedSize,localOffset,diskStart);
+      ({compressedSize,uncompressedSize,localOffset,diskStart}=resolved);
+    }
+    if(diskStart!==0)throw new Error('CBZ dividido em vários volumes não é suportado.');
+    const nameBytes=directory.subarray(variableStart,variableStart+nameLength);
+    let name;
+    try{name=new TextDecoder((flags&0x0800)?'utf-8':'windows-1252').decode(nameBytes);}
+    catch(error){name=new TextDecoder().decode(nameBytes);}
+    if(!(flags&0x0001)&&/\.(jpe?g|png|webp|gif)$/i.test(name)){
+      if(!Number.isSafeInteger(localOffset)||!Number.isSafeInteger(compressedSize)||!Number.isSafeInteger(uncompressedSize)||localOffset+30>size||localOffset+30+compressedSize>size)throw new Error(`Os limites da imagem ZIP são inválidos: ${name}`);
+      pages.push({name,flags,method,crc32,compressedSize,uncompressedSize,localOffset});
+    }
+    cursor=entryEnd;parsed++;
+  }
+  pages.sort((a,b)=>naturalSort(a.name,b.name));
+  if(!pages.length)throw new Error('Nenhuma imagem encontrada dentro do CBZ.');
+  return pages;
+}
+
+function makeSingleEntryZipBlob(entry,compressedBytes){
+  if(entry.compressedSize>0xffffffff||entry.uncompressedSize>0xffffffff)throw new Error(`A imagem ${entry.name} excede o limite ZIP clássico.`);
+  const nameBytes=new TextEncoder().encode(entry.name);
+  if(nameBytes.length>0xffff)throw new Error('O nome de uma página CBZ é longo demais.');
+  const flags=(entry.flags&0x0006)|0x0800; // mantém nível de DEFLATE e declara o nome sintético como UTF-8
+  const local=new Uint8Array(30+nameBytes.length),lv=new DataView(local.buffer);
+  lv.setUint32(0,0x04034b50,true);lv.setUint16(4,20,true);lv.setUint16(6,flags,true);lv.setUint16(8,entry.method,true);
+  lv.setUint32(14,entry.crc32,true);lv.setUint32(18,entry.compressedSize,true);lv.setUint32(22,entry.uncompressedSize,true);
+  lv.setUint16(26,nameBytes.length,true);lv.setUint16(28,0,true);local.set(nameBytes,30);
+  const central=new Uint8Array(46+nameBytes.length),cv=new DataView(central.buffer);
+  cv.setUint32(0,0x02014b50,true);cv.setUint16(4,20,true);cv.setUint16(6,20,true);cv.setUint16(8,flags,true);cv.setUint16(10,entry.method,true);
+  cv.setUint32(16,entry.crc32,true);cv.setUint32(20,entry.compressedSize,true);cv.setUint32(24,entry.uncompressedSize,true);
+  cv.setUint16(28,nameBytes.length,true);cv.setUint16(30,0,true);cv.setUint16(32,0,true);cv.setUint16(34,0,true);cv.setUint32(42,0,true);central.set(nameBytes,46);
+  const end=new Uint8Array(22),ev=new DataView(end.buffer);
+  ev.setUint32(0,0x06054b50,true);ev.setUint16(8,1,true);ev.setUint16(10,1,true);ev.setUint32(12,central.length,true);
+  ev.setUint32(16,local.length+compressedBytes.length,true);ev.setUint16(20,0,true);
+  return new Blob([local,compressedBytes,central,end],{type:'application/zip'});
+}
+
+async function openComicCBZRangeSource(source,size,signal){
+  const pages=await readCBZDirectory(source,size,signal);
+  const cache=createPageCache(4),inFlightPages=new Map();
+  let disposed=false,rangeSource=source;
+  const dispose=()=>{if(disposed)return;disposed=true;cache.disposeAll();inFlightPages.clear();rangeSource=null;pages.length=0;};
+  return {
+    pageCount:pages.length,
+    async getPage(index){
+      const cached=cache.get(index);
+      if(cached)return cached;
+      if(inFlightPages.has(index))return inFlightPages.get(index);
+      if(disposed)throw new Error('O leitor CBZ já foi fechado.');
+      if(!Number.isInteger(index)||index<0||index>=pages.length)throw new RangeError('Índice de página CBZ inválido.');
+      const opening=(async()=>{
+        try{
+          const entry=pages[index];
+          if(entry.flags&0x0001)throw new Error(`A imagem ${entry.name} está criptografada.`);
+          if(entry.method!==0&&entry.method!==8)throw new Error(`O CBZ usa compressão ZIP não suportada para ${entry.name}.`);
+          const header=await readCBZRange(rangeSource,size,entry.localOffset,entry.localOffset+29,signal);
+          const headerView=new DataView(header.buffer,header.byteOffset,header.byteLength);
+          if(headerView.getUint32(0,true)!==0x04034b50)throw new Error(`Cabeçalho local inválido para ${entry.name}.`);
+          const dataStart=entry.localOffset+30+headerView.getUint16(26,true)+headerView.getUint16(28,true);
+          const compressed=entry.compressedSize?await readCBZRange(rangeSource,size,dataStart,dataStart+entry.compressedSize-1,signal):new Uint8Array(0);
+          const syntheticZip=makeSingleEntryZipBlob(entry,compressed);
+          const zip=await JSZip.loadAsync(syntheticZip);
+          const item=zip.file(entry.name);
+          if(!item)throw new Error(`Não foi possível reabrir a imagem ${entry.name} do CBZ.`);
+          const pageBlob=await item.async('blob');
+          if(pageBlob.size!==entry.uncompressedSize)throw new Error(`A imagem ${entry.name} saiu com tamanho incorreto.`);
+          if(disposed||(signal&&signal.aborted))throw new DOMException('Leitura CBZ cancelada.','AbortError');
+          const url=URL.createObjectURL(pageBlob);
+          cache.set(index,url,true);
+          return url;
+        }catch(error){
+          if(error&&error.name!=='AbortError')dispose();
+          throw error;
+        }
+      })();
+      inFlightPages.set(index,opening);
+      try{return await opening;}
+      finally{if(inFlightPages.get(index)===opening)inFlightPages.delete(index);}
+    },
+    dispose
+  };
+}
+
 // HQs CBR leves continuam no caminho original e já conhecido. O Worker fica
 // reservado aos arquivos grandes, que não devem ser materializados por inteiro.
 const LEGACY_CBR_MAX_BYTES=150*1024*1024;
@@ -2783,14 +2974,16 @@ async function openComicCBRLegacy(blob){
   };
 }
 
-async function openComicCBR(blob,signal){
-  if(signal&&signal.aborted)throw new DOMException('Leitura CBR cancelada.','AbortError');
-  let worker,sourceBlobUrl;
+async function openComicCBRSource(sourceUrl,sourceSize,signal,revokeSourceUrl){
+  if(signal&&signal.aborted){
+    if(revokeSourceUrl)URL.revokeObjectURL(sourceUrl);
+    throw new DOMException('Leitura CBR cancelada.','AbortError');
+  }
+  let worker;
   try{
-    sourceBlobUrl=URL.createObjectURL(blob);
-    worker = new Worker(new URL('./vendor/unrar-reader-worker.js?v=111', document.baseURI));
+    worker = new Worker(new URL('./vendor/unrar-reader-worker.js?v=113', document.baseURI));
   }catch(error){
-    if(sourceBlobUrl)URL.revokeObjectURL(sourceBlobUrl);
+    if(revokeSourceUrl)URL.revokeObjectURL(sourceUrl);
     throw new Error('Este aparelho não conseguiu iniciar o leitor CBR de baixo consumo. Atualize o Android System WebView e tente novamente. ' + (error && error.message || ''));
   }
   let nextRequestId=0;
@@ -2837,11 +3030,10 @@ async function openComicCBR(blob,signal){
     catch(error){pending.delete(id);clearTimeout(timer);reject(error);}
   });
   try{
-    const initialized=await request('init',{blobUrl:sourceBlobUrl,size:blob.size},180000);
+    const initialized=await request('init',{sourceUrl,size:sourceSize},180000);
     const cache=createPageCache(4);
     const inFlightPages=new Map();
     return {
-      _sourceBlobUrl:sourceBlobUrl,
       pageCount:initialized.pageCount,
       async getPage(i){
         const cached=cache.get(i);
@@ -2872,9 +3064,7 @@ async function openComicCBR(blob,signal){
         cache.disposeAll();
         inFlightPages.clear();
         try{worker.terminate();}catch(e){}
-        URL.revokeObjectURL(sourceBlobUrl);
-        sourceBlobUrl=null;
-        this._sourceBlobUrl=null;
+        if(revokeSourceUrl)URL.revokeObjectURL(sourceUrl);
         rejectPending(new DOMException('Leitura CBR encerrada.','AbortError'));
       }
     };
@@ -2882,10 +3072,22 @@ async function openComicCBR(blob,signal){
     readerDisposed=true;
     if(signal)signal.removeEventListener('abort',onAbort);
     try{worker.terminate();}catch(e){}
-    if(sourceBlobUrl)URL.revokeObjectURL(sourceBlobUrl);
+    if(revokeSourceUrl)URL.revokeObjectURL(sourceUrl);
     rejectPending(error);
     throw error;
   }
+}
+
+async function openComicCBR(blob,signal){
+  if(signal&&signal.aborted)throw new DOMException('Leitura CBR cancelada.','AbortError');
+  let sourceUrl;
+  try{sourceUrl=URL.createObjectURL(blob);}
+  catch(error){throw new Error('Este aparelho não conseguiu iniciar o leitor CBR de baixo consumo. Atualize o Android System WebView e tente novamente. ' + (error && error.message || ''));}
+  return openComicCBRSource(sourceUrl,blob.size,signal,true);
+}
+
+async function openComicCBRRemote(sourceUrl,size,signal){
+  return openComicCBRSource(sourceUrl,size,signal,false);
 }
 
 // Tenta abrir o PDF do jeito econômico (por pedacinhos, via rede). Se isso
@@ -3096,7 +3298,10 @@ async function openComicFromBlob(fileObj, blob, signal){
       ext = realKind;
     }
   }
-  if(ext === 'cbz') return openComicCBZ(blob);
+  if(ext === 'cbz'){
+    if(blob.size>=LARGE_COMIC_RANGE_MIN_BYTES)return openComicCBZRangeSource(blob,blob.size,signal);
+    return openComicCBZ(blob);
+  }
   if(ext === 'cbr'){
     if(blob.size<=LEGACY_CBR_MAX_BYTES)return openComicCBRLegacy(blob);
     const opening = openComicCBR(blob,signal);
@@ -9350,6 +9555,33 @@ async function openReader(fileMeta, forceLocal, parentId){
         // enquanto o PDF carrega).
         status.innerHTML = '<div class="spinner"></div><div>Carregando...</div>';
         doc = await openComicPDF(driveMediaUrl(fileMeta.id), null, Number(fileMeta.size)||0, fileMeta.id, myAbort.signal);
+      } else if((ext === 'cbr' && Number(fileMeta.size) > LEGACY_CBR_MAX_BYTES) || ((ext === 'cbr' || ext === 'cbz') && Number(fileMeta.size) >= LARGE_COMIC_RANGE_MIN_BYTES)){
+        status.innerHTML = '<div class="spinner"></div><div>Preparando HQ grande por faixas. A primeira página pode levar mais tempo em aparelhos fracos.</div>';
+        const sourceUrl=driveMediaUrl(fileMeta.id);
+        const rangeProbeController=new AbortController();
+        const abortRangeProbe=()=>rangeProbeController.abort();
+        myAbort.signal.addEventListener('abort',abortRangeProbe,{once:true});
+        let probe;
+        try{
+          probe=await withStallTimeout(fetch(sourceUrl,{cache:'no-store',headers:{Range:'bytes=0-7'},signal:rangeProbeController.signal}),20000,'Tempo esgotado ao verificar a leitura por faixas da HQ.');
+        }catch(error){
+          rangeProbeController.abort();
+          throw error;
+        }finally{
+          myAbort.signal.removeEventListener('abort',abortRangeProbe);
+        }
+        if(probe.status!==206){
+          if(probe.body)await probe.body.cancel().catch(()=>{});
+          throw new Error(`O proxy não aceitou leitura por faixas da HQ (HTTP ${probe.status}). O arquivo não foi baixado integralmente para evitar sobrecarregar o aparelho.`);
+        }
+        const headerBytes=new Uint8Array(await probe.arrayBuffer());
+        const actualKind=sniffArchiveKindFromBytes(headerBytes);
+        const rangeTotal=Number(((probe.headers.get('Content-Range')||'').match(/\/(\d+)$/)||[])[1])||0;
+        const sourceSize=rangeTotal||Number(fileMeta.size)||0;
+        if(!sourceSize)throw new Error('O proxy não informou o tamanho da HQ grande para leitura por faixas.');
+        if(actualKind==='cbr')doc=await openComicCBRRemote(sourceUrl,sourceSize,myAbort.signal);
+        else if(actualKind==='cbz')doc=await openComicCBZRangeSource(sourceUrl,sourceSize,myAbort.signal);
+        else throw new Error('O arquivo grande não tem assinatura CBZ/CBR reconhecida. A transferência integral foi cancelada para proteger o aparelho.');
       } else {
         status.innerHTML = '<div class="spinner"></div><div>Carregando... <span id="reader-status-pct">0%</span></div>';
         let blob = await driveFetchBlob(fileMeta.id, p=>{ setPct(Math.round(p*100)); }, Number(fileMeta.size)||0, myAbort.signal);
@@ -12633,7 +12865,7 @@ async function boot(){
 }
 
 initConnectivityEvents();
-window.PLANETAHQ_BUILD='v111';
+window.PLANETAHQ_BUILD='v113';
 let appBootComplete=false;
 let pendingSWReload=false;
 let swReloadRequested=false;
