@@ -2785,15 +2785,14 @@ async function openComicCBRLegacy(blob){
 
 async function openComicCBR(blob,signal){
   if(signal&&signal.aborted)throw new DOMException('Leitura CBR cancelada.','AbortError');
-  let worker;
+  let worker,sourceBlobUrl;
   try{
+    sourceBlobUrl=URL.createObjectURL(blob);
     worker = new Worker(new URL('./vendor/unrar-reader-worker.js', document.baseURI));
   }catch(error){
+    if(sourceBlobUrl)URL.revokeObjectURL(sourceBlobUrl);
     throw new Error('Este aparelho não conseguiu iniciar o leitor CBR de baixo consumo. Atualize o Android System WebView e tente novamente. ' + (error && error.message || ''));
   }
-  // Alguns WebViews Android invalidam a origem file-backed do Blob se a
-  // referência principal for liberada logo após o postMessage.
-  worker.__planetaHqSourceBlob=blob;
   let nextRequestId=0;
   let readerDisposed=false;
   let workerFailed=false;
@@ -2838,11 +2837,11 @@ async function openComicCBR(blob,signal){
     catch(error){pending.delete(id);clearTimeout(timer);reject(error);}
   });
   try{
-    const initialized=await request('init',{blob},180000);
+    const initialized=await request('init',{blobUrl:sourceBlobUrl,size:blob.size},180000);
     const cache=createPageCache(4);
     const inFlightPages=new Map();
     return {
-      _sourceBlob:blob,
+      _sourceBlobUrl:sourceBlobUrl,
       pageCount:initialized.pageCount,
       async getPage(i){
         const cached=cache.get(i);
@@ -2869,20 +2868,21 @@ async function openComicCBR(blob,signal){
       dispose(){
         if(readerDisposed)return;
         readerDisposed=true;
-        worker.__planetaHqSourceBlob=null;
-        this._sourceBlob=null;
         if(signal)signal.removeEventListener('abort',onAbort);
         cache.disposeAll();
         inFlightPages.clear();
         try{worker.terminate();}catch(e){}
+        URL.revokeObjectURL(sourceBlobUrl);
+        sourceBlobUrl=null;
+        this._sourceBlobUrl=null;
         rejectPending(new DOMException('Leitura CBR encerrada.','AbortError'));
       }
     };
   }catch(error){
     readerDisposed=true;
-    worker.__planetaHqSourceBlob=null;
     if(signal)signal.removeEventListener('abort',onAbort);
     try{worker.terminate();}catch(e){}
+    if(sourceBlobUrl)URL.revokeObjectURL(sourceBlobUrl);
     rejectPending(error);
     throw error;
   }
@@ -12633,7 +12633,7 @@ async function boot(){
 }
 
 initConnectivityEvents();
-window.PLANETAHQ_BUILD='v109';
+window.PLANETAHQ_BUILD='v110';
 let appBootComplete=false;
 let pendingSWReload=false;
 let swReloadRequested=false;
