@@ -11126,13 +11126,31 @@ function buildLaunchItems(allFolders, allComics){
   const recentCutoff = now - 30*24*60*60*1000;
   // O Drive normalmente entrega createdTime como ISO. O fallback para
   // modifiedTime cobre itens legados, atalhos e caches antigos que não
-  // tinham a data de criação persistida. Assim uma pasta recém-adicionada
-  // não cai no desempate alfabético e aparece no fim da seção.
-  const launchTimestamp = item=>{
+  // tinham a data de criação persistida.
+  const itemTimestamp = item=>{
     const raw = item && (item.createdTime || item.modifiedTime);
     if(typeof raw === 'number' && Number.isFinite(raw)) return raw < 1e12 ? raw*1000 : raw;
     const parsed = Date.parse(String(raw || ''));
     return Number.isFinite(parsed) ? parsed : 0;
+  };
+  // Uma coleção deve subir quando ela própria OU qualquer HQ/pasta dentro
+  // dela for criada/alterada. Isso mantém Lançamentos realmente dinâmico:
+  // a coleção nova mais recente fica em primeiro, sem nome fixo/pin permanente.
+  const latestByRootId = new Map(folders.map(folder=>[folder.id,itemTimestamp(folder)]));
+  const rootFolderIdOf = item=>{
+    const parentId = item && (item._parentId!=null ? item._parentId : item.parentId);
+    if(folders.some(folder=>folder.id===parentId)) return parentId;
+    const pathIds = Array.isArray(item&&item._pathIds) ? item._pathIds : [];
+    return pathIds.length ? pathIds[0] : null;
+  };
+  (allFolders||[]).concat(allComics||[]).forEach(item=>{
+    const rootFolderId = rootFolderIdOf(item);
+    if(!rootFolderId || !latestByRootId.has(rootFolderId)) return;
+    latestByRootId.set(rootFolderId, Math.max(latestByRootId.get(rootFolderId), itemTimestamp(item)));
+  });
+  const launchTimestamp = item=>{
+    const rootFolderId = folders.some(folder=>folder.id===item.id) ? item.id : null;
+    return rootFolderId ? (latestByRootId.get(rootFolderId)||0) : itemTimestamp(item);
   };
   return items
     .filter(item=>launchTimestamp(item) >= recentCutoff)
