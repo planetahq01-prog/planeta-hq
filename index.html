@@ -2788,7 +2788,7 @@ async function openComicCBR(blob,signal){
   let worker,sourceBlobUrl;
   try{
     sourceBlobUrl=URL.createObjectURL(blob);
-    worker = new Worker(new URL('./vendor/unrar-reader-worker.js', document.baseURI));
+    worker = new Worker(new URL('./vendor/unrar-reader-worker.js?v=111', document.baseURI));
   }catch(error){
     if(sourceBlobUrl)URL.revokeObjectURL(sourceBlobUrl);
     throw new Error('Este aparelho não conseguiu iniciar o leitor CBR de baixo consumo. Atualize o Android System WebView e tente novamente. ' + (error && error.message || ''));
@@ -12633,7 +12633,7 @@ async function boot(){
 }
 
 initConnectivityEvents();
-window.PLANETAHQ_BUILD='v110';
+window.PLANETAHQ_BUILD='v111';
 let appBootComplete=false;
 let pendingSWReload=false;
 let swReloadRequested=false;
