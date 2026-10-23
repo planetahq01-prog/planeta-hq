@@ -2981,7 +2981,7 @@ async function openComicCBRSource(sourceUrl,sourceSize,signal,revokeSourceUrl){
   }
   let worker;
   try{
-    worker = new Worker(new URL('./vendor/unrar-reader-worker.js?v=113', document.baseURI));
+    worker = new Worker(new URL('./vendor/unrar-reader-worker.js?v=114', document.baseURI));
   }catch(error){
     if(revokeSourceUrl)URL.revokeObjectURL(sourceUrl);
     throw new Error('Este aparelho não conseguiu iniciar o leitor CBR de baixo consumo. Atualize o Android System WebView e tente novamente. ' + (error && error.message || ''));
@@ -9555,7 +9555,7 @@ async function openReader(fileMeta, forceLocal, parentId){
         // enquanto o PDF carrega).
         status.innerHTML = '<div class="spinner"></div><div>Carregando...</div>';
         doc = await openComicPDF(driveMediaUrl(fileMeta.id), null, Number(fileMeta.size)||0, fileMeta.id, myAbort.signal);
-      } else if((ext === 'cbr' && Number(fileMeta.size) > LEGACY_CBR_MAX_BYTES) || ((ext === 'cbr' || ext === 'cbz') && Number(fileMeta.size) >= LARGE_COMIC_RANGE_MIN_BYTES)){
+      } else if((ext === 'cbr' && Number(fileMeta.size) > LEGACY_CBR_MAX_BYTES) || (ext === 'cbz' && Number(fileMeta.size) >= LARGE_COMIC_RANGE_MIN_BYTES)){
         status.innerHTML = '<div class="spinner"></div><div>Preparando HQ grande por faixas. A primeira página pode levar mais tempo em aparelhos fracos.</div>';
         const sourceUrl=driveMediaUrl(fileMeta.id);
         const rangeProbeController=new AbortController();
@@ -9580,8 +9580,15 @@ async function openReader(fileMeta, forceLocal, parentId){
         const sourceSize=rangeTotal||Number(fileMeta.size)||0;
         if(!sourceSize)throw new Error('O proxy não informou o tamanho da HQ grande para leitura por faixas.');
         if(actualKind==='cbr')doc=await openComicCBRRemote(sourceUrl,sourceSize,myAbort.signal);
-        else if(actualKind==='cbz')doc=await openComicCBZRangeSource(sourceUrl,sourceSize,myAbort.signal);
-        else throw new Error('O arquivo grande não tem assinatura CBZ/CBR reconhecida. A transferência integral foi cancelada para proteger o aparelho.');
+        else if(actualKind==='cbz'&&sourceSize>=LARGE_COMIC_RANGE_MIN_BYTES)doc=await openComicCBZRangeSource(sourceUrl,sourceSize,myAbort.signal);
+        else if(ext==='cbz'&&Number(fileMeta.size)>=LARGE_COMIC_RANGE_MIN_BYTES)throw new Error('O arquivo CBZ grande não pôde ser reconhecido; a transferência integral foi cancelada para proteger o aparelho.');
+        else{
+          status.innerHTML = '<div class="spinner"></div><div>Carregando... <span id="reader-status-pct">0%</span></div>';
+          let blob=await driveFetchBlob(fileMeta.id,p=>{setPct(Math.round(p*100));},Number(fileMeta.size)||0,myAbort.signal);
+          const opening=openComicFromBlob(fileMeta,blob,myAbort.signal);
+          blob=null;
+          doc=await opening;
+        }
       } else {
         status.innerHTML = '<div class="spinner"></div><div>Carregando... <span id="reader-status-pct">0%</span></div>';
         let blob = await driveFetchBlob(fileMeta.id, p=>{ setPct(Math.round(p*100)); }, Number(fileMeta.size)||0, myAbort.signal);
@@ -12865,7 +12872,7 @@ async function boot(){
 }
 
 initConnectivityEvents();
-window.PLANETAHQ_BUILD='v113';
+window.PLANETAHQ_BUILD='v114';
 let appBootComplete=false;
 let pendingSWReload=false;
 let swReloadRequested=false;
