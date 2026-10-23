@@ -6,17 +6,17 @@ var DataFile = class {
     this.size = 0;
     this.blob = null;
     this.blobReader = null;
+    this.blobUrl = null;
     this.blobBlockSize = 2 * 1024 * 1024;
     this.blobCacheMaxBytes = 16 * 1024 * 1024;
     this.blobCacheBytes = 0;
     this.blobCache = new Map();
     if (data) {
       if (typeof data.slice === "function" && typeof data.size === "number") {
-        if (typeof FileReaderSync === "undefined") {
-          throw new Error("A leitura CBR por fatias exige FileReaderSync em Dedicated Worker.");
-        }
         this.blob = data;
-        this.blobReader = new FileReaderSync();
+        this.blobUrl = typeof self !== "undefined" && self.__PlanetaHQBlobUrl || null;
+        this.blobReader = !this.blobUrl && typeof FileReaderSync !== "undefined" ? new FileReaderSync() : null;
+        if (!this.blobUrl && !this.blobReader) throw new Error("O navegador não oferece leitura segura por faixas para este CBR.");
         this.size = data.size;
       } else {
         const bytes = data instanceof Uint8Array ? data : new Uint8Array(data);
@@ -71,7 +71,24 @@ var DataFile = class {
     }
     const start = index * this.blobBlockSize;
     const end = Math.min(this.size, start + this.blobBlockSize);
-    const bytes = new Uint8Array(this.blobReader.readAsArrayBuffer(this.blob.slice(start, end)));
+    let rawBytes;
+    if (this.blobUrl) {
+      const request = new XMLHttpRequest();
+      request.open("GET", this.blobUrl, false);
+      request.responseType = "arraybuffer";
+      request.setRequestHeader("Range", `bytes=${start}-${end - 1}`);
+      request.send();
+      const contentRange = request.getResponseHeader("Content-Range") || "";
+      const rangeMatch = /^bytes\s+(\d+)-(\d+)\/(\d+)$/i.exec(contentRange);
+      if (request.status !== 206 || !rangeMatch || Number(rangeMatch[1]) !== start || Number(rangeMatch[2]) !== end - 1 || !request.response || request.response.byteLength !== end - start) {
+        throw new Error(`O navegador não entregou a faixa CBR solicitada (${start}-${end - 1}; HTTP ${request.status}; ${contentRange || "sem Content-Range"}).`);
+      }
+      rawBytes = request.response;
+    } else {
+      if (!this.blobReader) throw new Error("O leitor síncrono do CBR não está disponível.");
+      rawBytes = this.blobReader.readAsArrayBuffer(this.blob.slice(start, end));
+    }
+    const bytes = new Uint8Array(rawBytes);
     this.blobCache.set(index, bytes);
     this.blobCacheBytes += bytes.byteLength;
     while (this.blobCacheBytes > this.blobCacheMaxBytes && this.blobCache.size > 1) {
@@ -2847,7 +2864,7 @@ async function createExtractorFromData({ wasmBinary, data, password = "" }) {
   return extractor;
 }
 async function createExtractorFromBlob({ wasmBinary, blob, password = "" }) {
-  if (typeof FileReaderSync === "undefined") {
+  if (typeof FileReaderSync === "undefined" && !(typeof self !== "undefined" && self.__PlanetaHQBlobUrl)) {
     throw new Error("createExtractorFromBlob precisa rodar dentro de um Dedicated Worker com FileReaderSync.");
   }
   const unrar2 = await getUnrar(wasmBinary && { wasmBinary });

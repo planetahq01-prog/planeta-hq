@@ -32,17 +32,22 @@ self.addEventListener('message', async event => {
   const { id, command } = message;
   try {
     if (command === 'init') {
-      if (typeof FileReaderSync === 'undefined') {
-        throw new Error('Este navegador não oferece FileReaderSync em Web Worker; não é seguro abrir este CBR neste aparelho.');
+      const sourceSize = Number(message.size);
+      if (!message.blobUrl || !Number.isSafeInteger(sourceSize) || sourceSize <= 0) throw new Error('A URL temporária ou o tamanho do CBR não chegaram ao worker.');
+      const rangeProbe = await fetch(message.blobUrl, { headers: { Range: 'bytes=0-0' } });
+      if (rangeProbe.status !== 206) {
+        if (rangeProbe.body) await rangeProbe.body.cancel().catch(() => {});
+        throw new Error('Este navegador não permite ler o CBR em faixas seguras; a leitura integral foi cancelada para evitar falta de memória.');
       }
-      if (!message.blob || typeof message.blob.slice !== 'function') {
-        throw new Error('O arquivo CBR não chegou ao worker como Blob.');
-      }
+      const probeBytes = await rangeProbe.arrayBuffer();
+      if (probeBytes.byteLength !== 1) throw new Error('A verificação de leitura por faixas do CBR retornou um tamanho inesperado.');
+      self.__PlanetaHQBlobUrl = message.blobUrl;
       const wasmUrl = new URL('./unrar.wasm', self.location.href);
       const wasmResponse = await fetch(wasmUrl, { cache: 'no-store' });
       if (!wasmResponse.ok) throw new Error(`Não foi possível carregar o decoder RAR (${wasmResponse.status}).`);
       const wasmBinary = await wasmResponse.arrayBuffer();
-      extractor = await createBlobExtractor({ blob: message.blob, wasmBinary });
+      const blobSource = { size: sourceSize, slice: () => null };
+      extractor = await createBlobExtractor({ blob: blobSource, wasmBinary });
       const fileList = extractor.getFileList();
       pageNames = [...fileList.fileHeaders]
         .filter(header => !header.flags.directory && /\.(jpe?g|png|webp|gif)$/i.test(header.name))
@@ -81,6 +86,7 @@ self.addEventListener('message', async event => {
       }
       extractor = null;
       pageNames = [];
+      self.__PlanetaHQBlobUrl = null;
       self.postMessage({ id, ok: true });
       self.close();
       return;
