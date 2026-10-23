@@ -10244,7 +10244,7 @@ function normalizeForFolderMatch(s){
   return normalizeStr(s).replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ');
 }
 
-const ALLFOLDERS_CACHE_KEY = 'planetahq_allfolders_cache_v3'; // v3: inclui createdTime para a seção Lançamentos
+const ALLFOLDERS_CACHE_KEY = 'planetahq_allfolders_cache_v4'; // v4: ordenação robusta de Lançamentos com fallback de data
 
 // Varredura ÚNICA de toda a biblioteca, usada pra montar as 5 seções da
 // Home de uma vez só (Aranha, X-Men, Mangás e Todos os quadrinhos/
@@ -10763,7 +10763,7 @@ function attachCarouselDrag(carousel){
 const ARANHA_CACHE_KEY = 'planetahq_aranha_cache_v3'; // v3: seção passou a ser baseada na coleção "Coleção Homem-Aranha", não mais filtro por nome
 const XMEN_CACHE_KEY = 'planetahq_xmen_cache_v1';
 const MANGA_CACHE_KEY = 'planetahq_manga_cache_v1';
-const ALLCOMICS_CACHE_KEY = 'planetahq_allcomics_cache_v3'; // v3: inclui createdTime para a seção Lançamentos
+const ALLCOMICS_CACHE_KEY = 'planetahq_allcomics_cache_v4'; // v4: ordenação robusta de Lançamentos com fallback de data
 const BATMAN_CACHE_KEY = 'planetahq_batman_cache_v1';
 const SALVAT_CACHE_KEY = 'planetahq_salvat_cache_v1';
 const HULK_CACHE_KEY = 'planetahq_hulk_cache_v1';
@@ -11124,13 +11124,20 @@ function buildLaunchItems(allFolders, allComics){
   const items = folders.concat(comics);
   const now = Date.now();
   const recentCutoff = now - 30*24*60*60*1000;
+  // O Drive normalmente entrega createdTime como ISO. O fallback para
+  // modifiedTime cobre itens legados, atalhos e caches antigos que não
+  // tinham a data de criação persistida. Assim uma pasta recém-adicionada
+  // não cai no desempate alfabético e aparece no fim da seção.
+  const launchTimestamp = item=>{
+    const raw = item && (item.createdTime || item.modifiedTime);
+    if(typeof raw === 'number' && Number.isFinite(raw)) return raw < 1e12 ? raw*1000 : raw;
+    const parsed = Date.parse(String(raw || ''));
+    return Number.isFinite(parsed) ? parsed : 0;
+  };
   return items
-    .filter(item=>{
-      const created = Date.parse(item.createdTime || '');
-      return Number.isFinite(created) && created >= recentCutoff;
-    })
+    .filter(item=>launchTimestamp(item) >= recentCutoff)
     .sort((a,b)=>{
-      const dateDiff = Date.parse(b.createdTime||'') - Date.parse(a.createdTime||'');
+      const dateDiff = launchTimestamp(b) - launchTimestamp(a);
       return dateDiff || String(a.name||'').localeCompare(String(b.name||''),'pt-BR',{numeric:true});
     })
     .slice(0, 10);
