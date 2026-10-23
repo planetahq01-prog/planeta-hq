@@ -1228,6 +1228,38 @@ html,body,button,input,select,textarea{font-family:'WhizBang','Inter',sans-serif
 .detail-tag-note{margin-top:8px;color:var(--text-muted);font-size:10px;line-height:1.45;}
 @media(min-width:700px){.detail-main{padding-top:32px}.detail-cover{width:150px}.detail-name{font-size:31px}.detail-synopsis{font-size:17px}}
 
+
+/* ===================== MODO TABLET ===================== */
+#layout-mode-modal{position:fixed;inset:0;z-index:10001;display:flex;align-items:center;justify-content:center;padding:22px;background:rgba(0,3,12,.82);backdrop-filter:blur(10px);}
+#layout-mode-modal.hidden{display:none;}
+.layout-mode-card{width:min(430px,100%);box-sizing:border-box;padding:26px 22px 22px;border:1px solid rgba(255,255,255,.12);border-radius:22px;background:linear-gradient(155deg,#111d3d,#0b1227);box-shadow:0 24px 80px rgba(0,0,0,.45);color:var(--paper);}
+.layout-mode-mark{width:46px;height:46px;display:grid;place-items:center;border-radius:14px;background:rgba(255,194,61,.13);color:var(--accent);font-size:25px;margin-bottom:16px;}
+.layout-mode-eyebrow{color:var(--accent);font-size:10px;font-weight:800;letter-spacing:.16em;margin-bottom:8px;}
+.layout-mode-card h2{margin:0 0 8px;font-size:25px;line-height:1.12;}
+.layout-mode-card p{margin:0 0 20px;color:var(--paper-dim);font-size:13px;line-height:1.55;}
+.layout-mode-options{display:grid;gap:10px;}
+.layout-mode-option{display:grid;grid-template-columns:34px 1fr 20px;align-items:center;gap:10px;width:100%;padding:14px;border:1px solid rgba(255,255,255,.12);border-radius:14px;background:rgba(255,255,255,.045);color:var(--paper);text-align:left;cursor:pointer;transition:border-color .18s ease,background .18s ease,transform .18s ease;}
+.layout-mode-option:hover,.layout-mode-option:focus-visible{border-color:rgba(255,194,61,.7);background:rgba(255,194,61,.09);outline:none;transform:translateY(-1px);}
+.layout-mode-option-icon{display:grid;place-items:center;width:32px;height:32px;border-radius:10px;background:rgba(85,168,255,.14);color:#76bcff;font-size:19px;}
+.layout-mode-option strong{display:block;font-size:14px;margin-bottom:3px;}
+.layout-mode-option small{display:block;color:var(--paper-dim);font-size:11px;line-height:1.35;}
+.layout-mode-check{opacity:0;color:var(--accent);font-weight:900;font-size:18px;}
+.layout-mode-option.active{border-color:var(--accent);background:rgba(255,194,61,.1);}
+.layout-mode-option.active .layout-mode-check{opacity:1;}
+
+/* Cinco capas visíveis e uma sexta parcialmente revelada no Modo Tablet. */
+body.layout-tablet .carousel{gap:10px;}
+body.layout-tablet .carousel-card{flex-basis:clamp(122px,calc((100vw - 72px)/5),190px);width:clamp(122px,calc((100vw - 72px)/5),190px);}
+body.layout-tablet .home-section[data-home-key="lancamentos"] .carousel-card{flex-basis:clamp(140px,calc((100vw - 58px)/4.5),220px);width:clamp(140px,calc((100vw - 58px)/4.5),220px);}
+body.layout-tablet .grid{grid-template-columns:repeat(5,minmax(0,1fr));gap:16px 12px;}
+body.layout-tablet #view-library.collection-grid-mode .grid{grid-template-columns:repeat(5,minmax(0,1fr));gap:16px 12px;}
+body.layout-tablet .search-grid{padding-left:0;padding-right:0;}
+@media(max-width:699px){
+  body.layout-tablet .carousel-card{flex-basis:calc((100vw - 72px)/5);width:calc((100vw - 72px)/5);}
+  body.layout-tablet .home-section[data-home-key="lancamentos"] .carousel-card{flex-basis:calc((100vw - 58px)/4.5);width:calc((100vw - 58px)/4.5);}
+  body.layout-tablet .grid,body.layout-tablet #view-library.collection-grid-mode .grid{grid-template-columns:repeat(5,minmax(0,1fr));gap:12px 7px;padding-left:12px;padding-right:12px;}
+  body.layout-tablet .grid .card.comic .label,body.layout-tablet .grid .card.folder .label{font-size:10px;}
+}
 </style>
 </head><body>
   <div id="access-gate" class="hidden" style="position:fixed;inset:0;z-index:9999;background:#0a0e1a;display:flex;align-items:center;justify-content:center;padding:24px;">
@@ -1249,6 +1281,19 @@ html,body,button,input,select,textarea{font-family:'WhizBang','Inter',sans-serif
       </div>
       <p id="devices-modal-sub" style="margin:6px 0 16px;color:#9aa3c7;font-size:0.85rem;"></p>
       <div id="devices-modal-list"></div>
+    </div>
+  </div>
+
+  <div id="layout-mode-modal" class="hidden" role="dialog" aria-modal="true" aria-labelledby="layout-mode-title">
+    <div class="layout-mode-card">
+      <div class="layout-mode-mark">▦</div>
+      <div class="layout-mode-eyebrow">PERSONALIZE SUA EXPERIÊNCIA</div>
+      <h2 id="layout-mode-title">Como você quer navegar?</h2>
+      <p>Escolha o layout que combina com a sua tela. Você pode mudar essa opção depois em Configurações.</p>
+      <div class="layout-mode-options">
+        <button type="button" class="layout-mode-option" data-layout-choice="tablet"><span class="layout-mode-option-icon">▦</span><span><strong>Modo Tablet</strong><small>Mais capas por vez, com cinco colunas nas coleções.</small></span><span class="layout-mode-check">✓</span></button>
+        <button type="button" class="layout-mode-option" data-layout-choice="standard"><span class="layout-mode-option-icon">▤</span><span><strong>Modo Padrão</strong><small>Layout equilibrado para celular e computador.</small></span><span class="layout-mode-check">✓</span></button>
+      </div>
     </div>
   </div>
 <div id="app">
@@ -1339,6 +1384,7 @@ html,body,button,input,select,textarea{font-family:'WhizBang','Inter',sans-serif
     <div class="menu-section-label">SEU APLICATIVO</div>
     <button class="drawer-action" id="btn-refresh" title="Atualizar biblioteca"><span class="drawer-icon" id="drawer-icon-refresh"></span><span>Atualizar biblioteca</span><span class="drawer-chevron">›</span></button>
     <button class="drawer-action" id="btn-settings" title="Dispositivos conectados"><span class="drawer-icon" id="drawer-icon-settings"></span><span>Dispositivos conectados</span><span class="drawer-chevron">›</span></button>
+    <button class="drawer-action" id="btn-layout-mode" title="Modo de exibição"><span class="drawer-icon">▦</span><span>Modo de exibição</span><span class="drawer-chevron">›</span></button>
     <div class="menu-section-label">REDES E CONTATO</div>
     <button class="drawer-action" id="btn-instagram" title="Instagram"><span class="drawer-icon" id="drawer-icon-instagram"></span><span>Instagram</span><span class="drawer-chevron">↗</span></button>
     <button class="drawer-action" id="btn-whatsapp" title="WhatsApp"><span class="drawer-icon" id="drawer-icon-whatsapp"></span><span>WhatsApp</span><span class="drawer-chevron">↗</span></button>
@@ -1609,6 +1655,7 @@ window.__rangeStats = {}; // fileId -> {count, totalMs}
 const CONFIG_KEY = 'planetahq_config';
 const READER_PREFS_KEY = 'planetahq_reader_prefs';
 const ACCESS_CODE_KEY = 'planetahq_access_code';
+const LAYOUT_MODE_KEY = 'planetahq_layout_mode_v1';
 
 const DEMOLIDOR_COLLECTION_FOLDER_ID = '18tH5RkW0MWvtqiCaJSQcIG9sb7gfq736';
 const HOMEM_ARANHA_COLLECTION_FOLDER_ID = '1MWAzehuiyTgBipvuMpSdUCcUtUVoakpw';
@@ -12385,6 +12432,10 @@ $('#btn-settings').onclick = ()=>{
   closeMenu();
   openDevicesModal();
 };
+$('#btn-layout-mode').onclick = ()=>{
+  closeMenu();
+  openLayoutModeModal();
+};
 $('#devices-modal-close').onclick = ()=>{ $('#devices-modal').classList.add('hidden'); };
 $('#devices-modal').onclick = (e)=>{ if(e.target.id === 'devices-modal') $('#devices-modal').classList.add('hidden'); };
 
@@ -12399,6 +12450,55 @@ function formatDeviceDate(ts){
   const days = Math.round(hours/24);
   if(days < 30) return `há ${days} dia${days>1?'s':''}`;
   return new Date(ts).toLocaleDateString('pt-BR');
+}
+
+const LAYOUT_MODE_VALUES = ['standard','tablet'];
+function getLayoutMode(){
+  try{ return LAYOUT_MODE_VALUES.includes(localStorage.getItem(LAYOUT_MODE_KEY)) ? localStorage.getItem(LAYOUT_MODE_KEY) : null; }catch(e){ return null; }
+}
+function applyLayoutMode(mode, persist=true){
+  mode = mode === 'tablet' ? 'tablet' : 'standard';
+  document.body.classList.toggle('layout-tablet', mode === 'tablet');
+  document.body.dataset.layoutMode = mode;
+  if(persist){ try{ localStorage.setItem(LAYOUT_MODE_KEY, mode); }catch(e){} }
+  return mode;
+}
+function chooseLayoutMode(){
+  const saved = getLayoutMode();
+  if(saved) { applyLayoutMode(saved, false); return Promise.resolve(saved); }
+  return new Promise(resolve=>{
+    const modal=$('#layout-mode-modal');
+    const buttons=[...modal.querySelectorAll('[data-layout-choice]')];
+    modal.classList.remove('hidden');
+    buttons.forEach(btn=>{
+      btn.classList.remove('active');
+      btn.onclick=()=>{
+        const mode=applyLayoutMode(btn.dataset.layoutChoice, true);
+        modal.classList.add('hidden');
+        resolve(mode);
+      };
+    });
+    buttons[0]?.focus();
+  });
+}
+function openLayoutModeModal(){
+  const modal=$('#layout-mode-modal');
+  const current=document.body.dataset.layoutMode || getLayoutMode() || 'standard';
+  modal.classList.remove('hidden');
+  const buttons=[...modal.querySelectorAll('[data-layout-choice]')];
+  buttons.forEach(btn=>{
+    btn.classList.toggle('active',btn.dataset.layoutChoice===current);
+    btn.onclick=()=>{
+      applyLayoutMode(btn.dataset.layoutChoice,true);
+      modal.classList.add('hidden');
+      toast(btn.dataset.layoutChoice==='tablet' ? 'Modo Tablet ativado' : 'Modo Padrão ativado');
+      if(state.currentTab==='library'){
+        const currentPath=state.path[state.path.length-1];
+        if(currentPath && currentPath.id!==CONFIG.rootFolderId) renderLibrary(currentPath.id,true);
+        else if(typeof paintHomeSections==='function' && lastHomeSectionsData) paintHomeSections($('#home-sections'),lastHomeSectionsData);
+      }
+    };
+  });
 }
 
 async function openDevicesModal(){
@@ -12709,6 +12809,7 @@ async function boot(){
     return;
   }
   await ensureAccessCode();
+  await chooseLayoutMode();
   $('#view-setup').classList.add('hidden');
   await coverWarmupPromise;
   if(navigator.onLine===false){showOfflineAppShell();return;}
@@ -12716,7 +12817,8 @@ async function boot(){
 }
 
 initConnectivityEvents();
-window.PLANETAHQ_BUILD='v115';
+applyLayoutMode(getLayoutMode() || 'standard', false);
+window.PLANETAHQ_BUILD='v116-tablet-mode';
 let appBootComplete=false;
 let pendingSWReload=false;
 let swReloadRequested=false;
