@@ -2706,71 +2706,20 @@ function naturalSort(a,b){
   return a.localeCompare(b, 'pt-BR', {numeric:true, sensitivity:'base'});
 }
 
-async function openComicCBZ(blob){
-  const zip = await JSZip.loadAsync(blob);
-  const names = Object.keys(zip.files)
-    .filter(n=>!zip.files[n].dir && /\.(jpe?g|png|webp|gif)$/i.test(n))
-    .sort(naturalSort);
-  if(names.length === 0) throw new Error('Nenhuma imagem encontrada dentro do CBZ.');
-  const cache = createPageCache(24);
-  return {
-    pageCount: names.length,
-    async getPage(i){
-      const cached = cache.get(i);
-      if(cached) return cached;
-      const fileBlob = await zip.files[names[i]].async('blob');
-      const url = URL.createObjectURL(fileBlob);
-      cache.set(i, url, true);
-      return url;
-    },
-    dispose(){
-      cache.disposeAll();
-    }
-  };
-}
-
-const LARGE_COMIC_RANGE_MIN_BYTES=400*1000*1000; // 400 MB decimais
-
 function readZipU64(view,offset){
   const value=view.getUint32(offset,true)+view.getUint32(offset+4,true)*4294967296;
   if(!Number.isSafeInteger(value))throw new Error('Este ZIP usa um offset maior que o navegador consegue representar com segurança.');
   return value;
 }
 
-async function readCBZRange(source,size,start,end,signal){
+async function readCBZBlobSlice(source,size,start,end,signal){
   if(signal&&signal.aborted)throw new DOMException('Leitura CBZ cancelada.','AbortError');
   if(!Number.isSafeInteger(start)||!Number.isSafeInteger(end)||start<0||end<start||end>=size)throw new RangeError('Faixa inválida no arquivo CBZ.');
-  const expected=end-start+1;
-  if(source instanceof Blob){
-    const bytes=new Uint8Array(await source.slice(start,end+1).arrayBuffer());
-    if(signal&&signal.aborted)throw new DOMException('Leitura CBZ cancelada.','AbortError');
-    if(bytes.length!==expected)throw new Error('A faixa local do CBZ veio incompleta.');
-    return bytes;
-  }
-  const controller=new AbortController();
-  const abortRequest=()=>controller.abort();
-  if(signal){
-    if(signal.aborted)throw new DOMException('Leitura CBZ cancelada.','AbortError');
-    signal.addEventListener('abort',abortRequest,{once:true});
-  }
-  try{
-    const response=await withStallTimeout(fetch(source,{cache:'no-store',headers:{Range:`bytes=${start}-${end}`},signal:controller.signal}),20000,'A conexão demorou para iniciar uma faixa do CBZ.');
-    if(response.status!==206){
-      if(response.body)await response.body.cancel().catch(()=>{});
-      throw new Error(`O servidor não aceitou a leitura por faixas do CBZ (HTTP ${response.status}).`);
-    }
-    const bytes=new Uint8Array(await withStallTimeout(response.arrayBuffer(),60000,'A leitura de uma faixa do CBZ excedeu o tempo limite.'));
-    if(bytes.length!==expected)throw new Error('O servidor retornou uma faixa CBZ incompleta.');
-    const contentRange=response.headers.get('Content-Range');
-    const match=contentRange&&contentRange.match(/^bytes\s+(\d+)-(\d+)\//i);
-    if(match&&(Number(match[1])!==start||Number(match[2])!==end))throw new Error('O servidor retornou uma faixa CBZ diferente da solicitada.');
-    return bytes;
-  }catch(error){
-    controller.abort();
-    throw error;
-  }finally{
-    if(signal)signal.removeEventListener('abort',abortRequest);
-  }
+  if(!(source instanceof Blob))throw new TypeError('O leitor CBZ recebe apenas o arquivo já baixado, nunca uma URL remota.');
+  const bytes=new Uint8Array(await source.slice(start,end+1).arrayBuffer());
+  if(signal&&signal.aborted)throw new DOMException('Leitura CBZ cancelada.','AbortError');
+  if(bytes.length!==end-start+1)throw new Error('A leitura local da página CBZ veio incompleta.');
+  return bytes;
 }
 
 function readZip64Extra(extra,uncompressedSize,compressedSize,localOffset,diskStart){
@@ -2794,10 +2743,10 @@ function readZip64Extra(extra,uncompressedSize,compressedSize,localOffset,diskSt
   return {uncompressedSize,compressedSize,localOffset,diskStart};
 }
 
-async function readCBZDirectory(source,size,signal){
+async function readCBZBlobDirectory(source,size,signal){
   if(!Number.isSafeInteger(size)||size<22)throw new Error('O tamanho do CBZ é inválido.');
   const tailLength=Math.min(size,65557),tailStart=size-tailLength;
-  const tail=await readCBZRange(source,size,tailStart,size-1,signal);
+  const tail=await readCBZBlobSlice(source,size,tailStart,size-1,signal);
   const tailView=new DataView(tail.buffer,tail.byteOffset,tail.byteLength);
   let eocd=-1;
   for(let i=tail.length-22;i>=0;i--){
@@ -2809,11 +2758,11 @@ async function readCBZDirectory(source,size,signal){
   let entryCount=tailView.getUint16(eocd+10,true),directorySize=tailView.getUint32(eocd+12,true),directoryOffset=tailView.getUint32(eocd+16,true);
   if(entryCount===0xffff||directorySize===0xffffffff||directoryOffset===0xffffffff){
     if(eocdAbsolute<20)throw new Error('O localizador ZIP64 está ausente.');
-    const locator=await readCBZRange(source,size,eocdAbsolute-20,eocdAbsolute-1,signal);
+    const locator=await readCBZBlobSlice(source,size,eocdAbsolute-20,eocdAbsolute-1,signal);
     const locatorView=new DataView(locator.buffer,locator.byteOffset,locator.byteLength);
     if(locatorView.getUint32(0,true)!==0x07064b50)throw new Error('O localizador ZIP64 é inválido.');
     const zip64Offset=readZipU64(locatorView,8);
-    const record=await readCBZRange(source,size,zip64Offset,zip64Offset+55,signal);
+    const record=await readCBZBlobSlice(source,size,zip64Offset,zip64Offset+55,signal);
     const recordView=new DataView(record.buffer,record.byteOffset,record.byteLength);
     if(recordView.getUint32(0,true)!==0x06064b50)throw new Error('O registro ZIP64 é inválido.');
     entryCount=readZipU64(recordView,32);
@@ -2822,7 +2771,7 @@ async function readCBZDirectory(source,size,signal){
   }
   if(disk!==0||directoryDisk!==0)throw new Error('CBZ dividido em vários volumes não é suportado.');
   if(!entryCount||entryCount>100000||directorySize<=0||directorySize>128*1024*1024||directoryOffset+directorySize>size)throw new Error('Os limites do diretório CBZ são inválidos.');
-  const directory=await readCBZRange(source,size,directoryOffset,directoryOffset+directorySize-1,signal);
+  const directory=await readCBZBlobSlice(source,size,directoryOffset,directoryOffset+directorySize-1,signal);
   const view=new DataView(directory.buffer,directory.byteOffset,directory.byteLength);
   const pages=[];
   let cursor=0,parsed=0;
@@ -2874,11 +2823,12 @@ function makeSingleEntryZipBlob(entry,compressedBytes){
   return new Blob([local,compressedBytes,central,end],{type:'application/zip'});
 }
 
-async function openComicCBZRangeSource(source,size,signal){
-  const pages=await readCBZDirectory(source,size,signal);
+async function openComicCBZBlob(source,size,signal){
+  if(!(source instanceof Blob))throw new TypeError('A HQ CBZ precisa estar totalmente baixada antes de ser aberta.');
+  const pages=await readCBZBlobDirectory(source,size,signal);
   const cache=createPageCache(4),inFlightPages=new Map();
-  let disposed=false,rangeSource=source;
-  const dispose=()=>{if(disposed)return;disposed=true;cache.disposeAll();inFlightPages.clear();rangeSource=null;pages.length=0;};
+  let disposed=false,sourceBlob=source;
+  const dispose=()=>{if(disposed)return;disposed=true;cache.disposeAll();inFlightPages.clear();sourceBlob=null;pages.length=0;};
   return {
     pageCount:pages.length,
     async getPage(index){
@@ -2892,11 +2842,11 @@ async function openComicCBZRangeSource(source,size,signal){
           const entry=pages[index];
           if(entry.flags&0x0001)throw new Error(`A imagem ${entry.name} está criptografada.`);
           if(entry.method!==0&&entry.method!==8)throw new Error(`O CBZ usa compressão ZIP não suportada para ${entry.name}.`);
-          const header=await readCBZRange(rangeSource,size,entry.localOffset,entry.localOffset+29,signal);
+          const header=await readCBZBlobSlice(sourceBlob,size,entry.localOffset,entry.localOffset+29,signal);
           const headerView=new DataView(header.buffer,header.byteOffset,header.byteLength);
           if(headerView.getUint32(0,true)!==0x04034b50)throw new Error(`Cabeçalho local inválido para ${entry.name}.`);
           const dataStart=entry.localOffset+30+headerView.getUint16(26,true)+headerView.getUint16(28,true);
-          const compressed=entry.compressedSize?await readCBZRange(rangeSource,size,dataStart,dataStart+entry.compressedSize-1,signal):new Uint8Array(0);
+          const compressed=entry.compressedSize?await readCBZBlobSlice(sourceBlob,size,dataStart,dataStart+entry.compressedSize-1,signal):new Uint8Array(0);
           const syntheticZip=makeSingleEntryZipBlob(entry,compressed);
           const zip=await JSZip.loadAsync(syntheticZip);
           const item=zip.file(entry.name);
@@ -2974,16 +2924,17 @@ async function openComicCBRLegacy(blob){
   };
 }
 
-async function openComicCBRSource(sourceUrl,sourceSize,signal,revokeSourceUrl){
+async function openComicCBRBlobUrl(sourceUrl,sourceSize,signal){
+  if(typeof sourceUrl!=='string'||!sourceUrl.startsWith('blob:'))throw new Error('O leitor CBR aceita somente um Blob local já baixado.');
   if(signal&&signal.aborted){
-    if(revokeSourceUrl)URL.revokeObjectURL(sourceUrl);
+    URL.revokeObjectURL(sourceUrl);
     throw new DOMException('Leitura CBR cancelada.','AbortError');
   }
   let worker;
   try{
-    worker = new Worker(new URL('./vendor/unrar-reader-worker.js?v=114', document.baseURI));
+    worker = new Worker(new URL('./vendor/unrar-reader-worker.js?v=115', document.baseURI));
   }catch(error){
-    if(revokeSourceUrl)URL.revokeObjectURL(sourceUrl);
+    URL.revokeObjectURL(sourceUrl);
     throw new Error('Este aparelho não conseguiu iniciar o leitor CBR de baixo consumo. Atualize o Android System WebView e tente novamente. ' + (error && error.message || ''));
   }
   let nextRequestId=0;
@@ -3064,7 +3015,7 @@ async function openComicCBRSource(sourceUrl,sourceSize,signal,revokeSourceUrl){
         cache.disposeAll();
         inFlightPages.clear();
         try{worker.terminate();}catch(e){}
-        if(revokeSourceUrl)URL.revokeObjectURL(sourceUrl);
+        URL.revokeObjectURL(sourceUrl);
         rejectPending(new DOMException('Leitura CBR encerrada.','AbortError'));
       }
     };
@@ -3072,7 +3023,7 @@ async function openComicCBRSource(sourceUrl,sourceSize,signal,revokeSourceUrl){
     readerDisposed=true;
     if(signal)signal.removeEventListener('abort',onAbort);
     try{worker.terminate();}catch(e){}
-    if(revokeSourceUrl)URL.revokeObjectURL(sourceUrl);
+    URL.revokeObjectURL(sourceUrl);
     rejectPending(error);
     throw error;
   }
@@ -3083,109 +3034,41 @@ async function openComicCBR(blob,signal){
   let sourceUrl;
   try{sourceUrl=URL.createObjectURL(blob);}
   catch(error){throw new Error('Este aparelho não conseguiu iniciar o leitor CBR de baixo consumo. Atualize o Android System WebView e tente novamente. ' + (error && error.message || ''));}
-  return openComicCBRSource(sourceUrl,blob.size,signal,true);
+  return openComicCBRBlobUrl(sourceUrl,blob.size,signal);
 }
 
-async function openComicCBRRemote(sourceUrl,size,signal){
-  return openComicCBRSource(sourceUrl,size,signal,false);
-}
-
-// Tenta abrir o PDF do jeito econômico (por pedacinhos, via rede). Se isso
-// travar/demorar demais — alguns PDFs, por causa de como foram criados,
-// obrigam a fazer centenas de pedidos pequenos só pra montar o índice —
-// desiste desse caminho e baixa o arquivo inteiro de uma vez (que já
-// sabemos ser rápido, mesmo em arquivos grandes) pra abrir a partir dele.
-const PDF_STREAM_TIMEOUT_MS = 12000;
-async function loadPdfWithFallback(source, onProgress, knownSize, fileId, signal){
-  if(typeof source !== 'string'){
-    // Antes: 'await source.arrayBuffer()' lia o Blob inteiro de uma vez na
-    // memória. Em PDFs grandes (ex.: os convertidos em altíssima resolução
-    // de scan) isso pode estourar um limite do Chromium/WebView pra leitura
-    // de um único arquivo e falhar com "NotReadableError" ("The requested
-    // file could not be read..."), principalmente em aparelhos com menos
-    // RAM — é por isso que só o PDF falhava e o CBR (bem menor, já
-    // comprimido) abria normal. Criando uma URL de objeto e deixando o
-    // pdf.js ler por pedacinhos (igual já faz com PDF vindo direto da
-    // rede, mais abaixo) evita carregar o arquivo inteiro de uma vez.
-    const objectUrl = URL.createObjectURL(source);
-    try{
-      const loadingTask = pdfjsLib.getDocument({
-        url: objectUrl,
-        rangeChunkSize: 1 << 18,
-        cMapUrl: new URL('./vendor/pdfjs/cmaps/', document.baseURI).href,
-        cMapPacked: true
-      });
-      const pdf = await loadingTask.promise;
-      // Guardado no próprio doc pra ser revogado em openComicPDF() quando o
-      // leitor for fechado (dispose()) — revogar cedo demais quebraria a
-      // leitura das páginas seguintes.
-      pdf._planetaHqObjectUrl = objectUrl;
-      return pdf;
-    }catch(e){
-      URL.revokeObjectURL(objectUrl);
-      throw e;
-    }
-  }
-  const loadingTask = pdfjsLib.getDocument({
-    url: source,
-    rangeChunkSize: 1 << 18,
-    disableAutoFetch: true,
-    disableStream: false,
-    disableRange: false,
+// PDFs chegam como Blob completo pelo fluxo normal de download. O pdf.js
+// abre uma URL Blob local para não materializar o arquivo inteiro em RAM.
+async function loadPdfFromBlob(source, signal){
+  if(!(source instanceof Blob))throw new TypeError('O PDF precisa ser baixado integralmente antes de ser aberto.');
+  if(signal&&signal.aborted)throw new DOMException('Carregamento do PDF cancelado.','AbortError');
+  const objectUrl=URL.createObjectURL(source);
+  const loadingTask=pdfjsLib.getDocument({
+    url:objectUrl,
+    rangeChunkSize:1<<18,
     cMapUrl: new URL('./vendor/pdfjs/cmaps/', document.baseURI).href,
     cMapPacked: true
   });
-  if(onProgress){
-    loadingTask.onProgress = (p)=>{
-      const total = (p && p.total) || knownSize || 0;
-      if(total && p && typeof p.loaded === 'number') onProgress(Math.min(1, p.loaded/total));
-    };
-  }
-  // Se a pessoa sair desta HQ (abrir outra / fechar o leitor) enquanto o PDF
-  // ainda está carregando, encerra o pdf.js e os pedidos de rede dele de
-  // verdade — antes eles continuavam rodando escondidos até terminar.
-  const onAbort = ()=>{ loadingTask.destroy().catch(()=>{}); };
-  if(signal){
-    if(signal.aborted) onAbort();
-    else signal.addEventListener('abort', onAbort, {once:true});
-  }
-  const abortErr = ()=> new DOMException('Carregamento cancelado.', 'AbortError');
-  let streamTimer;
+  const onAbort=()=>{loadingTask.destroy().catch(()=>{});};
+  if(signal)signal.addEventListener('abort',onAbort,{once:true});
   try{
-    if(!fileId) return await loadingTask.promise;
-    try{
-      return await Promise.race([
-        loadingTask.promise,
-        new Promise((_,reject)=>{ streamTimer = setTimeout(()=>reject(new Error('stream-timeout')), PDF_STREAM_TIMEOUT_MS); })
-      ]);
-    }catch(e){
-      if(signal && signal.aborted) throw abortErr();
-      const networkFailure = !!(e && (e.name === 'TypeError' || /failed to fetch|network|fetch|server response.*(408|429|5\d\d)|status (408|429|5\d\d)/i.test(String(e.message||''))));
-      if(e && e.message !== 'stream-timeout' && !networkFailure) throw e;
-      loadingTask.destroy().catch(()=>{});
-      logWarn(networkFailure
-        ? 'Falha transitória no streaming do PDF; tentando download completo com retry:'
-        : 'PDF demorando demais por streaming; tentando download completo com retry:',fileId,e);
-      // PDF.js usa pedidos Range próprios. Se um deles falhar, baixa o PDF
-      // inteiro pelo mesmo fluxo resiliente de HQs (3 tentativas), e então
-      // deixa o leitor local de Blob abrir por partes sem novas chamadas ao proxy.
-      if(onProgress) onProgress(0);
-      const blob = await driveFetchBlob(fileId,onProgress,knownSize,signal);
-      if(signal && signal.aborted) throw abortErr();
-      if(onProgress) onProgress(1);
-      const fallbackDoc = await loadPdfWithFallback(blob,null,knownSize,null,signal);
-      if(signal && signal.aborted){ fallbackDoc.destroy().catch(()=>{}); throw abortErr(); }
-      return fallbackDoc;
-    }
-  } finally {
-    clearTimeout(streamTimer);
-    if(signal) signal.removeEventListener('abort', onAbort);
+    const pdf=await loadingTask.promise;
+    if(signal&&signal.aborted){pdf.destroy().catch(()=>{});throw new DOMException('Carregamento do PDF cancelado.','AbortError');}
+    pdf._planetaHqObjectUrl=objectUrl;
+    return pdf;
+  }catch(error){
+    loadingTask.destroy().catch(()=>{});
+    URL.revokeObjectURL(objectUrl);
+    throw error;
+  }finally{
+    if(signal)signal.removeEventListener('abort',onAbort);
   }
 }
 
 async function openComicPDF(source, onProgress, knownSize, fileId, signal){
+  if(!(source instanceof Blob))throw new TypeError('A HQ PDF precisa estar totalmente baixada antes de ser aberta.');
   pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-  const pdf = await loadPdfWithFallback(source, onProgress, knownSize, fileId, signal);
+  const pdf = await loadPdfFromBlob(source, signal);
   // 14 em vez de 24: as páginas agora saem em resolução bem maior (ver
   // getPage abaixo), então cada uma pesa bem mais em memória — reduzir
   // quantas ficam guardadas ao mesmo tempo evita que o app fique pesado
@@ -3299,8 +3182,7 @@ async function openComicFromBlob(fileObj, blob, signal){
     }
   }
   if(ext === 'cbz'){
-    if(blob.size>=LARGE_COMIC_RANGE_MIN_BYTES)return openComicCBZRangeSource(blob,blob.size,signal);
-    return openComicCBZ(blob);
+    return openComicCBZBlob(blob,blob.size,signal);
   }
   if(ext === 'cbr'){
     if(blob.size<=LEGACY_CBR_MAX_BYTES)return openComicCBRLegacy(blob);
@@ -3308,7 +3190,7 @@ async function openComicFromBlob(fileObj, blob, signal){
     blob = null;
     return opening;
   }
-  if(ext === 'pdf') return openComicPDF(blob);
+  if(ext === 'pdf') return openComicPDF(blob,null,null,null,signal);
   throw new Error('Formato não suportado: ' + ext);
 }
 
@@ -9542,60 +9424,22 @@ async function openReader(fileMeta, forceLocal, parentId){
     } else {
       if(forceLocal || navigator.onLine===false) throw new Error('Esta HQ não foi encontrada nos downloads deste aparelho. Sem internet, só é possível abrir arquivos que aparecem na aba Baixados.');
       state.reader.fromDownload = false;
-      const ext = fileMeta._ext || guessExt(fileMeta) || fileMeta.name.split('.').pop().toLowerCase();
       const setPct = (v)=>{
         if(myToken !== readerLoadToken) return; // esta chamada já foi "aposentada" por uma HQ aberta depois
         const pctEl = document.getElementById('reader-status-pct');
         if(pctEl) pctEl.textContent = `${v}%`;
       };
-      if(ext === 'pdf'){
-        // Abre o PDF por partes (range requests), sob demanda, sem baixar o
-        // arquivo inteiro antes — e sem callback/ticker de progresso, já que
-        // a tela não mostra mais porcentagem (evita trabalho extra na UI
-        // enquanto o PDF carrega).
-        status.innerHTML = '<div class="spinner"></div><div>Carregando...</div>';
-        doc = await openComicPDF(driveMediaUrl(fileMeta.id), null, Number(fileMeta.size)||0, fileMeta.id, myAbort.signal);
-      } else if((ext === 'cbr' && Number(fileMeta.size) > LEGACY_CBR_MAX_BYTES) || (ext === 'cbz' && Number(fileMeta.size) >= LARGE_COMIC_RANGE_MIN_BYTES)){
-        status.innerHTML = '<div class="spinner"></div><div>Preparando HQ grande por faixas. A primeira página pode levar mais tempo em aparelhos fracos.</div>';
-        const sourceUrl=driveMediaUrl(fileMeta.id);
-        const rangeProbeController=new AbortController();
-        const abortRangeProbe=()=>rangeProbeController.abort();
-        myAbort.signal.addEventListener('abort',abortRangeProbe,{once:true});
-        let probe;
-        try{
-          probe=await withStallTimeout(fetch(sourceUrl,{cache:'no-store',headers:{Range:'bytes=0-7'},signal:rangeProbeController.signal}),20000,'Tempo esgotado ao verificar a leitura por faixas da HQ.');
-        }catch(error){
-          rangeProbeController.abort();
-          throw error;
-        }finally{
-          myAbort.signal.removeEventListener('abort',abortRangeProbe);
-        }
-        if(probe.status!==206){
-          if(probe.body)await probe.body.cancel().catch(()=>{});
-          throw new Error(`O proxy não aceitou leitura por faixas da HQ (HTTP ${probe.status}). O arquivo não foi baixado integralmente para evitar sobrecarregar o aparelho.`);
-        }
-        const headerBytes=new Uint8Array(await probe.arrayBuffer());
-        const actualKind=sniffArchiveKindFromBytes(headerBytes);
-        const rangeTotal=Number(((probe.headers.get('Content-Range')||'').match(/\/(\d+)$/)||[])[1])||0;
-        const sourceSize=rangeTotal||Number(fileMeta.size)||0;
-        if(!sourceSize)throw new Error('O proxy não informou o tamanho da HQ grande para leitura por faixas.');
-        if(actualKind==='cbr')doc=await openComicCBRRemote(sourceUrl,sourceSize,myAbort.signal);
-        else if(actualKind==='cbz'&&sourceSize>=LARGE_COMIC_RANGE_MIN_BYTES)doc=await openComicCBZRangeSource(sourceUrl,sourceSize,myAbort.signal);
-        else if(ext==='cbz'&&Number(fileMeta.size)>=LARGE_COMIC_RANGE_MIN_BYTES)throw new Error('O arquivo CBZ grande não pôde ser reconhecido; a transferência integral foi cancelada para proteger o aparelho.');
-        else{
-          status.innerHTML = '<div class="spinner"></div><div>Carregando... <span id="reader-status-pct">0%</span></div>';
-          let blob=await driveFetchBlob(fileMeta.id,p=>{setPct(Math.round(p*100));},Number(fileMeta.size)||0,myAbort.signal);
-          const opening=openComicFromBlob(fileMeta,blob,myAbort.signal);
-          blob=null;
-          doc=await opening;
-        }
-      } else {
-        status.innerHTML = '<div class="spinner"></div><div>Carregando... <span id="reader-status-pct">0%</span></div>';
-        let blob = await driveFetchBlob(fileMeta.id, p=>{ setPct(Math.round(p*100)); }, Number(fileMeta.size)||0, myAbort.signal);
-        const opening = openComicFromBlob(fileMeta, blob, myAbort.signal);
-        blob = null;
-        doc = await opening;
-      }
+      // A HQ inteira é baixada pelo fluxo normal com progresso e retry.
+      // Não enviamos cabeçalho Range ao proxy para abrir CBR, CBZ ou PDF.
+      // Após a transferência, os leitores trabalham no Blob local para não
+      // duplicar arquivos grandes em um ArrayBuffer gigante.
+      status.innerHTML = '<div class="spinner"></div><div>Baixando HQ... <span id="reader-status-pct">0%</span></div>';
+      let blob = await driveFetchBlob(fileMeta.id, p=>{ setPct(Math.round(p*100)); }, Number(fileMeta.size)||0, myAbort.signal);
+      if(myAbort.signal.aborted)throw new DOMException('Download cancelado.','AbortError');
+      status.innerHTML = '<div class="spinner"></div><div>Preparando a HQ baixada...</div>';
+      const opening = openComicFromBlob(fileMeta, blob, myAbort.signal);
+      blob = null;
+      doc = await opening;
     }
     // Se, enquanto isto tudo baixava/abria, a pessoa já saiu pra outra HQ
     // (um token mais novo assumiu), esta chamada está obsoleta — não deve
@@ -12872,7 +12716,7 @@ async function boot(){
 }
 
 initConnectivityEvents();
-window.PLANETAHQ_BUILD='v114';
+window.PLANETAHQ_BUILD='v115';
 let appBootComplete=false;
 let pendingSWReload=false;
 let swReloadRequested=false;
