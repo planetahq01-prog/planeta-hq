@@ -1,4 +1,4 @@
-importScripts('./node-unrar-js.worker.js?v=114');
+importScripts('./node-unrar-js.worker.js?v=115');
 const createBlobExtractor = self.PlanetaHQUnrar.createExtractorFromBlob;
 let extractor = null;
 let pageNames = [];
@@ -33,14 +33,14 @@ self.addEventListener('message', async event => {
   try {
     if (command === 'init') {
       const sourceSize = Number(message.size);
-      if (!message.sourceUrl || !Number.isSafeInteger(sourceSize) || sourceSize <= 0) throw new Error('A URL da fonte ou o tamanho do CBR não chegaram ao worker.');
+      if (typeof message.sourceUrl !== 'string' || !message.sourceUrl.startsWith('blob:') || !Number.isSafeInteger(sourceSize) || sourceSize <= 0) throw new Error('O CBR não chegou ao worker como um Blob local completo.');
       const rangeProbe = await fetch(message.sourceUrl, { headers: { Range: 'bytes=0-0' } });
       if (rangeProbe.status !== 206) {
         if (rangeProbe.body) await rangeProbe.body.cancel().catch(() => {});
-        throw new Error('Este navegador não permite ler o CBR em faixas seguras; a leitura integral foi cancelada para evitar falta de memória.');
+        throw new Error('Este navegador não conseguiu ler o Blob local do CBR com segurança.');
       }
       const probeBytes = await rangeProbe.arrayBuffer();
-      if (probeBytes.byteLength !== 1) throw new Error('A verificação de leitura por faixas do CBR retornou um tamanho inesperado.');
+      if (probeBytes.byteLength !== 1) throw new Error('A verificação do Blob local do CBR retornou um tamanho inesperado.');
       self.__PlanetaHQBlobUrl = message.sourceUrl;
       const wasmUrl = new URL('./unrar.wasm', self.location.href);
       const wasmResponse = await fetch(wasmUrl, { cache: 'no-store' });
