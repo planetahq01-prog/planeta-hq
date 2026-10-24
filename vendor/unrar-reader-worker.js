@@ -78,6 +78,37 @@ self.addEventListener('message', async event => {
       return;
     }
 
+    if (command === 'pages') {
+      if (!extractor) throw new Error('O leitor CBR no worker não está inicializado.');
+      const indices = [...new Set((message.indices || []).map(Number))]
+        .filter(index => Number.isInteger(index) && index >= 0 && index < pageNames.length);
+      if (!indices.length) throw new RangeError('Nenhuma página CBR válida foi solicitada.');
+      const wantedNames = indices.map(index => pageNames[index]);
+      const extractedByName = new Map();
+      const result = extractor.extract({ files: wantedNames });
+      for (const item of result.files) {
+        if (!item || !item.fileHeader || !item.extraction || item.extraction === 'skipped') continue;
+        let bytes = item.extraction;
+        if (bytes.byteOffset !== 0 || bytes.byteLength !== bytes.buffer.byteLength) bytes = bytes.slice();
+        extractedByName.set(item.fileHeader.name, {
+          name: item.fileHeader.name,
+          mime: mimeForName(item.fileHeader.name),
+          bytes: bytes.buffer
+        });
+        item.extraction = null;
+      }
+      const pages = [];
+      const transfers = [];
+      for (const index of indices) {
+        const page = extractedByName.get(pageNames[index]);
+        if (!page) throw new Error(`Falha ao extrair página do CBR: ${pageNames[index]}`);
+        pages.push({ index, name: page.name, mime: page.mime, bytes: page.bytes });
+        transfers.push(page.bytes);
+      }
+      self.postMessage({ id, ok: true, pages }, transfers);
+      return;
+    }
+
     if (command === 'dispose') {
       if (extractor) {
         try { if (extractor._archive) extractor.closeArc(); } catch (error) {}
