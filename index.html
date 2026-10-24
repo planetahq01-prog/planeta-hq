@@ -3020,7 +3020,7 @@ async function openComicCBRBlobUrl(sourceUrl,sourceSize,signal){
   }
   let worker;
   try{
-    worker = new Worker(new URL('./vendor/unrar-reader-worker.js?v=115', document.baseURI));
+    worker = new Worker(new URL('./vendor/unrar-reader-worker.js?v=116', document.baseURI));
   }catch(error){
     URL.revokeObjectURL(sourceUrl);
     throw new Error('Este aparelho não conseguiu iniciar o leitor CBR de baixo consumo. Atualize o Android System WebView e tente novamente. ' + (error && error.message || ''));
@@ -3079,22 +3079,33 @@ async function openComicCBRBlobUrl(sourceUrl,sourceSize,signal){
         if(cached)return cached;
         if(inFlightPages.has(i))return inFlightPages.get(i);
         if(readerDisposed)throw new Error('O leitor CBR já foi fechado.');
+        // CBRs sólidos precisam ser descompactados em sequência. Pedir a
+        // página atual e as duas seguintes numa única operação evita reabrir
+        // e revarrer o RAR a cada toque.
+        const batchIndices=[i,i+1,i+2].filter(index=>index>=0&&index<initialized.pageCount&&!cache.get(index));
         const opening=(async()=>{
           try{
-            const result=await request('page',{index:i},120000);
-            const pageBlob=new Blob([result.bytes],{type:result.mime||'image/jpeg'});
-            result.bytes=null;
-            const url=URL.createObjectURL(pageBlob);
-            cache.set(i,url,true);
+            const result=await request('pages',{indices:batchIndices},180000);
+            for(const page of result.pages||[]){
+              const pageBlob=new Blob([page.bytes],{type:page.mime||'image/jpeg'});
+              page.bytes=null;
+              cache.set(page.index,URL.createObjectURL(pageBlob),true);
+            }
+            const url=cache.get(i);
+            if(!url)throw new Error('A página CBR não foi retornada pelo worker.');
             return url;
           }catch(error){
             if(error&&error.name!=='AbortError')dispose();
             throw error;
           }
         })();
-        inFlightPages.set(i,opening);
+        batchIndices.forEach(index=>inFlightPages.set(index,index===i?opening:opening.then(()=>cache.get(index))));
         try{return await opening;}
-        finally{if(inFlightPages.get(i)===opening)inFlightPages.delete(i);}
+        finally{batchIndices.forEach(index=>{
+          const pending=inFlightPages.get(index);
+          if(index===i&&pending===opening)inFlightPages.delete(index);
+          else if(index!==i&&pending) pending.then(()=>{if(inFlightPages.get(index)===pending)inFlightPages.delete(index);},()=>{if(inFlightPages.get(index)===pending)inFlightPages.delete(index);});
+        });}
       },
       dispose(){
         if(readerDisposed)return;
