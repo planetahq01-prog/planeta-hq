@@ -2070,7 +2070,7 @@ function syncLibraryFilterUI(){
    2) IndexedDB — armazenamento local (capas + downloads offline + progresso)
    --------------------------------------------------------------------- */
 const DB_NAME = 'planetahq_db';
-const DB_VERSION = 9;
+const DB_VERSION = 10;
 let dbPromise = null;
 
 // Ponto único de gravação em 'downloads'. Sem teto: o que a pessoa baixa de
@@ -2134,6 +2134,7 @@ function openDB(){
       if(!db.objectStoreNames.contains('progress')) db.createObjectStore('progress', {keyPath:'id'});
       if(!db.objectStoreNames.contains('favorites')) db.createObjectStore('favorites', {keyPath:'id'});
       if(!db.objectStoreNames.contains('downloadPages')) db.createObjectStore('downloadPages', {keyPath:'id'});
+      if(!db.objectStoreNames.contains('archiveIndex')) db.createObjectStore('archiveIndex', {keyPath:'id'});
       // Guarda o cache das seções da Home (Coleção Homem-Aranha, X-Men,
       // Mangás, Recomendados, e o índice completo de coleções/HQs por trás
       // delas). Antes isso ficava no localStorage, que costuma ter um
@@ -2236,6 +2237,16 @@ function renderedPageKey(fileId,index){ return `${fileId}:${index}`; }
 async function clearRenderedDownloadPages(fileId){
   const pages=await idbAll('downloadPages');
   await Promise.all(pages.filter(page=>page&&page.fileId===fileId).map(page=>idbDelete('downloadPages',page.id)));
+}
+function archiveIndexKey(fileId){ return `cbz:${fileId}`; }
+async function saveDownloadedArchiveIndex(fileMeta,blob,ext){
+  if(ext!=='cbz'||!(blob instanceof Blob))return;
+  try{
+    const pages=await readCBZBlobDirectory(blob,blob.size,null);
+    await idbSet('archiveIndex',{id:archiveIndexKey(fileMeta.id),fileId:fileMeta.id,ext,pageCount:pages.length,pages,savedAt:Date.now()});
+    const local=await idbGet('downloads',fileMeta.id);
+    if(local)await idbSet('downloads',{...local,archiveIndexReady:true,archivePageCount:pages.length});
+  }catch(error){ logWarn('[PlanetaHQ] não foi possível indexar o CBZ offline',error); }
 }
 // Lista apenas metadados de downloads: nunca retenha os Blobs de HQ na tela
 // de Baixados. Cada arquivo só é lido do IndexedDB quando a pessoa o abre.
@@ -2651,13 +2662,16 @@ async function runBackgroundDownload(entry){
     if(entry.cancelRequested)throw new DOMException('Download cancelado.','AbortError');
     const ext=entry.fileMeta._ext||guessExt(entry.fileMeta);
     await saveDownloadWithCap(entry.fileMeta,blob,ext,entry.pathStr);
-    entry.status='preparing';entry.prepareProgress=0;notifyDownload(fileId);
-    await preRenderAllDownloadedPages(entry.fileMeta,blob,ext,entry);
     entry.status='done';entry.progress=1;entry.error=null;
     rememberCompletedDownload(entry);
     toast(`"${entry.fileMeta.name.replace(/\.(pdf|cbz|cbr)$/i,'')}" disponível offline`);
-    // As páginas já estão prontas no store downloadPages; a abertura offline
-    // não precisa descompactar/renderizar a HQ novamente.
+    // O índice do CBZ é só uma lista pequena de offsets. Ele é montado depois
+    // da conclusão para acelerar aberturas futuras, mas nunca segura o botão
+    // de download nem impede a leitura imediata do arquivo local.
+    if(ext==='cbz') setTimeout(()=>saveDownloadedArchiveIndex(entry.fileMeta,blob,ext),0);
+    // O download termina assim que o arquivo original é salvo. Não bloqueie a
+    // fila esperando a renderização de todas as páginas: isso transformava um
+    // download normal numa conversão completa da HQ e podia levar minutos.
   }catch(err){
     if(entry.pauseRequested){entry.status='paused';entry.error=null;}
     else if(entry.cancelRequested || err.name==='AbortError'){entry.status='cancelled';entry.error=null;}
@@ -2882,9 +2896,9 @@ function makeSingleEntryZipBlob(entry,compressedBytes){
   return new Blob([local,compressedBytes,central,end],{type:'application/zip'});
 }
 
-async function openComicCBZBlob(source,size,signal){
+async function openComicCBZBlob(source,size,signal,cachedPages){
   if(!(source instanceof Blob))throw new TypeError('A HQ CBZ precisa estar totalmente baixada antes de ser aberta.');
-  const pages=await readCBZBlobDirectory(source,size,signal);
+  const pages=Array.isArray(cachedPages)&&cachedPages.length?cachedPages:await readCBZBlobDirectory(source,size,signal);
   // Mantém só uma pequena janela em memória: a HQ continua armazenada uma
   // única vez no IndexedDB, mas páginas usadas recentemente não precisam ser
   // descompactadas de novo ao voltar um pouco na leitura.
@@ -3193,10 +3207,11 @@ async function openComicPDF(source, onProgress, knownSize, fileId, signal){
         const canvas = document.createElement('canvas');
         canvas.width = viewport.width; canvas.height = viewport.height;
         await page.render({canvasContext: canvas.getContext('2d'), viewport}).promise;
-        const url = canvas.toDataURL('image/jpeg', 0.95); // 0.9 → 0.95: menos artefato JPEG nos traços/tramas
+        const pageBlob=await new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('Não foi possível codificar a página PDF.')),'image/jpeg',0.95));
+        const url = URL.createObjectURL(pageBlob);
         canvas.width = 0; canvas.height = 0;
         page.cleanup && page.cleanup();
-        cache.set(i, url, false);
+        cache.set(i, url, true);
         return url;
       } finally {
         activePageRenders--;
@@ -3256,7 +3271,7 @@ async function openComicFromBlob(fileObj, blob, signal){
     }
   }
   if(ext === 'cbz'){
-    return openComicCBZBlob(blob,blob.size,signal);
+    return openComicCBZBlob(blob,blob.size,signal,fileObj._archiveIndex&&fileObj._archiveIndex.pages);
   }
   if(ext === 'cbr'){
     if(blob.size<=LEGACY_CBR_MAX_BYTES)return openComicCBRLegacy(blob);
@@ -7688,6 +7703,7 @@ async function downloadFolderOffline(root){
           },file._offlineSize,job.controller.signal);
           const ext=file._ext||guessExt(file);
           await saveDownloadWithCap(file,blob,ext,`Biblioteca / ${file._relativePath}`,{folderGroupId:group.id});
+          if(ext==='cbz') setTimeout(()=>saveDownloadedArchiveIndex(file,blob,ext),0);
         }else{
           await attachOfflineFileToGroup(file.id,group.id);
         }
@@ -8932,6 +8948,7 @@ function renderStoredDownloadCard(it){
 async function removeOfflineDownloadedFile(fileId){
   await idbDelete('downloads',fileId);
   await clearRenderedDownloadPages(fileId).catch(()=>{});
+  await idbDelete('archiveIndex',archiveIndexKey(fileId)).catch(()=>{});
   const notice=recentCompletedDownloads.findIndex(item=>item.fileMeta.id===fileId);
   if(notice>=0)recentCompletedDownloads.splice(notice,1);
   const groups=await idbAll('downloadFolders');
@@ -9053,6 +9070,7 @@ async function removeOfflineFolderGroup(groupId){
     if(await idbHasKey('downloads',fileId))removedCount++;
     await idbDelete('downloads',fileId);
     await clearRenderedDownloadPages(fileId).catch(()=>{});
+    await idbDelete('archiveIndex',archiveIndexKey(fileId)).catch(()=>{});
   }
   const otherGroups=await idbAll('downloadFolders');
   for(const other of otherGroups){
@@ -9550,9 +9568,11 @@ async function openReader(fileMeta, forceLocal, parentId){
     if(local){
       state.reader.fromDownload = true;
       let localBlob = local.blob;
+      const archiveIndex = local.archiveIndexReady ? await idbGet('archiveIndex',archiveIndexKey(fileMeta.id)).catch(()=>null) : null;
+      const localMeta={...fileMeta,_archiveIndex:archiveIndex};
       const opening = local.renderedPageCount>0
         ? openRenderedDownload(fileMeta.id,local.renderedPageCount,myAbort.signal)
-        : openComicFromBlob({...fileMeta, _ext: fileMeta._ext || local.ext}, localBlob, myAbort.signal);
+        : openComicFromBlob({...localMeta, _ext: fileMeta._ext || local.ext}, localBlob, myAbort.signal);
       localBlob = null;
       local.blob = null;
       doc = await opening;
