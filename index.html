@@ -4677,7 +4677,6 @@ function renderFolderCard(f, opts){
     cover.appendChild(ph);
   }
   cover.appendChild(buildFavButton(f));
-  cover.appendChild(buildFolderOfflineButton(f));
   card.appendChild(cover);
   card.appendChild(el('div','label', f.name));
   card.onclick = async ()=>{
@@ -4700,12 +4699,9 @@ function renderComicCard(f, opts){
   const ph = elHtml('div','cover-placeholder skeleton', `${ICONS.page}<span class="ph-name">${escapeHtml(f.name.split('.')[0].slice(0,40))}</span>`);
   card.appendChild(ph);
   card.appendChild(el('div','label', f.name.replace(/\.(pdf|cbz|cbr)$/i,'')));
-  // Mesmo botão de baixar (setinha no canto) usado nas seções de "edição
-  // única" — dá pra reaproveitar direto porque ele já cuida sozinho do
-  // download em segundo plano, do estado (baixando/offline) e do toque
-  // pra remover; só precisa saber o caminho da coleção atual pro toast/label.
-  if(!Array.isArray(f._path)) f._path = state.path.map(p=>p.name);
-  card.appendChild(buildCornerDownloadButton(f));
+  // O download continua disponível na ficha; sobre a capa fica apenas o
+  // favorito, evitando dois ícones concorrentes no mesmo canto.
+  card.appendChild(buildFavButton(f));
 
   card.onclick = async ()=>{
     const pid = f._parentId!=null ? f._parentId : (state.path[state.path.length-1] && state.path[state.path.length-1].id);
@@ -7376,7 +7372,7 @@ function renderCollectionDetails(){
         <div class="detail-cover"><div class="cover-placeholder skeleton">${ICONS.page}</div><div class="detail-cover-fallback hidden">${escapeHtml(title)}</div></div>
         <h1 class="detail-name">${escapeHtml(title)}</h1>
         ${showAuthorUnderTitle?`<p class="detail-author">${escapeHtml(inlineAuthorText)}</p>`:''}${publicationDate?`<p class="detail-meta-line">Publicação: ${escapeHtml(publicationDate)}</p>`:''}
-        <div class="detail-actions"><button class="detail-primary" type="button"><span class="detail-primary-icon">▶</span><span>${isFolder?'Ver capítulos':'Ler agora'}</span></button>${isFolder?`<button class="detail-download-all" type="button" aria-label="Baixar coleção inteira para uso offline" title="Baixar coleção inteira">${ICONS.downloadArrow}</button>`:`<span class="detail-download-one" aria-label="Baixar para ler offline" title="Baixar para ler offline">${ICONS.downloadArrow}</span>`}<button class="detail-favorite" type="button" aria-label="Favoritar" title="Favoritar">♥</button></div>
+        <div class="detail-actions"><button class="detail-primary" type="button"><span class="detail-primary-icon">▶</span><span>${item._continueProgress?'Continuar':isFolder?'Ver capítulos':'Ler agora'}</span></button>${isFolder?`<button class="detail-download-all" type="button" aria-label="Baixar coleção inteira para uso offline" title="Baixar coleção inteira">${ICONS.downloadArrow}</button>`:`<span class="detail-download-one" aria-label="Baixar para ler offline" title="Baixar para ler offline">${ICONS.downloadArrow}</span>`}<button class="detail-favorite" type="button" aria-label="Favoritar" title="Favoritar">♥</button></div>
         <div class="detail-stats"><div class="detail-stat"><strong data-detail-count>${countLabel}</strong><span>${isFolder?'na coleção':'leitura disponível'}</span></div><div class="detail-stat"><strong>${escapeHtml(meta.period)}</strong><span>fase / edição</span></div></div>
       </section>
       <section class="detail-section"><h3>Gêneros</h3><div class="detail-chips">${meta.genres.map(g=>`<span class="detail-chip">${escapeHtml(g)}</span>`).join('')}</div></section>
@@ -7425,6 +7421,13 @@ function renderCollectionDetails(){
       if(!isFolder){
         state.currentListContext=[item]; state.currentListIsLocal=false;
         await openReader(item,undefined,detail.parentId);
+        return;
+      }
+      if(item._continueProgress){
+        const progress=item._continueProgress;
+        state.currentListContext=detail.listing ? detail.listing.files : [progress];
+        state.currentListIsLocal=false;
+        await openReader({...progress,parentId:item.id,_parentId:item.id},undefined,item.id);
         return;
       }
       collectionDetailTab='chapters'; renderCollectionDetails(); await loadCollectionDetailChapters();
@@ -9318,10 +9321,15 @@ async function saveProgress(fileMeta,pageIndex,pageCount,scrollRatio){
   const pct=Math.min(100,Math.round(((pageIndex+1)/pageCount)*100));
   const isScrollMode=state.reader.mode==='scroll'||state.reader.mode==='scroll-desktop';
   if(scrollRatio===undefined) scrollRatio=isScrollMode?getScrollRatioForPage(pageIndex):null;
+  const pathNames=Array.isArray(fileMeta._path)&&fileMeta._path.length?fileMeta._path:state.path.map(p=>p.name);
+  const collectionId=state.reader.parentId || fileMeta.parentId || fileMeta._parentId || fileMeta.id;
+  const collectionName=fileMeta.parentName || (pathNames.length>1?pathNames[pathNames.length-2]:pathNames[pathNames.length-1]) || fileMeta.name;
+  const collectionIsFolder=collectionId!==fileMeta.id;
   await idbSet('progress',{
     id:fileMeta.id,name:fileMeta.name,mimeType:fileMeta.mimeType,
     size:fileMeta.size,_ext:fileMeta._ext||guessExt(fileMeta),
     thumbnailLink:fileMeta.thumbnailLink,parentId:state.reader.parentId||null,
+    collectionId,collectionName,collectionIsFolder,
     pageIndex,pageCount,pct,scrollRatio:isScrollMode?Math.max(0,Math.min(1,Number(scrollRatio)||0)):null,
     readerDirection:state.reader.direction||'ltr',
     path:state.path.map(p=>p.name).join(' / '),updatedAt:Date.now()
@@ -10603,8 +10611,9 @@ function buildCarouselCard(item, opts){
   if(opts.progressPct){
     cover.appendChild(elHtml('div','cc-progress', `<i style="width:${opts.progressPct}%"></i>`));
   }
-  if(isFolder) cover.appendChild(buildFavButton(item, 'span'));
-  else if(opts.dlCorner) cover.appendChild(buildCornerDownloadButton(item));
+  // Capas não exibem mais o download. Tanto HQs quanto pastas usam apenas
+  // o favorito; o download continua acessível pela ficha/offline.
+  cover.appendChild(buildFavButton(item, 'span'));
   btn.appendChild(cover);
 
   btn.appendChild(el('div','cc-name', item.name.replace(/\.(pdf|cbz|cbr)$/i,'')));
@@ -10655,7 +10664,12 @@ function buildCarouselCard(item, opts){
     if(hasCustomDetailMetadata(item,pid)&&!isDescendantOfDetailedCollection(item,pid)){
       openCollectionDetails({...item,_parentId:pid},pid); return;
     }
-    if(isFolder){ enterFolder(item.id, item.name); return; }
+    if(isFolder){
+      if(opts.openDetailsOnFolder){
+        openCollectionDetails({...item,_continueProgress:opts.continueProgress||item._continueProgress},item.parentId||item._parentId||null);
+      }else enterFolder(item.id, item.name);
+      return;
+    }
     if(btn.classList.contains('loading')) return;
     if(pid!=null){
       btn.classList.add('loading');
@@ -11143,10 +11157,27 @@ function hashStr(s){
 async function getContinueItems(){
   try{
     const allProg = await idbAll('progress');
-    return allProg
-      .filter(p=>p.pct >= 5 && p.pct < 98)
-      .sort((a,b)=>b.updatedAt-a.updatedAt)
-      .slice(0, 20);
+    const grouped=new Map();
+    allProg.filter(p=>p.pct >= 5 && p.pct < 98).forEach(progress=>{
+      const collectionId=progress.collectionId||progress.id;
+      const isFolder=progress.collectionIsFolder===true||collectionId!==progress.id;
+      const current=grouped.get(collectionId);
+      if(!current||Number(progress.updatedAt)>Number(current._continueProgress.updatedAt)){
+        const item=isFolder?{
+          id:collectionId,
+          name:progress.collectionName||progress.name,
+          mimeType:'application/vnd.google-apps.folder',
+          isFolder:true,
+          parentId:progress.collectionParentId||null,
+          path:progress.path||'',
+          _continueProgress:progress
+        }:{...progress,_continueProgress:progress};
+        grouped.set(collectionId,item);
+      }
+    });
+    return [...grouped.values()]
+      .sort((a,b)=>Number(b._continueProgress?.updatedAt||0)-Number(a._continueProgress?.updatedAt||0))
+      .slice(0,20);
   }catch(e){ return []; }
 }
 
@@ -11757,7 +11788,14 @@ function paintHomeSectionsNow(wrap, data){
   if(secLancamentos){ built['lancamentos'] = secLancamentos; }
 
   const secContinue = buildHomeSection('Continuar lendo', continueForShelf, (it)=>{
-    return buildCarouselCard(it, { isFolder:false, progressPct: it.pct, sub: `${it.pct}% · pág. ${it.pageIndex+1}/${it.pageCount}` });
+    const progress=it._continueProgress||it;
+    return buildCarouselCard(it, {
+      isFolder:!!it.isFolder,
+      openDetailsOnFolder:!!it.isFolder,
+      continueProgress:progress,
+      progressPct:progress.pct,
+      sub: `${progress.pct}% · pág. ${progress.pageIndex+1}/${progress.pageCount}`
+    });
   }, {collectionTitle:'Continuar lendo',hideViewAll:true,browseLoader:async()=>{
     const all=(await idbAll('progress')).filter(p=>p.pct>=5&&p.pct<98).sort((a,b)=>b.updatedAt-a.updatedAt);
     return filterContinueItemsForShelf(all,currentShelf);
