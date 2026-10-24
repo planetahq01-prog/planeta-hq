@@ -9321,15 +9321,35 @@ async function saveProgress(fileMeta,pageIndex,pageCount,scrollRatio){
   const pct=Math.min(100,Math.round(((pageIndex+1)/pageCount)*100));
   const isScrollMode=state.reader.mode==='scroll'||state.reader.mode==='scroll-desktop';
   if(scrollRatio===undefined) scrollRatio=isScrollMode?getScrollRatioForPage(pageIndex):null;
-  const pathNames=Array.isArray(fileMeta._path)&&fileMeta._path.length?fileMeta._path:state.path.map(p=>p.name);
-  const collectionId=state.reader.parentId || fileMeta.parentId || fileMeta._parentId || fileMeta.id;
-  const collectionName=fileMeta.parentName || (pathNames.length>1?pathNames[pathNames.length-2]:pathNames[pathNames.length-1]) || fileMeta.name;
-  const collectionIsFolder=collectionId!==fileMeta.id;
+  const readerParentId=state.reader.parentId!=null?state.reader.parentId:(fileMeta.parentId!=null?fileMeta.parentId:(fileMeta._parentId!=null?fileMeta._parentId:null));
+  const detailItem=activeCollectionDetail?.item;
+  const readingDetailedFile=!!detailItem && detailItem.id===fileMeta.id && detailItem.mimeType!=='application/vnd.google-apps.folder' && detailItem.isFolder!==true;
+  const parentIsLibraryRoot=readerParentId!=null && String(readerParentId)===String(CONFIG.rootFolderId);
+  // HQs na raiz e HQs abertas pela própria ficha representam a HQ, não a
+  // coleção-pai genérica. Nas demais situações, o cartão representa a pasta.
+  const collectionId=readingDetailedFile||parentIsLibraryRoot||readerParentId==null?fileMeta.id:readerParentId;
+  const isComicContinueItem=String(collectionId)===String(fileMeta.id);
+  const pathNames=Array.isArray(fileMeta._path)?fileMeta._path:[];
+  const pathIds=Array.isArray(fileMeta._pathIds)?fileMeta._pathIds:[];
+  const statePath=Array.isArray(state.path)?state.path:[];
+  const currentPathFolder=statePath[statePath.length-1];
+  const detailedParent=detailItem && String(detailItem.id)===String(collectionId) && (detailItem.mimeType==='application/vnd.google-apps.folder'||detailItem.isFolder===true) ? detailItem : null;
+  const customCollectionTitle=String(customDetailRecordForItem(collectionId)?.displayTitle||'').trim();
+  const pathParentName=pathNames.length?pathNames[pathNames.length-1]:'';
+  const currentParentName=currentPathFolder && String(currentPathFolder.id)===String(collectionId)?currentPathFolder.name:'';
+  const collectionName=customCollectionTitle || (isComicContinueItem?fileMeta.name:(fileMeta.parentName || detailedParent?.name || pathParentName || currentParentName || fileMeta.name));
+  const collectionIsFolder=!isComicContinueItem;
+  let collectionParentId=null;
+  if(collectionIsFolder){
+    if(detailedParent) collectionParentId=detailedParent._parentId??detailedParent.parentId??null;
+    else if(pathIds.length && String(pathIds[pathIds.length-1])===String(collectionId)) collectionParentId=pathIds.length>1?pathIds[pathIds.length-2]:CONFIG.rootFolderId;
+    else if(currentPathFolder && String(currentPathFolder.id)===String(collectionId)) collectionParentId=statePath.length>1?statePath[statePath.length-2].id:CONFIG.rootFolderId;
+  }
   await idbSet('progress',{
     id:fileMeta.id,name:fileMeta.name,mimeType:fileMeta.mimeType,
     size:fileMeta.size,_ext:fileMeta._ext||guessExt(fileMeta),
-    thumbnailLink:fileMeta.thumbnailLink,parentId:state.reader.parentId||null,
-    collectionId,collectionName,collectionIsFolder,
+    thumbnailLink:fileMeta.thumbnailLink,parentId:readerParentId||null,
+    collectionId,collectionName,collectionIsFolder,collectionParentId,
     pageIndex,pageCount,pct,scrollRatio:isScrollMode?Math.max(0,Math.min(1,Number(scrollRatio)||0)):null,
     readerDirection:state.reader.direction||'ltr',
     path:state.path.map(p=>p.name).join(' / '),updatedAt:Date.now()
@@ -10616,7 +10636,9 @@ function buildCarouselCard(item, opts){
   cover.appendChild(buildFavButton(item, 'span'));
   btn.appendChild(cover);
 
-  btn.appendChild(el('div','cc-name', item.name.replace(/\.(pdf|cbz|cbr)$/i,'')));
+  const customTitle=String(customDetailRecordForItem(item.id)?.displayTitle||'').trim();
+  const nameLabel=el('div','cc-name', customTitle||item.name.replace(/\.(pdf|cbz|cbr)$/i,''));
+  btn.appendChild(nameLabel);
 
   const loadCover = async ()=>{
     const ph = cover.querySelector('.cc-placeholder');
@@ -10660,6 +10682,8 @@ function buildCarouselCard(item, opts){
 
   btn.onclick = async ()=>{
     await loadCustomDetailMetadata(item.id);
+    const loadedCustomTitle=String(customDetailRecordForItem(item.id)?.displayTitle||'').trim();
+    if(loadedCustomTitle) nameLabel.textContent=loadedCustomTitle;
     const pid = item.parentId!=null ? item.parentId : (item._parentId!=null ? item._parentId : CONFIG.rootFolderId);
     if(hasCustomDetailMetadata(item,pid)&&!isDescendantOfDetailedCollection(item,pid)){
       openCollectionDetails({...item,_parentId:pid},pid); return;
@@ -11159,13 +11183,19 @@ async function getContinueItems(){
     const allProg = await idbAll('progress');
     const grouped=new Map();
     allProg.filter(p=>p.pct >= 5 && p.pct < 98).forEach(progress=>{
-      const collectionId=progress.collectionId||progress.id;
-      const isFolder=progress.collectionIsFolder===true||collectionId!==progress.id;
+      const storedCollectionId=progress.collectionId||progress.id;
+      const isRootCollection=String(storedCollectionId)===String(CONFIG.rootFolderId);
+      // Progressos antigos podiam agrupar HQs soltas sob o ID da biblioteca;
+      // nesse caso, cada HQ deve aparecer pelo próprio nome, nunca como pasta.
+      const collectionId=isRootCollection?progress.id:storedCollectionId;
+      const isFolder=!isRootCollection&&(progress.collectionIsFolder===true||collectionId!==progress.id);
       const current=grouped.get(collectionId);
       if(!current||Number(progress.updatedAt)>Number(current._continueProgress.updatedAt)){
+        const savedCollectionName=String(progress.collectionName||'').trim();
+        const hasGenericLibraryName=/^biblioteca(?:\s*\(raiz\))?$/i.test(savedCollectionName);
         const item=isFolder?{
           id:collectionId,
-          name:progress.collectionName||progress.name,
+          name:savedCollectionName&&!hasGenericLibraryName?savedCollectionName:progress.name,
           mimeType:'application/vnd.google-apps.folder',
           isFolder:true,
           parentId:progress.collectionParentId||null,
@@ -11736,7 +11766,10 @@ function paintHomeSections(wrap, data){
 function paintHomeSectionsNow(wrap, data){
   lastHomeSectionsData = data;
   const foldersByParent=new Map(),comicsByParent=new Map();
-  (Array.isArray(data.allFolders)?data.allFolders:[]).forEach(item=>{
+  const foldersById=new Map();
+  const allFolderItems=Array.isArray(data.allFolders)?data.allFolders:[];
+  allFolderItems.forEach(item=>{
+    if(item?.id!=null) foldersById.set(String(item.id),item);
     const parentId=item&&(item._parentId!=null?item._parentId:item.parentId);
     if(parentId==null)return;
     if(!foldersByParent.has(parentId))foldersByParent.set(parentId,[]);
@@ -11750,6 +11783,16 @@ function paintHomeSectionsNow(wrap, data){
   });
   homeSectionDataContext = {...data,foldersByParent,comicsByParent};
   const {continueItems, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders, deadpoolFolders, wolverineFolders, motoqueiroFolders, capitaoAmericaFolders, allComics, allFolders, hadError, errorMessage} = data;
+  const resolvedContinueItems=(continueItems||[]).map(item=>{
+    if(!item) return item;
+    const folder=foldersById.get(String(item.id));
+    const customTitle=String(customDetailRecordForItem(item.id)?.displayTitle||'').trim();
+    const canonicalName=customTitle || (isHomeFolderItem(item)&&folder?folder.name:'') || item.name;
+    const canonicalParentId=isHomeFolderItem(item)&&folder?(folder._parentId!=null?folder._parentId:folder.parentId):item.parentId;
+    const nameChanged=canonicalName&&canonicalName!==item.name;
+    const parentChanged=canonicalParentId!=null&&canonicalParentId!==item.parentId;
+    return nameChanged||parentChanged?{...item,name:canonicalName||item.name,parentId:canonicalParentId??item.parentId}:item;
+  });
   // "Recomendados" só com HQs da estante atual (Marvel só recomenda Marvel,
   // DC só DC etc.) — ver comicShelfOf. Repintar ao trocar de estante já
   // recalcula isto (switchShelf chama paintHomeSections de novo).
@@ -11773,7 +11816,7 @@ function paintHomeSectionsNow(wrap, data){
   const secFeatured = buildFeaturedSection({allFolders,allComics});
   if(secFeatured){ built['destaques'] = secFeatured; }
 
-  const continueForShelf=filterContinueItemsForShelf(continueItems,currentShelf);
+  const continueForShelf=filterContinueItemsForShelf(resolvedContinueItems,currentShelf);
   const launchItems = buildLaunchItems(allFolders, allComics);
   const secLancamentos = buildHomeSection('Lançamentos', launchItems, (it)=>{
     const isFolder = isHomeFolderItem(it);
