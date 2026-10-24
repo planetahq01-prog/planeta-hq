@@ -2993,7 +2993,8 @@ async function openComicCBRLegacy(blob){
     .map(h=>h.name)
     .sort(naturalSort);
   if(names.length===0)throw new Error('Nenhuma imagem encontrada dentro do CBR.');
-  const cache=createPageCache(24);
+    const cbrCacheEntries=Math.max(16,Math.min(40,Math.round((Number(navigator.deviceMemory)||4)*6)));
+    const cache=createPageCache(cbrCacheEntries);
   return {
     pageCount:names.length,
     async getPage(i){
@@ -3020,7 +3021,7 @@ async function openComicCBRBlobUrl(sourceUrl,sourceSize,signal){
   }
   let worker;
   try{
-    worker = new Worker(new URL('./vendor/unrar-reader-worker.js?v=116', document.baseURI));
+    worker = new Worker(new URL('./vendor/unrar-reader-worker.js?v=118', document.baseURI));
   }catch(error){
     URL.revokeObjectURL(sourceUrl);
     throw new Error('Este aparelho não conseguiu iniciar o leitor CBR de baixo consumo. Atualize o Android System WebView e tente novamente. ' + (error && error.message || ''));
@@ -3070,7 +3071,10 @@ async function openComicCBRBlobUrl(sourceUrl,sourceSize,signal){
   });
   try{
     const initialized=await request('init',{sourceUrl,size:sourceSize},180000);
-    const cache=createPageCache(4);
+    // Mantém uma janela maior para voltar páginas sem reextrair o RAR. O
+    // limite se adapta à memória anunciada pelo Android/WebView.
+    const cbrCacheEntries=Math.max(16,Math.min(40,Math.round((Number(navigator.deviceMemory)||4)*6)));
+    const cache=createPageCache(cbrCacheEntries);
     const inFlightPages=new Map();
     return {
       pageCount:initialized.pageCount,
@@ -3080,9 +3084,10 @@ async function openComicCBRBlobUrl(sourceUrl,sourceSize,signal){
         if(inFlightPages.has(i))return inFlightPages.get(i);
         if(readerDisposed)throw new Error('O leitor CBR já foi fechado.');
         // CBRs sólidos precisam ser descompactados em sequência. Pedir a
-        // página atual e as duas seguintes numa única operação evita reabrir
+        // página atual e as sete seguintes numa única operação evita reabrir
         // e revarrer o RAR a cada toque.
-        const batchIndices=[i,i+1,i+2].filter(index=>index>=0&&index<initialized.pageCount&&!cache.get(index));
+        const batchIndices=Array.from({length:8},(_,offset)=>i+offset)
+          .filter(index=>index>=0&&index<initialized.pageCount&&!cache.get(index));
         const opening=(async()=>{
           try{
             const result=await request('pages',{indices:batchIndices},180000);
