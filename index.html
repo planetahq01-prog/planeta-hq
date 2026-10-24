@@ -2070,7 +2070,7 @@ function syncLibraryFilterUI(){
    2) IndexedDB — armazenamento local (capas + downloads offline + progresso)
    --------------------------------------------------------------------- */
 const DB_NAME = 'planetahq_db';
-const DB_VERSION = 8;
+const DB_VERSION = 9;
 let dbPromise = null;
 
 // Ponto único de gravação em 'downloads'. Sem teto: o que a pessoa baixa de
@@ -2133,6 +2133,7 @@ function openDB(){
       if(!db.objectStoreNames.contains('folderCovers')) db.createObjectStore('folderCovers', {keyPath:'id'});
       if(!db.objectStoreNames.contains('progress')) db.createObjectStore('progress', {keyPath:'id'});
       if(!db.objectStoreNames.contains('favorites')) db.createObjectStore('favorites', {keyPath:'id'});
+      if(!db.objectStoreNames.contains('downloadPages')) db.createObjectStore('downloadPages', {keyPath:'id'});
       // Guarda o cache das seções da Home (Coleção Homem-Aranha, X-Men,
       // Mangás, Recomendados, e o índice completo de coleções/HQs por trás
       // delas). Antes isso ficava no localStorage, que costuma ter um
@@ -2230,6 +2231,11 @@ async function idbAll(store){
     };
     req.onerror = ()=>reject(req.error);
   });
+}
+function renderedPageKey(fileId,index){ return `${fileId}:${index}`; }
+async function clearRenderedDownloadPages(fileId){
+  const pages=await idbAll('downloadPages');
+  await Promise.all(pages.filter(page=>page&&page.fileId===fileId).map(page=>idbDelete('downloadPages',page.id)));
 }
 // Lista apenas metadados de downloads: nunca retenha os Blobs de HQ na tela
 // de Baixados. Cada arquivo só é lido do IndexedDB quando a pessoa o abre.
@@ -2623,7 +2629,7 @@ function notifyDownload(fileId,entryOverride){
   if(state.currentTab==='downloads') renderDownloadsManager();
 }
 function pumpDownloadQueue(){
-  let running=[...activeDownloads.values()].filter(e=>['downloading','pausing','cancelling'].includes(e.status)).length;
+  let running=[...activeDownloads.values()].filter(e=>['downloading','pausing','cancelling','preparing'].includes(e.status)).length;
   if(running>=MAX_PARALLEL_COMIC_DOWNLOADS)return;
   const queued=[...activeDownloads.values()].filter(e=>e.status==='queued').sort((a,b)=>a.queuedAt-b.queuedAt);
   while(running<MAX_PARALLEL_COMIC_DOWNLOADS && queued.length){
@@ -2645,12 +2651,13 @@ async function runBackgroundDownload(entry){
     if(entry.cancelRequested)throw new DOMException('Download cancelado.','AbortError');
     const ext=entry.fileMeta._ext||guessExt(entry.fileMeta);
     await saveDownloadWithCap(entry.fileMeta,blob,ext,entry.pathStr);
+    entry.status='preparing';entry.prepareProgress=0;notifyDownload(fileId);
+    await preRenderAllDownloadedPages(entry.fileMeta,blob,ext,entry);
     entry.status='done';entry.progress=1;entry.error=null;
     rememberCompletedDownload(entry);
     toast(`"${entry.fileMeta.name.replace(/\.(pdf|cbz|cbr)$/i,'')}" disponível offline`);
-    // Não reabra/decodifique a HQ imediatamente após salvá-la: em aparelhos
-    // Android com pouca memória, gerar a capa nesse ponto concorria com a
-    // gravação do Blob. A capa será gerada sob demanda pelo fallback normal.
+    // As páginas já estão prontas no store downloadPages; a abertura offline
+    // não precisa descompactar/renderizar a HQ novamente.
   }catch(err){
     if(entry.pauseRequested){entry.status='paused';entry.error=null;}
     else if(entry.cancelRequested || err.name==='AbortError'){entry.status='cancelled';entry.error=null;}
@@ -2705,7 +2712,7 @@ function resumeBackgroundDownload(fileId){
 }
 function cancelBackgroundDownload(fileId){
   const entry=activeDownloads.get(fileId);if(!entry)return;
-  if(['downloading','pausing'].includes(entry.status)){
+    if(['downloading','pausing','preparing'].includes(entry.status)){
     entry.cancelRequested=true;entry.status='cancelling';notifyDownload(fileId);
     try{entry.controller&&entry.controller.abort();}catch(e){}
   }else{
@@ -2878,7 +2885,10 @@ function makeSingleEntryZipBlob(entry,compressedBytes){
 async function openComicCBZBlob(source,size,signal){
   if(!(source instanceof Blob))throw new TypeError('A HQ CBZ precisa estar totalmente baixada antes de ser aberta.');
   const pages=await readCBZBlobDirectory(source,size,signal);
-  const cache=createPageCache(4),inFlightPages=new Map();
+  // Mantém só uma pequena janela em memória: a HQ continua armazenada uma
+  // única vez no IndexedDB, mas páginas usadas recentemente não precisam ser
+  // descompactadas de novo ao voltar um pouco na leitura.
+  const cache=createPageCache(8),inFlightPages=new Map();
   let disposed=false,sourceBlob=source;
   const dispose=()=>{if(disposed)return;disposed=true;cache.disposeAll();inFlightPages.clear();sourceBlob=null;pages.length=0;};
   return {
@@ -2899,11 +2909,23 @@ async function openComicCBZBlob(source,size,signal){
           if(headerView.getUint32(0,true)!==0x04034b50)throw new Error(`Cabeçalho local inválido para ${entry.name}.`);
           const dataStart=entry.localOffset+30+headerView.getUint16(26,true)+headerView.getUint16(28,true);
           const compressed=entry.compressedSize?await readCBZBlobSlice(sourceBlob,size,dataStart,dataStart+entry.compressedSize-1,signal):new Uint8Array(0);
-          const syntheticZip=makeSingleEntryZipBlob(entry,compressed);
-          const zip=await JSZip.loadAsync(syntheticZip);
-          const item=zip.file(entry.name);
-          if(!item)throw new Error(`Não foi possível reabrir a imagem ${entry.name} do CBZ.`);
-          const pageBlob=await item.async('blob');
+          let pageBlob;
+          // Chrome/Android WebView modernos descompactam DEFLATE nativamente,
+          // evitando criar um ZIP sintético e inicializar o JSZip para cada
+          // página. O caminho antigo permanece como fallback para WebViews
+          // que ainda não expõem DecompressionStream.
+          if(entry.method===0){
+            pageBlob=new Blob([compressed],{type:/\.png$/i.test(entry.name)?'image/png':/\.webp$/i.test(entry.name)?'image/webp':'image/jpeg'});
+          }else if(typeof DecompressionStream==='function'){
+            const stream=new Blob([compressed]).stream().pipeThrough(new DecompressionStream('deflate-raw'));
+            pageBlob=new Blob([await new Response(stream).arrayBuffer()],{type:/\.png$/i.test(entry.name)?'image/png':/\.webp$/i.test(entry.name)?'image/webp':'image/jpeg'});
+          }else{
+            const syntheticZip=makeSingleEntryZipBlob(entry,compressed);
+            const zip=await JSZip.loadAsync(syntheticZip);
+            const item=zip.file(entry.name);
+            if(!item)throw new Error(`Não foi possível reabrir a imagem ${entry.name} do CBZ.`);
+            pageBlob=await item.async('blob');
+          }
           if(pageBlob.size!==entry.uncompressedSize)throw new Error(`A imagem ${entry.name} saiu com tamanho incorreto.`);
           if(disposed||(signal&&signal.aborted))throw new DOMException('Leitura CBZ cancelada.','AbortError');
           const url=URL.createObjectURL(pageBlob);
@@ -3244,6 +3266,62 @@ async function openComicFromBlob(fileObj, blob, signal){
   }
   if(ext === 'pdf') return openComicPDF(blob,null,null,null,signal);
   throw new Error('Formato não suportado: ' + ext);
+}
+
+async function openRenderedDownload(fileId,pageCount,signal){
+  const cache=createPageCache(8),inFlightPages=new Map();
+  let disposed=false;
+  const dispose=()=>{if(disposed)return;disposed=true;cache.disposeAll();inFlightPages.clear();};
+  return {
+    pageCount,
+    async getPage(index){
+      const cached=cache.get(index);
+      if(cached)return cached;
+      if(inFlightPages.has(index))return inFlightPages.get(index);
+      if(disposed)throw new Error('O leitor offline já foi fechado.');
+      if(!Number.isInteger(index)||index<0||index>=pageCount)throw new RangeError('Índice de página offline inválido.');
+      const opening=(async()=>{
+        if(signal&&signal.aborted)throw new DOMException('Leitura offline cancelada.','AbortError');
+        const page=await idbGet('downloadPages',renderedPageKey(fileId,index));
+        if(!page||!(page.blob instanceof Blob))throw new Error('A página pré-renderizada não está disponível.');
+        const url=URL.createObjectURL(page.blob);
+        cache.set(index,url,true);
+        return url;
+      })();
+      inFlightPages.set(index,opening);
+      try{return await opening;}
+      finally{if(inFlightPages.get(index)===opening)inFlightPages.delete(index);}
+    },
+    dispose
+  };
+}
+
+async function preRenderAllDownloadedPages(fileMeta,blob,ext,entry){
+  const signal=entry.controller&&entry.controller.signal;
+  await clearRenderedDownloadPages(fileMeta.id);
+  let doc;
+  let rendered=0;
+  try{
+    doc=await openComicFromBlob({...fileMeta,_ext:ext},blob,signal);
+    for(let index=0;index<doc.pageCount;index++){
+      if(entry.cancelRequested||signal&&signal.aborted)throw new DOMException('Preparação cancelada.','AbortError');
+      const url=await doc.getPage(index);
+      const response=await fetch(url);
+      if(!response.ok)throw new Error(`Não foi possível salvar a página ${index+1}.`);
+      const pageBlob=await response.blob();
+      await idbSet('downloadPages',{id:renderedPageKey(fileMeta.id,index),fileId:fileMeta.id,index,blob:pageBlob,mimeType:pageBlob.type||'image/jpeg',savedAt:Date.now()});
+      rendered=index+1;
+      entry.prepareProgress=rendered/doc.pageCount;
+      notifyDownload(fileMeta.id);
+    }
+    const local=await idbGet('downloads',fileMeta.id);
+    if(local)await idbSet('downloads',{...local,renderedPageCount:rendered,renderedAt:Date.now()});
+  }catch(error){
+    await clearRenderedDownloadPages(fileMeta.id).catch(()=>{});
+    throw error;
+  }finally{
+    if(doc&&doc.dispose)await doc.dispose();
+  }
 }
 
 /* ---------------------------------------------------------------------
@@ -8853,6 +8931,7 @@ function renderStoredDownloadCard(it){
 }
 async function removeOfflineDownloadedFile(fileId){
   await idbDelete('downloads',fileId);
+  await clearRenderedDownloadPages(fileId).catch(()=>{});
   const notice=recentCompletedDownloads.findIndex(item=>item.fileMeta.id===fileId);
   if(notice>=0)recentCompletedDownloads.splice(notice,1);
   const groups=await idbAll('downloadFolders');
@@ -8900,7 +8979,7 @@ function renderDownloadsManager(groups){
   if(activeFolderDownload&&!folderTasks.some(g=>g.rootId===activeFolderDownload.rootId))folderTasks.unshift({id:'active-folder-scan',rootId:activeFolderDownload.rootId,name:activeFolderDownload.rootName||'Coleção',items:[],status:'downloading'});
   const completed=recentCompletedDownloads;
   const taskCount=active.length+folderTasks.length;
-  const runningCount=active.filter(e=>['downloading','pausing','cancelling'].includes(e.status)).length+(activeFolderDownload?1:0);
+  const runningCount=active.filter(e=>['downloading','pausing','cancelling','preparing'].includes(e.status)).length+(activeFolderDownload?1:0);
   const queuedCount=active.filter(e=>['queued','paused','error'].includes(e.status)).length+folderTasks.filter(g=>!(activeFolderDownload&&activeFolderDownload.rootId===g.rootId)).length;
   $('#downloads-manager-summary').textContent=taskCount?`${runningCount} em andamento · ${queuedCount} na fila/pausado(s)${completed.length?` · ${completed.length} concluído(s)`:''}`:completed.length?`${completed.length} concluído(s)`:'Fila vazia';
   if(!taskCount&&!completed.length){list.innerHTML='<div class="download-manager-empty">Baixe uma HQ ou coleção para acompanhar e controlar as tarefas por aqui.</div>';return;}
@@ -8916,14 +8995,15 @@ function renderDownloadsManager(groups){
     list.appendChild(row);return row;
   };
   active.forEach(entry=>{
-    const statusMap={queued:'Na fila',downloading:`Baixando · ${Math.round((Number(entry.progress)||0)*100)}%`,pausing:'Pausando',paused:'Interrompido · pode retomar',cancelling:'Parando',error:'Falha · pronto para retomar'};
+    const statusMap={queued:'Na fila',downloading:`Baixando · ${Math.round((Number(entry.progress)||0)*100)}%`,preparing:`Preparando páginas · ${Math.round((Number(entry.prepareProgress)||0)*100)}%`,pausing:'Pausando',paused:'Interrompido · pode retomar',cancelling:'Parando',error:'Falha · pronto para retomar'};
     const buttons=[];
     if(entry.status==='downloading')buttons.push(managerButton('Pausar',()=>pauseBackgroundDownload(entry.fileMeta.id)));
     else if(['queued','paused','error'].includes(entry.status))buttons.push(managerButton(entry.status==='queued'?'Pausar':entry.status==='error'?'Tentar novamente':'Retomar',()=>entry.status==='queued'?pauseBackgroundDownload(entry.fileMeta.id):resumeBackgroundDownload(entry.fileMeta.id)));
-    if(['downloading','pausing','cancelling'].includes(entry.status))buttons.push(managerButton('Cancelar',()=>cancelBackgroundDownload(entry.fileMeta.id),true));
+    if(['downloading','pausing','cancelling','preparing'].includes(entry.status))buttons.push(managerButton('Cancelar',()=>cancelBackgroundDownload(entry.fileMeta.id),true));
     else buttons.push(managerButton('Remover da fila',()=>cancelBackgroundDownload(entry.fileMeta.id),true));
     const detail=entry.status==='error'?`${entry.pathStr||'Biblioteca'} · ${entry.error&&entry.error.message?entry.error.message:'O download falhou. Tente novamente.'}`:entry.status==='paused'?`${entry.pathStr||'Biblioteca'} · O progresso pode ser retomado.`:(entry.pathStr||'');
-    makeRow(entry.fileMeta.name,detail,statusMap[entry.status]||entry.status,entry.progress*100,buttons,entry.status==='queued'||(entry.status==='downloading'&&!entry.progress));
+    const displayProgress=entry.status==='preparing'?entry.prepareProgress*100:entry.progress*100;
+    makeRow(entry.fileMeta.name,detail,statusMap[entry.status]||entry.status,displayProgress,buttons,entry.status==='queued'||(entry.status==='downloading'&&!entry.progress));
   });
   completed.forEach(item=>{
     const row=makeRow(item.fileMeta.name,`${item.pathStr||'Biblioteca'} · salva para leitura offline`,'Concluído · disponível offline',100,[managerButton('Dispensar',()=>dismissCompletedDownload(item.fileMeta.id))],false);
@@ -8972,6 +9052,7 @@ async function removeOfflineFolderGroup(groupId){
     if(doneIndex>=0)recentCompletedDownloads.splice(doneIndex,1);
     if(await idbHasKey('downloads',fileId))removedCount++;
     await idbDelete('downloads',fileId);
+    await clearRenderedDownloadPages(fileId).catch(()=>{});
   }
   const otherGroups=await idbAll('downloadFolders');
   for(const other of otherGroups){
@@ -9469,7 +9550,9 @@ async function openReader(fileMeta, forceLocal, parentId){
     if(local){
       state.reader.fromDownload = true;
       let localBlob = local.blob;
-      const opening = openComicFromBlob({...fileMeta, _ext: fileMeta._ext || local.ext}, localBlob, myAbort.signal);
+      const opening = local.renderedPageCount>0
+        ? openRenderedDownload(fileMeta.id,local.renderedPageCount,myAbort.signal)
+        : openComicFromBlob({...fileMeta, _ext: fileMeta._ext || local.ext}, localBlob, myAbort.signal);
       localBlob = null;
       local.blob = null;
       doc = await opening;
