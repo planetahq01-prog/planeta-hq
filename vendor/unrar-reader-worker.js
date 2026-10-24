@@ -2,16 +2,6 @@ importScripts('./node-unrar-js.worker.js?v=115');
 const createBlobExtractor = self.PlanetaHQUnrar.createExtractorFromBlob;
 let extractor = null;
 let pageNames = [];
-let sequentialOpen = false;
-let sequentialFinished = false;
-let sequentialSeen = new Set();
-
-function resetSequentialArchive() {
-  try { if (sequentialOpen && extractor && extractor._archive) extractor.closeArc(); } catch (error) {}
-  sequentialOpen = false;
-  sequentialFinished = false;
-  sequentialSeen = new Set();
-}
 
 function naturalSort(a, b) {
   return a.localeCompare(b, 'pt-BR', { numeric: true, sensitivity: 'base' });
@@ -58,7 +48,6 @@ self.addEventListener('message', async event => {
       const wasmBinary = await wasmResponse.arrayBuffer();
       const blobSource = { size: sourceSize, slice: () => null };
       extractor = await createBlobExtractor({ blob: blobSource, wasmBinary });
-      resetSequentialArchive();
       const fileList = extractor.getFileList();
       pageNames = [...fileList.fileHeaders]
         .filter(header => !header.flags.directory && /\.(jpe?g|png|webp|gif)$/i.test(header.name))
@@ -95,32 +84,18 @@ self.addEventListener('message', async event => {
         .filter(index => Number.isInteger(index) && index >= 0 && index < pageNames.length);
       if (!indices.length) throw new RangeError('Nenhuma página CBR válida foi solicitada.');
       const wantedNames = indices.map(index => pageNames[index]);
-      // Mantém o arquivo RAR aberto e avança a partir do ponto anterior.
-      // Isso é especialmente importante em arquivos sólidos: reabrir o RAR
-      // para cada lote obrigava o decoder a refazer todo o trabalho anterior.
-      if (sequentialFinished || wantedNames.some(name => sequentialSeen.has(name))) resetSequentialArchive();
-      if (!sequentialOpen) {
-        extractor.openArc(false);
-        sequentialOpen = true;
-      }
-      const wanted = new Set(wantedNames);
       const extractedByName = new Map();
-      while (extractedByName.size < wanted.size && !sequentialFinished) {
-        const arcFile = extractor.processNextFile(header => !wanted.has(header.name));
-        if (arcFile === 'ERAR_END_ARCHIVE') {
-          sequentialFinished = true;
-          try { extractor.closeArc(); } catch (error) {}
-          sequentialOpen = false;
-          break;
-        }
-        const name = arcFile && arcFile.fileHeader && arcFile.fileHeader.name;
-        if (!name) continue;
-        sequentialSeen.add(name);
-        if (!wanted.has(name) || !arcFile.extraction || arcFile.extraction === 'skipped') continue;
-        let bytes = arcFile.extraction;
+      const result = extractor.extract({ files: wantedNames });
+      for (const item of result.files) {
+        if (!item || !item.fileHeader || !item.extraction || item.extraction === 'skipped') continue;
+        let bytes = item.extraction;
         if (bytes.byteOffset !== 0 || bytes.byteLength !== bytes.buffer.byteLength) bytes = bytes.slice();
-        extractedByName.set(name, { name, mime: mimeForName(name), bytes: bytes.buffer });
-        arcFile.extraction = null;
+        extractedByName.set(item.fileHeader.name, {
+          name: item.fileHeader.name,
+          mime: mimeForName(item.fileHeader.name),
+          bytes: bytes.buffer
+        });
+        item.extraction = null;
       }
       const pages = [];
       const transfers = [];
