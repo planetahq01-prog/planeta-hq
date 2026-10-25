@@ -1193,12 +1193,14 @@ html,body,button,input,select,textarea{font-family:'WhizBang','Inter',sans-serif
 .detail-chip{padding:8px 13px;border:1px solid rgba(255,255,255,.07);border-radius:999px;background:#171a20;color:#d6d9df;font-size:13px;}
 .detail-synopsis{margin:0;color:#e2e4e8;font-size:16px;line-height:1.68;}
 .detail-credit{color:var(--text-muted);font-size:12px;line-height:1.5;}
-.detail-chapters-toolbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;padding:14px 14px 0;}
-.detail-chapters-toolbar .detail-chapters-status{flex:1 1 100%;}
-.detail-chapter-filters{display:flex;gap:4px;overflow-x:auto;min-width:0;padding:2px 0;scrollbar-width:none;}
+.detail-chapters-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 14px 0;}
+.detail-chapter-filters{display:none;gap:4px;overflow-x:auto;min-width:0;padding:2px 0;scrollbar-width:none;}
 .detail-chapter-filters::-webkit-scrollbar{display:none;}
 .detail-chapter-filter{min-height:30px;padding:0 9px;border:1px solid rgba(255,255,255,.08);border-radius:8px;background:#11151d;color:#b9c0cb;font-size:10px;font-weight:800;white-space:nowrap;}
 .detail-chapter-filter.active{background:var(--accent);border-color:var(--accent);color:#15120a;}
+body.layout-tablet .detail-chapters-toolbar{flex-wrap:wrap;}
+body.layout-tablet .detail-chapters-toolbar .detail-chapters-status{flex:1 1 100%;}
+body.layout-tablet .detail-chapter-filters{display:flex;}
 .detail-view-switch{display:flex;gap:4px;padding:3px;border:1px solid rgba(255,255,255,.08);border-radius:10px;background:#11151d;}
 .detail-view-btn{min-height:32px;padding:0 10px;border:0;border-radius:7px;background:transparent;color:#b9c0cb;font-size:11px;font-weight:800;}
 .detail-view-btn.active{background:var(--accent);color:#15120a;}
@@ -10638,8 +10640,6 @@ function buildCarouselCard(item, opts){
   if(immediateSrc){
     const customCoverFile=isFolder?getCustomDetailCoverFile(item.id):null;
     const img = buildCoverNode(immediateSrc, isFolder ? (customCoverFile||null) : item);
-    img.loading='eager';
-    img.fetchPriority='high';
     img.classList.add('loaded');
     if(isFolder&&!customCoverFile) wireImmediateFolderCoverRetry(img, item);
     cover.appendChild(img);
@@ -10694,8 +10694,6 @@ function buildCarouselCard(item, opts){
       // eram as mais afetadas: arquivos adicionados/alterados há pouco
       // tempo são justamente os que mais sofrem com thumbnailLink falho.
       const img = buildCoverNode(src, coverFile);
-      img.loading='eager';
-      img.fetchPriority='high';
       if(ph) mountCoverNodeOverPlaceholder(ph, img);
     }catch(e){ if(ph) ph.classList.remove('skeleton'); }
   };
