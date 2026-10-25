@@ -1193,7 +1193,12 @@ html,body,button,input,select,textarea{font-family:'WhizBang','Inter',sans-serif
 .detail-chip{padding:8px 13px;border:1px solid rgba(255,255,255,.07);border-radius:999px;background:#171a20;color:#d6d9df;font-size:13px;}
 .detail-synopsis{margin:0;color:#e2e4e8;font-size:16px;line-height:1.68;}
 .detail-credit{color:var(--text-muted);font-size:12px;line-height:1.5;}
-.detail-chapters-toolbar{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:14px 14px 0;}
+.detail-chapters-toolbar{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;padding:14px 14px 0;}
+.detail-chapters-toolbar .detail-chapters-status{flex:1 1 100%;}
+.detail-chapter-filters{display:flex;gap:4px;overflow-x:auto;min-width:0;padding:2px 0;scrollbar-width:none;}
+.detail-chapter-filters::-webkit-scrollbar{display:none;}
+.detail-chapter-filter{min-height:30px;padding:0 9px;border:1px solid rgba(255,255,255,.08);border-radius:8px;background:#11151d;color:#b9c0cb;font-size:10px;font-weight:800;white-space:nowrap;}
+.detail-chapter-filter.active{background:var(--accent);border-color:var(--accent);color:#15120a;}
 .detail-view-switch{display:flex;gap:4px;padding:3px;border:1px solid rgba(255,255,255,.08);border-radius:10px;background:#11151d;}
 .detail-view-btn{min-height:32px;padding:0 10px;border:0;border-radius:7px;background:transparent;color:#b9c0cb;font-size:11px;font-weight:800;}
 .detail-view-btn.active{background:var(--accent);color:#15120a;}
@@ -1411,7 +1416,7 @@ body.layout-tablet .carousel-card .cc-name{box-sizing:border-box;min-height:2.6e
       </div>
       <div class="search-box search-page-box">
         <span class="search-icon" id="search-icon-slot"></span>
-        <input type="text" id="search-input" placeholder="Ex.: Batman, Homem-Aranha, X-Men..." autocomplete="off" autocorrect="off" spellcheck="false" aria-label="Pesquisar HQ, personagem ou saga">
+        <input type="text" id="search-input" placeholder="Ex.: Batman, Homem-Aranha, Hulk..." autocomplete="off" autocorrect="off" spellcheck="false" aria-label="Pesquisar HQ, personagem ou saga">
         <button class="search-clear hidden" id="btn-search-clear" aria-label="Limpar pesquisa" title="Limpar pesquisa"><span class="button-icon"></span></button>
       </div>
       <div id="search-suggestions" class="search-suggestions">
@@ -1419,10 +1424,11 @@ body.layout-tablet .carousel-card .cc-name{box-sizing:border-box;min-height:2.6e
         <div class="search-chips">
           <button class="search-chip" data-search="Batman">Batman</button>
           <button class="search-chip" data-search="Homem-Aranha">Homem-Aranha</button>
-          <button class="search-chip" data-search="X-Men">X-Men</button>
-          <button class="search-chip" data-search="Marvel">Marvel</button>
-          <button class="search-chip" data-search="DC">DC</button>
-          <button class="search-chip" data-search="Mangás">Mangás</button>
+          <button class="search-chip" data-search="Hulk">Hulk</button>
+          <button class="search-chip" data-search="Superman">Superman</button>
+          <button class="search-chip" data-search="Wolverine">Wolverine</button>
+          <button class="search-chip" data-search="Lanterna Verde">Lanterna Verde</button>
+          <button class="search-chip" data-search="Demolidor">Demolidor</button>
         </div>
       </div>
       <div id="search-results-heading" class="search-results-heading hidden"><span>RESULTADOS DA BUSCA</span><span class="results-accent"></span></div>
@@ -1865,6 +1871,7 @@ let activeCollectionDetail = null;
 let collectionDetailStack = [];
 let collectionDetailTab = 'details';
 let collectionDetailChapterMode = 'grid';
+let collectionDetailChapterFilter = 'all';
 
 const DEVICE_ID_KEY = 'planetahq_device_id';
 let CONFIG = null;
@@ -4110,11 +4117,12 @@ async function runInitialLoad(){
   clearInterval(stallWatch);
   progress.home = 1; recompute();
 
-  // As capas ficam fora do APK e são servidas pelo R2. Não bloquear a
-  // abertura esperando a biblioteca inteira nem disparar todas as capas de
-  // uma vez: o IntersectionObserver já agenda somente as que estão visíveis
-  // ou próximas da tela, respeitando as filas e limites de concorrência.
-  setLoadingSub('Capas carregando conforme aparecem…');
+  // Etapa 3: depois da Home ter pintado, dispara o carregamento das capas
+  // durante a abertura e aguarda a fila terminar, como no comportamento
+  // anterior da aplicação.
+  setLoadingSub('Carregando capas das seções…');
+  forceLoadAllPendingCovers();
+  await waitForVisibleCovers(20000, frac=>{ progress.covers = Math.max(progress.covers, frac); recompute(); });
   progress.covers = 1; recompute();
 
   if(finished) return;
@@ -7335,6 +7343,7 @@ function openCollectionDetails(item, parentId, nested){
   activeCollectionDetail={item:{...item},parentId:parentId||item._parentId||item._collectionRoot?.id||DEMOLIDOR_COLLECTION_FOLDER_ID,listing:null,loading:false,error:null};
   collectionDetailTab='details';
   collectionDetailChapterMode='grid';
+  collectionDetailChapterFilter='all';
   renderCollectionDetails();
   navPushLevel();
 }
@@ -7380,11 +7389,12 @@ function renderCollectionDetails(){
       <section class="detail-section"><h3>Gêneros</h3><div class="detail-chips">${meta.genres.map(g=>`<span class="detail-chip">${escapeHtml(g)}</span>`).join('')}</div></section>
       <section class="detail-section"><h3>Sinopse</h3><p class="detail-synopsis">${escapeHtml(meta.synopsis)}</p></section>
       ${author?`<section class="detail-section"><h3>Autores</h3><p class="detail-credit">${escapeHtml(author)}</p></section>`:''}</main>
-    ` : `<div class="detail-chapters-toolbar"><div class="detail-chapters-status" data-chapters-status>${detail.loading?'Carregando capítulos…':detail.error?'Não foi possível carregar esta lista. Toque para tentar novamente.':'Carregando capítulos…'}</div><div class="detail-view-switch" role="group" aria-label="Organização das edições"><button class="detail-view-btn ${collectionDetailChapterMode==='grid'?'active':''}" type="button" data-chapter-view="grid" aria-pressed="${collectionDetailChapterMode==='grid'}">Capas</button><button class="detail-view-btn ${collectionDetailChapterMode==='list'?'active':''}" type="button" data-chapter-view="list" aria-pressed="${collectionDetailChapterMode==='list'}">Lista</button></div></div><div class="detail-chapter-list ${collectionDetailChapterMode==='grid'?'grid-mode':'list-mode'}" data-detail-chapter-list></div>`}
+    ` : `<div class="detail-chapters-toolbar"><div class="detail-chapters-status" data-chapters-status>${detail.loading?'Carregando capítulos…':detail.error?'Não foi possível carregar esta lista. Toque para tentar novamente.':'Carregando capítulos…'}</div><div class="detail-chapter-filters" role="group" aria-label="Filtro dos capítulos"><button class="detail-chapter-filter ${collectionDetailChapterFilter==='all'?'active':''}" type="button" data-chapter-filter="all">Todos</button><button class="detail-chapter-filter ${collectionDetailChapterFilter==='unread'?'active':''}" type="button" data-chapter-filter="unread">Não lidos</button><button class="detail-chapter-filter ${collectionDetailChapterFilter==='finished'?'active':''}" type="button" data-chapter-filter="finished">Concluídos</button><button class="detail-chapter-filter ${collectionDetailChapterFilter==='az'?'active':''}" type="button" data-chapter-filter="az">Nome A-Z</button></div><div class="detail-view-switch" role="group" aria-label="Organização das edições"><button class="detail-view-btn ${collectionDetailChapterMode==='grid'?'active':''}" type="button" data-chapter-view="grid" aria-pressed="${collectionDetailChapterMode==='grid'}">Capas</button><button class="detail-view-btn ${collectionDetailChapterMode==='list'?'active':''}" type="button" data-chapter-view="list" aria-pressed="${collectionDetailChapterMode==='list'}">Lista</button></div></div><div class="detail-chapter-list ${collectionDetailChapterMode==='grid'?'grid-mode':'list-mode'}" data-detail-chapter-list></div>`}
   `;
   screen.querySelector('.detail-screen-back').onclick=()=>closeCollectionDetails(true);
   screen.querySelectorAll('[data-detail-tab]').forEach(btn=>btn.onclick=()=>{ collectionDetailTab=btn.dataset.detailTab; renderCollectionDetails(); if(collectionDetailTab==='chapters') loadCollectionDetailChapters(); });
   screen.querySelectorAll('[data-chapter-view]').forEach(btn=>btn.onclick=()=>{ collectionDetailChapterMode=btn.dataset.chapterView; renderCollectionDetails(); });
+  screen.querySelectorAll('[data-chapter-filter]').forEach(btn=>btn.onclick=()=>{ collectionDetailChapterFilter=btn.dataset.chapterFilter; renderCollectionDetails(); if(collectionDetailTab==='chapters') loadCollectionDetailChapters(); });
   const coverSlot=screen.querySelector('.detail-cover .cover-placeholder');
   if(coverSlot){
     const loadCover=async()=>{
@@ -7460,8 +7470,7 @@ async function loadCollectionDetailChapters(){
   const status=document.querySelector('#collection-details-screen [data-chapters-status]');
   if(!listEl || !status) return;
   if(!detailIsFolder(detail.item)){
-    status.textContent='1 edição'; listEl.innerHTML='';
-    listEl.appendChild(collectionDetailChapterMode==='grid' ? buildCollectionChapterCard(detail.item,1,detail.parentId) : buildCollectionChapterRow(detail.item,1,detail.parentId)); return;
+    renderCollectionChapterRows(detail); return;
   }
   if(detail.listing){ renderCollectionChapterRows(detail); return; }
   if(detail.loading) return;
@@ -7471,7 +7480,7 @@ async function loadCollectionDetailChapters(){
   detail.loading=false;
   if(activeCollectionDetail===detail && collectionDetailTab==='chapters') renderCollectionChapterRows(detail);
 }
-function renderCollectionChapterRows(detail){
+async function renderCollectionChapterRows(detail){
   const screen=document.getElementById('collection-details-screen'); if(!screen || activeCollectionDetail!==detail) return;
   const status=screen.querySelector('[data-chapters-status]'), listEl=screen.querySelector('[data-detail-chapter-list]');
   if(!status || !listEl) return;
@@ -7479,12 +7488,18 @@ function renderCollectionChapterRows(detail){
   listEl.classList.toggle('grid-mode',collectionDetailChapterMode==='grid');
   listEl.classList.toggle('list-mode',collectionDetailChapterMode==='list');
   if(detail.error){ status.textContent='Não foi possível carregar os capítulos. Toque aqui para tentar novamente.'; status.onclick=()=>{detail.listing=null;detail.loading=false;detail.error=null;loadCollectionDetailChapters();}; return; }
-  const folders=detail.listing?.folders||[], files=detail.listing?.files||[];
+  const folders=detailIsFolder(detail.item)?(detail.listing?.folders||[]):[];
+  const files=detailIsFolder(detail.item)?(detail.listing?.files||[]):[detail.item];
   const rows=[...folders.map(x=>({...x,isFolder:true})),...files];
-  status.textContent=`${rows.length} ${rows.length===1?'capítulo':'capítulos'}`;
-  if(!rows.length){ listEl.innerHTML='<p class="detail-chapters-status">Nenhum capítulo encontrado nesta coleção.</p>'; return; }
-  rows.sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true,sensitivity:'base'}));
-  rows.forEach((entry,index)=>listEl.appendChild(collectionDetailChapterMode==='grid' ? buildCollectionChapterCard(entry,index+1,detail.item.id) : buildCollectionChapterRow(entry,index+1,detail.item.id)));
+  const progressEntries=await Promise.all(rows.map(async entry=>({entry,progress:await idbGet('progress',entry.id).catch(()=>null)})));
+  if(activeCollectionDetail!==detail || collectionDetailTab!=='chapters') return;
+  let visible=progressEntries;
+  if(collectionDetailChapterFilter==='unread') visible=visible.filter(({progress})=>!progress||Number(progress.pct||0)<=0);
+  else if(collectionDetailChapterFilter==='finished') visible=visible.filter(({progress})=>Number(progress?.pct||0)>=98);
+  if(collectionDetailChapterFilter==='az') visible.sort((a,b)=>a.entry.name.localeCompare(b.entry.name,'pt-BR',{numeric:true,sensitivity:'base'}));
+  status.textContent=`${visible.length} ${visible.length===1?'capítulo':'capítulos'}`;
+  if(!visible.length){ listEl.innerHTML='<p class="detail-chapters-status">Nenhum capítulo corresponde a esta aba.</p>'; return; }
+  visible.forEach(({entry},index)=>listEl.appendChild(collectionDetailChapterMode==='grid' ? buildCollectionChapterCard(entry,index+1,detail.item.id) : buildCollectionChapterRow(entry,index+1,detail.item.id)));
 }
 function collectionChapterOfflineMeta(entry){
   const current=activeCollectionDetail?.item;
@@ -10623,6 +10638,8 @@ function buildCarouselCard(item, opts){
   if(immediateSrc){
     const customCoverFile=isFolder?getCustomDetailCoverFile(item.id):null;
     const img = buildCoverNode(immediateSrc, isFolder ? (customCoverFile||null) : item);
+    img.loading='eager';
+    img.fetchPriority='high';
     img.classList.add('loaded');
     if(isFolder&&!customCoverFile) wireImmediateFolderCoverRetry(img, item);
     cover.appendChild(img);
@@ -10677,6 +10694,8 @@ function buildCarouselCard(item, opts){
       // eram as mais afetadas: arquivos adicionados/alterados há pouco
       // tempo são justamente os que mais sofrem com thumbnailLink falho.
       const img = buildCoverNode(src, coverFile);
+      img.loading='eager';
+      img.fetchPriority='high';
       if(ph) mountCoverNodeOverPlaceholder(ph, img);
     }catch(e){ if(ph) ph.classList.remove('skeleton'); }
   };
