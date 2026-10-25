@@ -4110,13 +4110,11 @@ async function runInitialLoad(){
   clearInterval(stallWatch);
   progress.home = 1; recompute();
 
-  // Etapa 3: só faz sentido depois da Home ter pintado de verdade (etapa
-  // 2) — antes disso não existe esqueleto de capa nenhum no DOM pra
-  // esperar. Já avança capa a capa por conta própria (ver
-  // waitForVisibleCovers).
-  setLoadingSub('Carregando capas das seções…');
-  forceLoadAllPendingCovers();
-  await waitForVisibleCovers(20000, frac=>{ progress.covers = Math.max(progress.covers, frac); recompute(); });
+  // As capas ficam fora do APK e são servidas pelo R2. Não bloquear a
+  // abertura esperando a biblioteca inteira nem disparar todas as capas de
+  // uma vez: o IntersectionObserver já agenda somente as que estão visíveis
+  // ou próximas da tela, respeitando as filas e limites de concorrência.
+  setLoadingSub('Capas carregando conforme aparecem…');
   progress.covers = 1; recompute();
 
   if(finished) return;
