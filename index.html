@@ -3171,11 +3171,18 @@ async function openComicPDF(source, onProgress, knownSize, fileId, signal){
   if(!(source instanceof Blob))throw new TypeError('A HQ PDF precisa estar totalmente baixada antes de ser aberta.');
   pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
   const pdf = await loadPdfFromBlob(source, signal);
-  // 14 em vez de 24: as páginas agora saem em resolução bem maior (ver
-  // getPage abaixo), então cada uma pesa bem mais em memória — reduzir
-  // quantas ficam guardadas ao mesmo tempo evita que o app fique pesado
-  // ou trave em aparelhos com pouca RAM.
-  const cache = createPageCache(14);
+  // PDFs podem conter páginas enormes (especialmente HQs escaneadas). Uma
+  // página renderizada em canvas RGBA consome largura × altura × 4 bytes,
+  // além das cópias temporárias do PDF.js e do JPEG. Portanto, o tamanho do
+  // arquivo PDF não é um limite seguro de memória por si só: controlamos
+  // tanto a resolução máxima quanto a quantidade de páginas mantidas.
+  const deviceMemory = Number(navigator.deviceMemory) || 4;
+  const pdfRenderProfile = deviceMemory <= 2
+    ? { cacheEntries: 6, maxWidth: 1100, maxPixels: 1.8e6, quality: 0.78 }
+    : deviceMemory <= 4
+      ? { cacheEntries: 10, maxWidth: 1400, maxPixels: 2.8e6, quality: 0.82 }
+      : { cacheEntries: 14, maxWidth: 1800, maxPixels: 4.0e6, quality: 0.86 };
+  const cache = createPageCache(pdfRenderProfile.cacheEntries);
   // Bug corrigido: ao abrir a leitura, cacheCoverFromDoc() dispara em
   // segundo plano (sem esperar) um getPage(0) neste MESMO doc pra gerar a
   // capinha. Se a pessoa voltar pra biblioteca rápido, closeReader()
@@ -3204,24 +3211,21 @@ async function openComicPDF(source, onProgress, knownSize, fileId, signal){
       activePageRenders++;
       try{
         const page = await pdf.getPage(i+1);
-        // Antes: scale fixo de 2, sempre a mesma resolução não importa a
-        // tela do aparelho. Isso ficava nitidamente pior que o visualizador
-        // do Google Drive (que desenha na resolução real da tela) em
-        // qualquer celular com tela de alta densidade — a maioria hoje —,
-        // e a compressão JPEG por cima ainda borrava mais os traços e as
-        // tramas de pontos comuns em gibi antigo.
-        // Agora: renderiza na largura física real da tela (CSS width ×
-        // devicePixelRatio), com um teto pra não estourar memória em
-        // telas gigantes/muito densas, e nunca abaixo do scale 2 de antes
-        // (telas antigas/pequenas continuam pelo menos como estavam).
+        // Renderiza em resolução suficiente para leitura no celular, sem
+        // usar cegamente o devicePixelRatio nem impor scale mínimo 2. O
+        // limite por pixels é importante para páginas muito compridas ou
+        // PDFs escaneados em resolução exagerada.
         const base = page.getViewport({scale: 1});
-        const targetPhysicalWidth = Math.min(2400, (window.innerWidth || 1080) * (window.devicePixelRatio || 2));
-        const scale = Math.max(2, targetPhysicalWidth / base.width);
+        const screenWidth = Math.max(720, window.innerWidth || 1080);
+        const targetWidth = Math.min(pdfRenderProfile.maxWidth, screenWidth * 1.35);
+        const widthScale = targetWidth / base.width;
+        const pixelScale = Math.sqrt(pdfRenderProfile.maxPixels / Math.max(1, base.width * base.height));
+        const scale = Math.max(0.5, Math.min(widthScale, pixelScale));
         const viewport = page.getViewport({scale});
         const canvas = document.createElement('canvas');
         canvas.width = viewport.width; canvas.height = viewport.height;
         await page.render({canvasContext: canvas.getContext('2d'), viewport}).promise;
-        const pageBlob=await new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('Não foi possível codificar a página PDF.')),'image/jpeg',0.95));
+        const pageBlob=await new Promise((resolve,reject)=>canvas.toBlob(blob=>blob?resolve(blob):reject(new Error('Não foi possível codificar a página PDF.')),'image/jpeg',pdfRenderProfile.quality));
         const url = URL.createObjectURL(pageBlob);
         canvas.width = 0; canvas.height = 0;
         page.cleanup && page.cleanup();
