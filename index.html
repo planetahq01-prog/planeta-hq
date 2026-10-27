@@ -7486,6 +7486,14 @@ async function renderCollectionChapterRows(detail){
   const screen=document.getElementById('collection-details-screen'); if(!screen || activeCollectionDetail!==detail) return;
   const status=screen.querySelector('[data-chapters-status]'), listEl=screen.querySelector('[data-detail-chapter-list]');
   if(!status || !listEl) return;
+  // A aba pode disparar mais de uma renderização para a mesma listagem (por
+  // exemplo, a resposta de driveListFolder e a chamada iniciada ao abrir a
+  // aba podem terminar quase juntas). Como a leitura do progresso abaixo é
+  // assíncrona, as duas renderizações poderiam limpar a lista e depois
+  // acrescentar os mesmos cards, duplicando 3 em 6, 1 em 2 etc. Cada nova
+  // renderização invalida a anterior; somente a mais recente pode pintar.
+  const renderToken=(detail.chapterRenderToken||0)+1;
+  detail.chapterRenderToken=renderToken;
   listEl.innerHTML='';
   listEl.classList.toggle('grid-mode',collectionDetailChapterMode==='grid');
   listEl.classList.toggle('list-mode',collectionDetailChapterMode==='list');
@@ -7494,7 +7502,11 @@ async function renderCollectionChapterRows(detail){
   const files=detailIsFolder(detail.item)?(detail.listing?.files||[]):[detail.item];
   const rows=[...folders.map(x=>({...x,isFolder:true})),...files];
   const progressEntries=await Promise.all(rows.map(async entry=>({entry,progress:await idbGet('progress',entry.id).catch(()=>null)})));
-  if(activeCollectionDetail!==detail || collectionDetailTab!=='chapters') return;
+  if(activeCollectionDetail!==detail || collectionDetailTab!=='chapters' || detail.chapterRenderToken!==renderToken) return;
+  // A renderização mais nova pode ter limpado a lista enquanto esta chamada
+  // aguardava o IndexedDB. Limpar novamente aqui evita que uma pintura
+  // válida, mas iniciada antes, fique misturada à pintura atual.
+  listEl.innerHTML='';
   let visible=progressEntries;
   if(collectionDetailChapterFilter==='unread') visible=visible.filter(({progress})=>!progress||Number(progress.pct||0)<=0);
   else if(collectionDetailChapterFilter==='finished') visible=visible.filter(({progress})=>Number(progress?.pct||0)>=98);
