@@ -239,6 +239,7 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
   display:flex;align-items:center;gap:8px;padding:10px 16px 2px;overflow-x:auto;
   scrollbar-width:none;-webkit-overflow-scrolling:touch;
 }
+#filter-bar,#folder-download-toolbar{display:none!important;}
 .filter-bar::-webkit-scrollbar{display:none;}
 .filter-chip{
   flex-shrink:0;padding:7px 14px;border-radius:999px;font-size:12px;font-weight:700;
@@ -713,12 +714,11 @@ body.theme-transitioning .tab.active{
 .carousel .carousel-end{
   flex:0 0 24px;
 }
-.cc-progress{
-  position:absolute;left:6px;right:6px;bottom:6px;height:4px;border-radius:4px;
-  background:rgba(0,0,0,.55);overflow:hidden;z-index:2;
+.cover.cover-rotate-batman-saga-08{
+  position:absolute!important;left:50%!important;top:50%!important;
+  width:150%!important;height:66.6667%!important;
+  transform:translate(-50%,-50%) rotate(90deg)!important;object-fit:contain!important;
 }
-.cc-progress i{display:block;height:100%;background:linear-gradient(90deg,var(--accent),var(--gold));border-radius:4px;}
-
 @media(min-width:700px){
   .grid{grid-template-columns:repeat(auto-fill,minmax(160px,1fr));}
 }
@@ -1218,6 +1218,7 @@ body.layout-tablet .detail-chapter-filters{display:flex;}
 .detail-chapter-cover .cover-placeholder{position:absolute;inset:0;display:grid;place-items:center;color:var(--text-muted);}
 #collection-details-screen .detail-chapter-cover .cover{width:100%;height:100%;object-fit:contain;background:#10141c;}
 .detail-chapter-card-title{display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:2;overflow:hidden;margin-top:6px;padding:0 1px;font-size:11px;font-weight:700;line-height:1.35;}
+.detail-chapter-card-size{margin-top:3px;padding:0 1px;color:var(--text-muted);font-size:10px;font-weight:700;line-height:1.25;}
 .detail-chapter-card-kind{margin-top:3px;color:var(--text-muted);font-size:9px;line-height:1.3;}
 @media(min-width:700px){.detail-chapter-list.grid-mode{grid-template-columns:repeat(5,minmax(0,1fr));gap:16px 12px}.detail-chapter-card-title{font-size:12px}}
 .detail-chapter-row{display:flex;align-items:center;gap:10px;width:100%;min-height:64px;padding:6px 9px;border:1px solid rgba(255,255,255,.07);border-radius:13px;background:#11151d;color:var(--paper);text-align:left;}
@@ -1230,6 +1231,7 @@ body.layout-tablet .detail-chapter-filters{display:flex;}
 .detail-chapter-copy{flex:1;min-width:0;display:flex;flex-direction:column;gap:4px;}
 .detail-chapter-name{font-size:13px;font-weight:800;line-height:1.35;overflow-wrap:anywhere;}
 .detail-chapter-kind{font-size:10px;color:var(--text-muted);}
+.detail-chapter-size{font-size:10px;color:var(--accent);font-weight:700;}
 .detail-chapter-arrow{font-size:20px;color:var(--text-muted);}
 .detail-chapters-status{padding:30px 20px;color:var(--text-muted);text-align:center;font-size:13px;}
 .detail-tag-note{margin-top:8px;color:var(--text-muted);font-size:10px;line-height:1.45;}
@@ -1457,23 +1459,8 @@ body.layout-tablet .carousel-card .cc-name{box-sizing:border-box;min-height:2.6e
   <!-- ===================== BIBLIOTECA ===================== -->
   <div id="view-library" class="view hidden">
     <div id="home-sections" class="hidden"></div>
-    <div id="folder-download-toolbar" class="folder-download-toolbar hidden">
-      <button id="btn-download-current-folder" class="folder-download-action" type="button" aria-label="Baixar a coleção atual e suas coleções para uso offline no Planeta HQ">
-        <span id="folder-download-current-icon" class="folder-download-current-icon"></span>
-        <span>Baixar coleção para offline</span><span class="folder-download-format">APP</span>
-      </button>
-    </div>
-    <div id="filter-bar" class="filter-bar hidden">
-      <button class="filter-chip active" data-filter="all">Todos</button>
-      <button class="filter-chip" data-filter="unread">Não lidos</button>
-      <button class="filter-chip" data-filter="reading">Em andamento</button>
-      <button class="filter-chip" data-filter="finished">Concluídos</button>
-      <select class="sort-select" id="sort-select">
-        <option value="name">Nome A-Z</option>
-        <option value="recent">Mais recentes</option>
-        <option value="size">Tamanho</option>
-      </select>
-    </div>
+    <div id="folder-download-toolbar" class="folder-download-toolbar hidden" aria-hidden="true"></div>
+    <div id="filter-bar" class="filter-bar hidden" aria-hidden="true"></div>
     <div id="grid-library" class="grid"></div>
   </div>
 
@@ -1873,7 +1860,6 @@ let activeCollectionDetail = null;
 let collectionDetailStack = [];
 let collectionDetailTab = 'details';
 let collectionDetailChapterMode = 'grid';
-let collectionDetailChapterFilter = 'all';
 
 const DEVICE_ID_KEY = 'planetahq_device_id';
 let CONFIG = null;
@@ -3802,9 +3788,13 @@ function forceLoadAllPendingCovers(){
   keep.forEach(node=>pendingCoverNodes.add(node));
 }
 function fmtSize(bytes){
-  if(!bytes) return '';
-  const mb = bytes/1024/1024;
-  return mb >= 1 ? mb.toFixed(1)+' MB' : (bytes/1024).toFixed(0)+' KB';
+  const value=Number(bytes)||0;
+  if(value<=0) return '';
+  const units=['B','KB','MB','GB','TB'];
+  let amount=value, unit=0;
+  while(amount>=1024 && unit<units.length-1){ amount/=1024; unit++; }
+  const decimals=unit===0?0:(amount>=100?0:amount>=10?1:2);
+  return `${String(parseFloat(amount.toFixed(decimals)))} ${units[unit]}`;
 }
 function toast(msg){
   const text=String(msg == null ? '' : msg);
@@ -7345,7 +7335,6 @@ function openCollectionDetails(item, parentId, nested){
   activeCollectionDetail={item:{...item},parentId:parentId||item._parentId||item._collectionRoot?.id||DEMOLIDOR_COLLECTION_FOLDER_ID,listing:null,loading:false,error:null};
   collectionDetailTab='details';
   collectionDetailChapterMode='grid';
-  collectionDetailChapterFilter='all';
   renderCollectionDetails();
   navPushLevel();
 }
@@ -7385,18 +7374,17 @@ function renderCollectionDetails(){
         <div class="detail-cover"><div class="cover-placeholder skeleton">${ICONS.page}</div><div class="detail-cover-fallback hidden">${escapeHtml(title)}</div></div>
         <h1 class="detail-name">${escapeHtml(title)}</h1>
         ${showAuthorUnderTitle?`<p class="detail-author">${escapeHtml(inlineAuthorText)}</p>`:''}${publicationDate?`<p class="detail-meta-line">Publicação: ${escapeHtml(publicationDate)}</p>`:''}
-        <div class="detail-actions"><button class="detail-primary" type="button"><span class="detail-primary-icon">▶</span><span>${item._continueProgress?'Continuar':isFolder?'Ver capítulos':'Ler agora'}</span></button>${isFolder?`<button class="detail-download-all" type="button" aria-label="Baixar coleção inteira para uso offline" title="Baixar coleção inteira">${ICONS.downloadArrow}</button>`:`<span class="detail-download-one" aria-label="Baixar para ler offline" title="Baixar para ler offline">${ICONS.downloadArrow}</span>`}<button class="detail-favorite" type="button" aria-label="Favoritar" title="Favoritar">♥</button></div>
-        <div class="detail-stats"><div class="detail-stat"><strong data-detail-count>${countLabel}</strong><span>${isFolder?'na coleção':'leitura disponível'}</span></div><div class="detail-stat"><strong>${escapeHtml(meta.period)}</strong><span>fase / edição</span></div></div>
+        <div class="detail-actions"><button class="detail-primary" type="button"><span class="detail-primary-icon">▶</span><span>${item._continueProgress?'Continuar':isFolder?'Ver capítulos':'Ler agora'}</span></button>${isFolder?`<button class="detail-download-all" type="button" aria-label="Baixar coleção inteira para uso offline" title="Baixar coleção inteira">${ICONS.downloadArrow}</button>`:`<span class="detail-download-one" aria-label="Baixar para ler offline" title="Baixar para ler offline">${ICONS.downloadArrow}</span>`}<button class="detail-favorite" type="button" aria-label="Favoritar" title="Favoritar">★</button></div>
+        <div class="detail-stats"><div class="detail-stat"><strong data-detail-count>${countLabel}</strong><span>${isFolder?'na coleção':'leitura disponível'}</span></div><div class="detail-stat"><strong>${escapeHtml(isFolder ? meta.period : (fmtSize(item.size)||'Tamanho indisponível'))}</strong><span>${isFolder?'fase / edição':'tamanho do arquivo'}</span></div></div>
       </section>
       <section class="detail-section"><h3>Gêneros</h3><div class="detail-chips">${meta.genres.map(g=>`<span class="detail-chip">${escapeHtml(g)}</span>`).join('')}</div></section>
       <section class="detail-section"><h3>Sinopse</h3><p class="detail-synopsis">${escapeHtml(meta.synopsis)}</p></section>
       ${author?`<section class="detail-section"><h3>Autores</h3><p class="detail-credit">${escapeHtml(author)}</p></section>`:''}</main>
-    ` : `<div class="detail-chapters-toolbar"><div class="detail-chapters-status" data-chapters-status>${detail.loading?'Carregando capítulos…':detail.error?'Não foi possível carregar esta lista. Toque para tentar novamente.':'Carregando capítulos…'}</div><div class="detail-chapter-filters" role="group" aria-label="Filtro dos capítulos"><button class="detail-chapter-filter ${collectionDetailChapterFilter==='all'?'active':''}" type="button" data-chapter-filter="all">Todos</button><button class="detail-chapter-filter ${collectionDetailChapterFilter==='unread'?'active':''}" type="button" data-chapter-filter="unread">Não lidos</button><button class="detail-chapter-filter ${collectionDetailChapterFilter==='finished'?'active':''}" type="button" data-chapter-filter="finished">Concluídos</button><button class="detail-chapter-filter ${collectionDetailChapterFilter==='az'?'active':''}" type="button" data-chapter-filter="az">Nome A-Z</button></div><div class="detail-view-switch" role="group" aria-label="Organização das edições"><button class="detail-view-btn ${collectionDetailChapterMode==='grid'?'active':''}" type="button" data-chapter-view="grid" aria-pressed="${collectionDetailChapterMode==='grid'}">Capas</button><button class="detail-view-btn ${collectionDetailChapterMode==='list'?'active':''}" type="button" data-chapter-view="list" aria-pressed="${collectionDetailChapterMode==='list'}">Lista</button></div></div><div class="detail-chapter-list ${collectionDetailChapterMode==='grid'?'grid-mode':'list-mode'}" data-detail-chapter-list></div>`}
+    ` : `<div class="detail-chapters-toolbar"><div class="detail-chapters-status" data-chapters-status>${detail.loading?'Carregando capítulos…':detail.error?'Não foi possível carregar esta lista. Toque para tentar novamente.':'Carregando capítulos…'}</div><div class="detail-view-switch" role="group" aria-label="Organização das edições"><button class="detail-view-btn ${collectionDetailChapterMode==='grid'?'active':''}" type="button" data-chapter-view="grid" aria-pressed="${collectionDetailChapterMode==='grid'}">Capas</button><button class="detail-view-btn ${collectionDetailChapterMode==='list'?'active':''}" type="button" data-chapter-view="list" aria-pressed="${collectionDetailChapterMode==='list'}">Lista</button></div></div><div class="detail-chapter-list ${collectionDetailChapterMode==='grid'?'grid-mode':'list-mode'}" data-detail-chapter-list></div>`}
   `;
   screen.querySelector('.detail-screen-back').onclick=()=>closeCollectionDetails(true);
   screen.querySelectorAll('[data-detail-tab]').forEach(btn=>btn.onclick=()=>{ collectionDetailTab=btn.dataset.detailTab; renderCollectionDetails(); if(collectionDetailTab==='chapters') loadCollectionDetailChapters(); });
   screen.querySelectorAll('[data-chapter-view]').forEach(btn=>btn.onclick=()=>{ collectionDetailChapterMode=btn.dataset.chapterView; renderCollectionDetails(); });
-  screen.querySelectorAll('[data-chapter-filter]').forEach(btn=>btn.onclick=()=>{ collectionDetailChapterFilter=btn.dataset.chapterFilter; renderCollectionDetails(); if(collectionDetailTab==='chapters') loadCollectionDetailChapters(); });
   const coverSlot=screen.querySelector('.detail-cover .cover-placeholder');
   if(coverSlot){
     const loadCover=async()=>{
@@ -7508,9 +7496,6 @@ async function renderCollectionChapterRows(detail){
   // válida, mas iniciada antes, fique misturada à pintura atual.
   listEl.innerHTML='';
   let visible=progressEntries;
-  if(collectionDetailChapterFilter==='unread') visible=visible.filter(({progress})=>!progress||Number(progress.pct||0)<=0);
-  else if(collectionDetailChapterFilter==='finished') visible=visible.filter(({progress})=>Number(progress?.pct||0)>=98);
-  if(collectionDetailChapterFilter==='az') visible.sort((a,b)=>a.entry.name.localeCompare(b.entry.name,'pt-BR',{numeric:true,sensitivity:'base'}));
   status.textContent=`${visible.length} ${visible.length===1?'capítulo':'capítulos'}`;
   if(!visible.length){ listEl.innerHTML='<p class="detail-chapters-status">Nenhum capítulo corresponde a esta aba.</p>'; return; }
   visible.forEach(({entry},index)=>listEl.appendChild(collectionDetailChapterMode==='grid' ? buildCollectionChapterCard(entry,index+1,detail.item.id) : buildCollectionChapterRow(entry,index+1,detail.item.id)));
@@ -7543,7 +7528,8 @@ function buildCollectionChapterCard(entry,index,parentId){
   const folder=detailIsFolder(entry);
   const card=el('div','detail-chapter-card');
   const open=el('button','detail-chapter-card-open'); open.type='button';
-  open.innerHTML=`<div class="detail-chapter-cover"><div class="cover-placeholder skeleton">${folder?ICONS.folder:ICONS.page}</div></div><div class="detail-chapter-card-title">${escapeHtml(detailCleanTitle(entry.name))}</div>`;
+  const sizeLabel=!folder ? fmtSize(entry.size) : '';
+  open.innerHTML=`<div class="detail-chapter-cover"><div class="cover-placeholder skeleton">${folder?ICONS.folder:ICONS.page}</div></div><div class="detail-chapter-card-title">${escapeHtml(detailCleanTitle(entry.name))}</div>${sizeLabel?`<div class="detail-chapter-card-size">${escapeHtml(sizeLabel)}</div>`:''}`;
   open.onclick=()=>openCollectionChapter(entry,parentId);
   card.append(open,buildChapterDownloadControl(entry,'grid'));
   const placeholder=card.querySelector('.cover-placeholder');
@@ -7569,7 +7555,8 @@ function buildCollectionChapterRow(entry,index,parentId){
   const folder=detailIsFolder(entry);
   const row=el('div','detail-chapter-row');
   const open=el('button','detail-chapter-open'); open.type='button';
-  open.innerHTML=`<span class="detail-chapter-number">${folder?'▰':String(index).padStart(2,'0')}</span><span class="detail-chapter-copy"><span class="detail-chapter-name">${escapeHtml(detailCleanTitle(entry.name))}</span><span class="detail-chapter-kind">${folder?'Subcoleção':'HQ · toque para abrir'}</span></span><span class="detail-chapter-arrow">›</span>`;
+  const sizeLabel=!folder ? fmtSize(entry.size) : '';
+  open.innerHTML=`<span class="detail-chapter-number">${folder?'▰':String(index).padStart(2,'0')}</span><span class="detail-chapter-copy"><span class="detail-chapter-name">${escapeHtml(detailCleanTitle(entry.name))}</span><span class="detail-chapter-kind">${folder?'Subcoleção':'HQ · toque para abrir'}</span>${sizeLabel?`<span class="detail-chapter-size">${escapeHtml(sizeLabel)}</span>`:''}</span><span class="detail-chapter-arrow">›</span>`;
   open.onclick=()=>openCollectionChapter(entry,parentId);
   row.append(open,buildChapterDownloadControl(entry,'list'));
   return row;
@@ -8327,6 +8314,10 @@ async function cacheCoverFromDoc(fileId, doc){
 function buildCoverNode(src, f){
   const img = el('img','cover');
   img.decoding = 'async'; img.alt = '';
+  // A imagem original de "A Saga do Batman - Volume 08" foi publicada de
+  // lado. Corrige somente essa edição, preservando a orientação das demais
+  // capas e funcionando em carrosséis, grades e fichas.
+  if(f && isBatmanSagaVolume08(f)) img.classList.add('cover-rotate-batman-saga-08');
   let settled = false, usingFallback = false;
   img.onload = ()=>{
     settled = true; img.classList.add('loaded');
@@ -8361,6 +8352,11 @@ function buildCoverNode(src, f){
   }
   img.src = src;
   return img;
+}
+
+function isBatmanSagaVolume08(file){
+  const name=normalizeForFolderMatch(String(file?.name||''));
+  return name.includes('a saga do batman') && /\bvolume 08\b/.test(name);
 }
 
 // Mantém o placeholder visível enquanto a imagem ainda está transparente.
@@ -9243,7 +9239,7 @@ async function renderFavorites(){
   releaseCoverObservers(grid);
   grid.innerHTML = '';
   if(items.length===0){
-    renderAppState(grid,{icon:ICONS.star,title:'Nenhum favorito ainda',message:'Toque no coração de uma HQ ou coleção para guardá-la nesta lista.',actions:[{label:'Explorar biblioteca',primary:true,onClick:()=>$('#tab-library').click()}]});
+    renderAppState(grid,{icon:ICONS.star,title:'Nenhum favorito ainda',message:'Toque na estrela de uma HQ ou coleção para guardá-la nesta lista.',actions:[{label:'Explorar biblioteca',primary:true,onClick:()=>$('#tab-library').click()}]});
     return;
   }
   items.sort((a,b)=>(b.addedAt||0)-(a.addedAt||0));
@@ -10659,9 +10655,6 @@ function buildCarouselCard(item, opts){
   } else {
     cover.appendChild(elHtml('div','cc-placeholder skeleton', isFolder ? ICONS.folder : ICONS.page));
   }
-  if(opts.progressPct){
-    cover.appendChild(elHtml('div','cc-progress', `<i style="width:${opts.progressPct}%"></i>`));
-  }
   // Capas não exibem mais o download. Tanto HQs quanto pastas usam apenas
   // o favorito; o download continua acessível pela ficha/offline.
   cover.appendChild(buildFavButton(item, 'span'));
@@ -11691,13 +11684,13 @@ const SHELVES = {
   marvel: {
     key: 'marvel', label: 'Marvel',
     logo: MARVEL_LOGO,
-    sections: ['aranha','especiaisAranha','hulk','ironman','demolidor','capitaoamerica','recomendados','doomsday','xmen','wolverine','deadpool','motoqueiro','quarteto','classicoAvengers','thanos','salvat'],
+    sections: ['aranha','especiaisAranha','hulk','ironman','demolidor','capitaoamerica','doomsday','xmen','wolverine','deadpool','motoqueiro','quarteto','classicoAvengers','thanos','salvat'],
     pathKeywords: ['colecao homem aranha','edicoes especiais homem aranha','colecao hulk','colecao homem de ferro','colecao demolidor','colecao capitao america','doomsday','x men','xmen','colecao wolverine','colecao deadpool','colecao motoqueiro fantasma','colecao quarteto fantastico','vingadores classico','colecao thanos','graphic novels marvel']
   },
   dc: {
     key: 'dc', label: 'DC',
     logo: DC_LOGO,
-    sections: ['batman','superman','flash','lanterna','mulhermaravilha','recomendados','universoAbsoluto','classicoLiga','sagaLiga','darkseid'],
+    sections: ['batman','superman','flash','lanterna','mulhermaravilha','universoAbsoluto','classicoLiga','sagaLiga','darkseid'],
     pathKeywords: ['batman','superman','colecao flash','lanterna verde','mulher maravilha','wonder woman','universo absoluto','liga da justica da america','a saga da liga da justica','colecao darkseid']
   }
 };
@@ -11716,7 +11709,6 @@ SHELVES.todas.sections = [
   'sagaLiga',          // A Saga da Liga da Justiça
   'classicoAvengers',  // Clássicos: Avengers
   'classicoLiga',      // Clássicos: Liga da Justiça da América
-  'recomendados',      // Recomendados
   'salvat',            // Graphic Novels Marvel
   'especiaisAranha',   // Edições Especiais: Homem-Aranha
   'lanterna',          // Lanterna Verde
@@ -11824,13 +11816,6 @@ function paintHomeSectionsNow(wrap, data){
     const parentChanged=canonicalParentId!=null&&canonicalParentId!==item.parentId;
     return nameChanged||parentChanged?{...item,name:canonicalName||item.name,parentId:canonicalParentId??item.parentId}:item;
   });
-  // "Recomendados" só com HQs da estante atual (Marvel só recomenda Marvel,
-  // DC só DC etc.) — ver comicShelfOf. Repintar ao trocar de estante já
-  // recalcula isto (switchShelf chama paintHomeSections de novo).
-  const recommended = buildRecommended((allComics || []).filter(f=>{
-    const sh = comicShelfOf(f);
-    return currentShelf === 'todas' ? sh !== 'manga' : sh === currentShelf; // padrão = Marvel + DC
-  }));
   cancelStaleCoverWork();
   releaseCoverObservers(wrap);
   // Monta toda a nova árvore fora da tela. Antes o contêiner visível era
@@ -11867,7 +11852,6 @@ function paintHomeSectionsNow(wrap, data){
       isFolder:!!it.isFolder,
       openDetailsOnFolder:!!it.isFolder,
       continueProgress:progress,
-      progressPct:progress.pct,
       sub: `${progress.pct}% · pág. ${progress.pageIndex+1}/${progress.pageCount}`
     });
   }, {collectionTitle:'Continuar lendo',hideViewAll:true,browseLoader:async()=>{
@@ -12237,11 +12221,6 @@ function paintHomeSectionsNow(wrap, data){
   );
   if(secCapitaoAmerica){ built['capitaoamerica'] = secCapitaoAmerica; wireHomeLogoFallback(secCapitaoAmerica, 'capitaoamerica'); }
 
-  const secRec = buildHomeSection('Recomendados', recommended, (it)=>{
-    return buildCarouselCard(it, { isFolder:false, size: it.size });
-  }, {collectionTitle:'Recomendados'});
-  if(secRec){ built['recomendados'] = secRec; }
-
   // Coloca na tela só as seções da estante atual (SHELVES[currentShelf]),
   // na ordem definida ali — "continuar" vem sempre primeiro, quando existe.
   // Uma seção que exista mas não pertença a nenhuma estante simplesmente
@@ -12521,12 +12500,6 @@ document.querySelectorAll('#filter-bar .filter-chip').forEach(chip=>{
     reRenderCurrentLibraryView();
   };
 });
-$('#sort-select').addEventListener('change', e=>{
-  state.librarySort = e.target.value;
-  persistLibraryPrefs();
-  reRenderCurrentLibraryView();
-});
-
 function openMenu(){
   const backdrop = $('#app-menu-backdrop');
   const menu = $('#app-menu');
@@ -12584,10 +12557,6 @@ $('#btn-menu').onclick = ()=>{
   else openMenu();
 };
 $('#btn-menu-close').onclick = closeMenu;
-$('#btn-download-current-folder').onclick = ()=>{
-  const current=state.path[state.path.length-1];
-  if(current && current.id!==CONFIG.rootFolderId) downloadFolderOffline(current);
-};
 $('#btn-downloads-folder-back').onclick = ()=>{
   downloadsFolderViewId=null;renderDownloads();navSyncAfterBack();
 };
