@@ -7349,6 +7349,33 @@ function closeCollectionDetails(syncNav=true){
   }
   if(syncNav) navSyncAfterBack();
 }
+async function sumCollectionContentSize(folderId, visited=new Set()){
+  const key=String(folderId||'');
+  if(!key || visited.has(key)) return 0;
+  visited.add(key);
+  const listing=await driveListFolder(folderId);
+  let total=(listing.files||[]).reduce((sum,file)=>sum+(Number(file.size)||0),0);
+  for(const folder of (listing.folders||[])){
+    total += await sumCollectionContentSize(folder.id,visited);
+  }
+  return total;
+}
+function loadCollectionTotalSize(detail){
+  if(!detail || !detailIsFolder(detail.item) || detail.totalSizePromise) return;
+  detail.totalSizeError=false;
+  detail.totalSizePromise=sumCollectionContentSize(detail.item.id).then(total=>{
+    detail.totalSize=total;
+    const node=document.querySelector('#collection-details-screen [data-detail-size]');
+    if(activeCollectionDetail===detail && node) node.textContent=fmtSize(total)||'Tamanho indisponível';
+    return total;
+  }).catch(err=>{
+    detail.totalSizeError=true;
+    logWarn('[PlanetaHQ] não foi possível calcular o tamanho total da coleção',detail.item.id,err);
+    const node=document.querySelector('#collection-details-screen [data-detail-size]');
+    if(activeCollectionDetail===detail && node) node.textContent=String(collectionDetailMeta(detail.item).period||'Tamanho indisponível');
+    return null;
+  });
+}
 function renderCollectionDetails(){
   const detail=activeCollectionDetail;
   if(!detail) return;
@@ -7375,7 +7402,7 @@ function renderCollectionDetails(){
         <h1 class="detail-name">${escapeHtml(title)}</h1>
         ${showAuthorUnderTitle?`<p class="detail-author">${escapeHtml(inlineAuthorText)}</p>`:''}${publicationDate?`<p class="detail-meta-line">Publicação: ${escapeHtml(publicationDate)}</p>`:''}
         <div class="detail-actions"><button class="detail-primary" type="button"><span class="detail-primary-icon">▶</span><span>${item._continueProgress?'Continuar':isFolder?'Ver capítulos':'Ler agora'}</span></button>${isFolder?`<button class="detail-download-all" type="button" aria-label="Baixar coleção inteira para uso offline" title="Baixar coleção inteira">${ICONS.downloadArrow}</button>`:`<span class="detail-download-one" aria-label="Baixar para ler offline" title="Baixar para ler offline">${ICONS.downloadArrow}</span>`}<button class="detail-favorite" type="button" aria-label="Favoritar" title="Favoritar">★</button></div>
-        <div class="detail-stats"><div class="detail-stat"><strong data-detail-count>${countLabel}</strong><span>${isFolder?'na coleção':'leitura disponível'}</span></div><div class="detail-stat"><strong>${escapeHtml(isFolder ? meta.period : (fmtSize(item.size)||'Tamanho indisponível'))}</strong><span>${isFolder?'fase / edição':'tamanho do arquivo'}</span></div></div>
+        <div class="detail-stats"><div class="detail-stat"><strong data-detail-count>${countLabel}</strong><span>${isFolder?'na coleção':'leitura disponível'}</span></div><div class="detail-stat"><strong data-detail-size>${escapeHtml(isFolder ? (detail.totalSize!=null ? (fmtSize(detail.totalSize)||'Tamanho indisponível') : (detail.totalSizeError ? (meta.period||'Tamanho indisponível') : 'Calculando…')) : (fmtSize(item.size)||'Tamanho indisponível'))}</strong><span>${isFolder?'tamanho da coleção':'tamanho da HQ'}</span></div></div>
       </section>
       <section class="detail-section"><h3>Gêneros</h3><div class="detail-chips">${meta.genres.map(g=>`<span class="detail-chip">${escapeHtml(g)}</span>`).join('')}</div></section>
       <section class="detail-section"><h3>Sinopse</h3><p class="detail-synopsis">${escapeHtml(meta.synopsis)}</p></section>
@@ -7452,6 +7479,7 @@ function renderCollectionDetails(){
     });
   }
   if(collectionDetailTab==='chapters') void loadCollectionDetailChapters();
+  if(isFolder) loadCollectionTotalSize(detail);
 }
 async function loadCollectionDetailChapters(){
   const detail=activeCollectionDetail;
