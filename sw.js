@@ -608,7 +608,7 @@
 */
 /* v85: index.html agora monta as seções como mistas e inclui a logo Flash; o cache da Home também reconstrói o índice pai/filho. */
 // v156: o worker CBR extrai páginas vizinhas em uma única passagem do RAR.
-const CACHE_VERSION = 'v160';
+const CACHE_VERSION = 'v161';
 // Cache das capas: separado do da casca do app e mantido entre versões.
 const COVERS_CACHE = 'planeta-hq-covers-v1';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
@@ -859,6 +859,9 @@ const APP_SHELL = [
   'https://i.postimg.cc/zv1NH4Nf/daredevil-seeklogo.png',
   // Logo da nova seção Coleção: Capitão América — direta do postimg.cc.
   'https://i.postimg.cc/Y9zqd0Ph/captain-america-seeklogo.png',
+  // Logos das novas seções Coleção: Vingadores e Coleção: Justiceiro.
+  'https://i.postimg.cc/prZTdWvh/IMG-20261103-192319.png',
+  'https://i.postimg.cc/X74B6hWX/Punisher(1987-1995)-(1).webp',
   // Logos das estantes atuais Marvel/DC (ver SHELVES no index.html).
   'https://i.postimg.cc/vBNJsJVq/Marvel-Logo.jpg',
   'https://i.postimg.cc/P550CfQJ/DC-Comics-logo.png'

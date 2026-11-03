@@ -536,6 +536,8 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 .home-section-title .section-logo[data-logo="flash"]{height:50px;}
 .home-section-title .section-logo[data-logo="demolidor"]{height:50px;}
 .home-section-title .section-logo[data-logo="capitaoamerica"]{height:65px;}
+.home-section-title .section-logo[data-logo="vingadores"]{height:50px;}
+.home-section-title .section-logo[data-logo="justiceiro"]{height:50px;}
 .home-section-title .section-logo.hidden{display:none;}
 .home-section-title .section-logo-text.hidden{display:none;}
 
@@ -10528,7 +10530,7 @@ async function crawlLibrarySections(token, isStale, errorState){
     await runLimited(toVisit, 6, sub=>walk(sub.id, [...path, sub.name], [...(pathIds || []), sub.id]));
   }
   await walk(CONFIG.rootFolderId, [], []);
-  if(isStale(token)) return {comics: [], folders: [], aranhaFolders: [], xmenFolders: [], mangaFolders: [], batmanFolders: [], salvatFolders: [], hulkFolders: [], lanternaFolders: [], ironmanFolders: [], supermanFolders: [], universoAbsolutoFolders: [], mulherMaravilhaFolders: [], doomsdayFolders: [], thanosFolders: [], darkseidFolders: [], quartetoFolders: [], deadpoolFolders: [], wolverineFolders: [], motoqueiroFolders: [], hadError:false, errorMessage:null};
+  if(isStale(token)) return {comics: [], folders: [], aranhaFolders: [], xmenFolders: [], mangaFolders: [], batmanFolders: [], salvatFolders: [], hulkFolders: [], lanternaFolders: [], ironmanFolders: [], supermanFolders: [], universoAbsolutoFolders: [], mulherMaravilhaFolders: [], doomsdayFolders: [], thanosFolders: [], darkseidFolders: [], quartetoFolders: [], deadpoolFolders: [], wolverineFolders: [], motoqueiroFolders: [], vingadoresFolders: [], justiceiroFolders: [], hadError:false, errorMessage:null};
 
   // Antes: a seção "Coleção Homem-Aranha" juntava, de QUALQUER lugar da
   // biblioteca, toda coleção cujo nome contivesse "aranha" ou "spider" (com
@@ -10652,8 +10654,10 @@ async function crawlLibrarySections(token, isStale, errorState){
   // Coleção "Coleção: Capitão América" — seção MISTA com todo o conteúdo
   // diretamente dentro dela: coleções e HQs soltas na raiz.
   const capitaoAmericaFolders = await childrenOfNamedFolder(['colecao capitao america']);
+  const vingadoresFolders = await childrenOfNamedFolder(['colecao vingadores']);
+  const justiceiroFolders = await childrenOfNamedFolder(['colecao justiceiro']);
 
-  return {comics, folders: allFolders, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders, deadpoolFolders, wolverineFolders, motoqueiroFolders, capitaoAmericaFolders,
+  return {comics, folders: allFolders, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders, deadpoolFolders, wolverineFolders, motoqueiroFolders, capitaoAmericaFolders, vingadoresFolders, justiceiroFolders,
     hadError: !!(errorState && errorState.hadError),
     errorMessage: errorState && errorState.lastError ? errorState.lastError.message : null};
 }
@@ -11510,14 +11514,16 @@ const HOME_LOGOS = {
   motoqueiro: 'https://i.postimg.cc/gkKwd0vg/175900-ghost-rider-download-hd.png',
   flash: 'https://i.postimg.cc/HsXMK065/the-flash-seeklogo.png',
   demolidor: 'https://i.postimg.cc/zv1NH4Nf/daredevil-seeklogo.png',
-  capitaoamerica: 'https://i.postimg.cc/Y9zqd0Ph/captain-america-seeklogo.png'
+  capitaoamerica: 'https://i.postimg.cc/Y9zqd0Ph/captain-america-seeklogo.png',
+  vingadores: 'https://i.postimg.cc/prZTdWvh/IMG-20261103-192319.png',
+  justiceiro: 'https://i.postimg.cc/X74B6hWX/Punisher(1987-1995)-(1).webp'
 };
 
 // Logos que NÃO passam pelo proxy/R2 (o worker.js só conhece as ids antigas
 // acima): vão direto pela URL do postimg.cc, sem gastar uma requisição
 // ao proxy que só ia falhar antes de cair no link direto. Se um dia você
 // adicionar 'avengers' ao mapa de logos do worker.js, é só tirar daqui.
-const LOGO_IDS_DIRECT = new Set(['avengers', 'liga', 'aranhaespecial', 'ligasaga', 'quarteto', 'deadpool', 'wolverine', 'motoqueiro', 'flash', 'demolidor', 'capitaoamerica']);
+const LOGO_IDS_DIRECT = new Set(['avengers', 'liga', 'aranhaespecial', 'ligasaga', 'quarteto', 'deadpool', 'wolverine', 'motoqueiro', 'flash', 'demolidor', 'capitaoamerica', 'vingadores', 'justiceiro']);
 
 // Com proxy configurado, a logo vem do cache compartilhado (R2) via
 // worker.js — instantânea pra qualquer pessoa, mesmo na primeira visita
@@ -11712,8 +11718,8 @@ const SHELVES = {
   marvel: {
     key: 'marvel', label: 'Marvel',
     logo: MARVEL_LOGO,
-    sections: ['aranha','especiaisAranha','hulk','ironman','demolidor','capitaoamerica','doomsday','xmen','wolverine','deadpool','motoqueiro','quarteto','classicoAvengers','thanos','salvat'],
-    pathKeywords: ['colecao homem aranha','edicoes especiais homem aranha','colecao hulk','colecao homem de ferro','colecao demolidor','colecao capitao america','doomsday','x men','xmen','colecao wolverine','colecao deadpool','colecao motoqueiro fantasma','colecao quarteto fantastico','vingadores classico','colecao thanos','graphic novels marvel']
+    sections: ['vingadores','aranha','especiaisAranha','hulk','ironman','demolidor','justiceiro','capitaoamerica','doomsday','xmen','wolverine','deadpool','motoqueiro','quarteto','classicoAvengers','thanos','salvat'],
+    pathKeywords: ['colecao homem aranha','edicoes especiais homem aranha','colecao hulk','colecao homem de ferro','colecao demolidor','colecao justiceiro','colecao capitao america','colecao vingadores','doomsday','x men','xmen','colecao wolverine','colecao deadpool','colecao motoqueiro fantasma','colecao quarteto fantastico','vingadores classico','colecao thanos','graphic novels marvel']
   },
   dc: {
     key: 'dc', label: 'DC',
@@ -11725,10 +11731,12 @@ const SHELVES = {
 // Ordem das seções da estante padrão "Marvel + DC" (definida pelo usuário —
 // as duas listas ficam misturadas, não Marvel e depois DC).
 SHELVES.todas.sections = [
+  'vingadores',        // Vingadores
   'aranha',            // Homem-Aranha
   'batman',            // Batman
   'ironman',           // Homem de Ferro
   'demolidor',        // Demolidor
+  'justiceiro',        // Justiceiro, logo abaixo de Demolidor
   'capitaoamerica',   // Capitão América
   'superman',          // Superman
   'flash',              // Flash
@@ -11833,7 +11841,7 @@ function paintHomeSectionsNow(wrap, data){
     comicsByParent.get(parentId).push(item);
   });
   homeSectionDataContext = {...data,foldersByParent,comicsByParent};
-  const {continueItems, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders, deadpoolFolders, wolverineFolders, motoqueiroFolders, capitaoAmericaFolders, allComics, allFolders, hadError, errorMessage} = data;
+  const {continueItems, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders, deadpoolFolders, wolverineFolders, motoqueiroFolders, capitaoAmericaFolders, vingadoresFolders, justiceiroFolders, allComics, allFolders, hadError, errorMessage} = data;
   const resolvedContinueItems=(continueItems||[]).map(item=>{
     if(!item) return item;
     const folder=foldersById.get(String(item.id));
@@ -11918,6 +11926,22 @@ function paintHomeSectionsNow(wrap, data){
     { kind: SECTION_KINDS.MISTA, detailsRootFolderId: HULK_COLLECTION_FOLDER_ID }
   );
   if(secHulk){ built['hulk'] = secHulk; wireHomeLogoFallback(secHulk, 'hulk'); }
+
+  const secVingadores = buildHomeSection(
+    `Coleção: <span class="section-logo-text hidden" data-logo-text="vingadores">Vingadores</span><img class="section-logo" data-logo="vingadores" src="${logoSrc('vingadores')}" alt="Vingadores" loading="eager" decoding="async">`,
+    vingadoresFolders,
+    null,
+    {kind:SECTION_KINDS.MISTA,folderNames:['colecao vingadores'],collectionTitle:'Coleção: Vingadores'}
+  );
+  if(secVingadores){ built['vingadores'] = secVingadores; wireHomeLogoFallback(secVingadores, 'vingadores'); }
+
+  const secJusticeiro = buildHomeSection(
+    `Coleção: <span class="section-logo-text hidden" data-logo-text="justiceiro">Justiceiro</span><img class="section-logo" data-logo="justiceiro" src="${logoSrc('justiceiro')}" alt="Justiceiro" loading="eager" decoding="async">`,
+    justiceiroFolders,
+    null,
+    {kind:SECTION_KINDS.MISTA,folderNames:['colecao justiceiro'],collectionTitle:'Coleção: Justiceiro'}
+  );
+  if(secJusticeiro){ built['justiceiro'] = secJusticeiro; wireHomeLogoFallback(secJusticeiro, 'justiceiro'); }
 
   const secXMen = buildHomeSection(
     `Coleção: <span class="section-logo-text hidden" data-logo-text="xmen">X-Men</span><img class="section-logo" data-logo="xmen" src="${logoSrc('xmen')}" alt="X-Men" loading="eager" decoding="async">`,
