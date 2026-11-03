@@ -11173,6 +11173,8 @@ async function getLibrarySections(forceRefresh){
         deadpoolFolders: cDeadpool.folders,
         wolverineFolders: cWolverine.folders,
         motoqueiroFolders: cMotoqueiro.folders,
+        vingadoresFolders: [],
+        justiceiroFolders: [],
         hadError: false,
         errorMessage: null
       };
@@ -11229,7 +11231,7 @@ async function getLibrarySections(forceRefresh){
       finalizeHomeSectionResult(WOLVERINE_CACHE_KEY, 'folders', raw.wolverineFolders, syncInfo),
       finalizeHomeSectionResult(MOTOQUEIRO_CACHE_KEY, 'folders', raw.motoqueiroFolders, syncInfo)
     ]);
-    return { aranhaFolders, xmenFolders, mangaFolders, comics, allFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders, deadpoolFolders, wolverineFolders, motoqueiroFolders,
+    return { aranhaFolders, xmenFolders, mangaFolders, comics, allFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders, deadpoolFolders, wolverineFolders, motoqueiroFolders, vingadoresFolders: raw.vingadoresFolders || [], justiceiroFolders: raw.justiceiroFolders || [],
       hadError: errorState.hadError,
       errorMessage: errorState.lastError ? errorState.lastError.message : null };
   })();
@@ -12474,6 +12476,8 @@ async function renderHomeSections(forceRefresh, onProgress, {invalidatePersisten
         deadpoolFolders: cachedDeadpool ? cachedDeadpool.folders : [],
         wolverineFolders: cachedWolverine ? cachedWolverine.folders : [],
         motoqueiroFolders: cachedMotoqueiro ? cachedMotoqueiro.folders : [],
+        vingadoresFolders: [],
+        justiceiroFolders: [],
         comics: cachedComics ? cachedComics.comics : [],
         allFolders: cachedAllFolders ? cachedAllFolders.folders : undefined,
         hadError: true,
@@ -12512,6 +12516,8 @@ async function renderHomeSections(forceRefresh, onProgress, {invalidatePersisten
     deadpoolFolders: sections.deadpoolFolders,
     wolverineFolders: sections.wolverineFolders,
     motoqueiroFolders: sections.motoqueiroFolders,
+    vingadoresFolders: sections.vingadoresFolders,
+    justiceiroFolders: sections.justiceiroFolders,
     allComics: sections.comics,
     allFolders: sections.allFolders,
     hadError: sections.hadError,

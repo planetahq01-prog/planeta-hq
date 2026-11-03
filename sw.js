@@ -607,9 +607,9 @@
   sobe pra os aparelhos buscarem o index.html novo.
 */
 /* v85: index.html agora monta as seções como mistas e inclui a logo Flash; o cache da Home também reconstrói o índice pai/filho. */
-/* v162: forçar a atualização do shell após as correções das seções Vingadores/Justiceiro. */
+/* v163: corrigido o pacote de dados da Home para as seções Vingadores/Justiceiro chegarem à pintura final. */
 // v156: o worker CBR extrai páginas vizinhas em uma única passagem do RAR.
-const CACHE_VERSION = 'v162';
+const CACHE_VERSION = 'v163';
 // Cache das capas: separado do da casca do app e mantido entre versões.
 const COVERS_CACHE = 'planeta-hq-covers-v1';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
