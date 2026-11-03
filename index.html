@@ -10447,6 +10447,15 @@ function normalizeForFolderMatch(s){
 }
 
 const ALLFOLDERS_CACHE_KEY = 'planetahq_allfolders_cache_v4'; // v4: ordenação robusta de Lançamentos com fallback de data
+function cachedChildrenOfNamedFolder(allFolders,targetNames){
+  const folders=Array.isArray(allFolders)?allFolders:[];
+  const targets=new Set((targetNames||[]).map(normalizeForFolderMatch));
+  const roots=folders.filter(folder=>targets.has(normalizeForFolderMatch(folder.name)));
+  if(!roots.length) return [];
+  const root=roots[0];
+  return folders.filter(folder=>String(folder._parentId!=null?folder._parentId:folder.parentId)===String(root.id))
+    .map(folder=>({...folder,_collectionRoot:{id:root.id,name:root.name}}));
+}
 
 // Varredura ÚNICA de toda a biblioteca, usada pra montar as 5 seções da
 // Home de uma vez só (Aranha, X-Men, Mangás e Todos os quadrinhos/
@@ -11173,8 +11182,8 @@ async function getLibrarySections(forceRefresh){
         deadpoolFolders: cDeadpool.folders,
         wolverineFolders: cWolverine.folders,
         motoqueiroFolders: cMotoqueiro.folders,
-        vingadoresFolders: [],
-        justiceiroFolders: [],
+        vingadoresFolders: cachedChildrenOfNamedFolder(cAllFolders.folders,['colecao vingadores']),
+        justiceiroFolders: cachedChildrenOfNamedFolder(cAllFolders.folders,['colecao justiceiro']),
         hadError: false,
         errorMessage: null
       };
@@ -12344,13 +12353,13 @@ function paintHomeSectionsNow(wrap, data){
 // pra comparar "o que já está na tela" com "o que acabou de chegar do
 // Drive" e decidir se vale a pena redesenhar tudo de novo (ver
 // lastPaintedHomeSignature abaixo).
-function homeSectionsSignature({aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders, deadpoolFolders, wolverineFolders, motoqueiroFolders, allComics, allFolders}){
+function homeSectionsSignature({aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders, deadpoolFolders, wolverineFolders, motoqueiroFolders, vingadoresFolders, justiceiroFolders, allComics, allFolders}){
   const ids = arr => (arr||[]).map(x=>x.id+':'+((x._collectionRoot&&x._collectionRoot.id)||'')).join(',');
   const folderIds = arr => (arr||[]).map(x=>x.id+':'+x.name+':'+(x._parentId!=null?x._parentId:(x.parentId||''))).join(',');
   // IDs de caminho/raiz entram na assinatura para a tela velha em cache ser
   // substituída assim que a varredura atualizada descobrir as raízes físicas.
   const namedIds = arr => (arr||[]).map(x=>x.id+':'+x.name+':'+(x._mangaFolderId||'')+':'+((x._pathIds||[]).join('/'))+':'+((x._collectionRoot&&x._collectionRoot.id)||'')).join(',');
-  return [ids(aranhaFolders), ids(xmenFolders), ids(mangaFolders), ids(batmanFolders), ids(salvatFolders), ids(hulkFolders), ids(lanternaFolders), ids(ironmanFolders), ids(supermanFolders), ids(universoAbsolutoFolders), ids(mulherMaravilhaFolders), ids(doomsdayFolders), ids(thanosFolders), ids(darkseidFolders), ids(quartetoFolders), ids(deadpoolFolders), ids(wolverineFolders), ids(motoqueiroFolders), folderIds(allFolders), namedIds(allComics)].join('|');
+  return [ids(aranhaFolders), ids(xmenFolders), ids(mangaFolders), ids(batmanFolders), ids(salvatFolders), ids(hulkFolders), ids(lanternaFolders), ids(ironmanFolders), ids(supermanFolders), ids(universoAbsolutoFolders), ids(mulherMaravilhaFolders), ids(doomsdayFolders), ids(thanosFolders), ids(darkseidFolders), ids(quartetoFolders), ids(deadpoolFolders), ids(wolverineFolders), ids(motoqueiroFolders), ids(vingadoresFolders), ids(justiceiroFolders), folderIds(allFolders), namedIds(allComics)].join('|');
 }
 let lastPaintedHomeSignature = null;
 
@@ -12427,6 +12436,8 @@ async function renderHomeSections(forceRefresh, onProgress, {invalidatePersisten
       deadpoolFolders: cachedDeadpool ? cachedDeadpool.folders : [],
       wolverineFolders: cachedWolverine ? cachedWolverine.folders : [],
       motoqueiroFolders: cachedMotoqueiro ? cachedMotoqueiro.folders : [],
+      vingadoresFolders: cachedChildrenOfNamedFolder(cachedAllFolders ? cachedAllFolders.folders : [],['colecao vingadores']),
+      justiceiroFolders: cachedChildrenOfNamedFolder(cachedAllFolders ? cachedAllFolders.folders : [],['colecao justiceiro']),
       allComics: cachedComics ? cachedComics.comics : undefined,
       allFolders: cachedAllFolders ? cachedAllFolders.folders : undefined
     };
