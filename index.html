@@ -10863,18 +10863,41 @@ function resolveLargestHomeCollectionRoot(allFolders, allComics, folderNames){
   return best ? {id:best.id,name:best.name} : null;
 }
 
+const HOME_COLLECTION_ROOTS = Object.freeze({
+  vingadores:{id:'10_-0abpL9gAon4hvQWr69sFXA135bXRg',name:'Coleção: Vingadores',names:['colecao vingadores']},
+  justiceiro:{id:'1XCQPJXU8byvpYrVAQU2yD-sZzcJzv8tC',name:'Coleção: Justiceiro',names:['colecao justiceiro']}
+});
+function resolveKnownHomeCollectionRoot(allFolders, allComics, collection){
+  const folders=Array.isArray(allFolders)?allFolders:[];
+  const exact=folders.find(folder=>String(folder.id)===String(collection.id));
+  if(exact) return {id:exact.id,name:exact.name};
+  const named=resolveLargestHomeCollectionRoot(allFolders,allComics,collection.names);
+  if(named) return named;
+  if(CONFIG && String(CONFIG.rootFolderId)===String(DEFAULT_CONFIG.rootFolderId)){
+    return {id:collection.id,name:collection.name};
+  }
+  return null;
+}
+
 function mixedHomeItems(root, seedItems, data){
   if(!root || !root.id) return [];
   data = data || {};
   const hasFolderIndex = Array.isArray(data.allFolders);
   const hasComicIndex = Array.isArray(data.allComics);
+  const directMap=data.directHomeCollectionItemsByRoot;
+  const hasDirectItems=directMap instanceof Map && directMap.has(String(root.id));
+  const directItems=hasDirectItems?(directMap.get(String(root.id))||[]):[];
   const folderBuckets=data.foldersByParent;
   const comicBuckets=data.comicsByParent;
   const parentIdOf=item=>item && (item._parentId!=null ? item._parentId : item.parentId);
-  let folders = hasFolderIndex
+  let folders = hasDirectItems
+    ? directItems.filter(isHomeFolderItem)
+    : hasFolderIndex
     ? (folderBuckets instanceof Map ? (folderBuckets.get(root.id)||[]) : data.allFolders.filter(item=>item && String(parentIdOf(item))===String(root.id)))
     : (seedItems||[]).filter(isHomeFolderItem);
-  let comics = hasComicIndex
+  let comics = hasDirectItems
+    ? directItems.filter(item=>item && !isHomeFolderItem(item))
+    : hasComicIndex
     ? (comicBuckets instanceof Map ? (comicBuckets.get(root.id)||[]) : data.allComics.filter(item=>item && String(parentIdOf(item))===String(root.id)))
     : (seedItems||[]).filter(item=>item && !isHomeFolderItem(item));
 
@@ -10884,8 +10907,10 @@ function mixedHomeItems(root, seedItems, data){
   const seeds=Array.isArray(seedItems)?seedItems:[];
   const seededFolders=seeds.filter(isHomeFolderItem);
   const seededComics=seeds.filter(item=>item && !isHomeFolderItem(item));
-  if(!folders.length && seededFolders.length) folders=seededFolders;
-  if(!comics.length && seededComics.length) comics=seededComics;
+  if(!hasDirectItems){
+    if(!folders.length && seededFolders.length) folders=seededFolders;
+    if(!comics.length && seededComics.length) comics=seededComics;
+  }
 
   const nat=(a,b)=>String(a||'').localeCompare(String(b||''),'pt-BR',{numeric:true});
   folders = folders.slice().sort((a,b)=>nat(a.name,b.name)).map(item=>({...item,_collectionRoot:{id:root.id,name:root.name}}));
@@ -11868,7 +11893,19 @@ function paintHomeSectionsNow(wrap, data){
     if(!comicsByParent.has(parentId))comicsByParent.set(parentId,[]);
     comicsByParent.get(parentId).push(item);
   });
-  homeSectionDataContext = {...data,foldersByParent,comicsByParent};
+  // Para estes dois carrosséis, a listagem direta do parent é a fonte de
+  // verdade: o índice global deduplica IDs compartilhados entre pastas e pode
+  // perder a relação pai-filho necessária para mostrar um item nesta seção.
+  const directHomeCollectionItemsByRoot=new Map();
+  Object.values(HOME_COLLECTION_ROOTS).forEach(collection=>{
+    const root=resolveKnownHomeCollectionRoot(allFolderItems,data.allComics,collection);
+    const listing=root && state.folderCache && state.folderCache[String(root.id)];
+    if(!root || !listing || !Array.isArray(listing.folders) || !Array.isArray(listing.files)) return;
+    const rootInfo={id:root.id,name:root.name||collection.name};
+    const directItems=[...listing.folders,...listing.files].map(item=>({...item,_parentId:root.id,_collectionRoot:rootInfo}));
+    directHomeCollectionItemsByRoot.set(String(root.id),directItems);
+  });
+  homeSectionDataContext = {...data,foldersByParent,comicsByParent,directHomeCollectionItemsByRoot};
   const {continueItems, aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders, deadpoolFolders, wolverineFolders, motoqueiroFolders, capitaoAmericaFolders, vingadoresFolders, justiceiroFolders, allComics, allFolders, hadError, errorMessage} = data;
   const resolvedContinueItems=(continueItems||[]).map(item=>{
     if(!item) return item;
@@ -11955,7 +11992,7 @@ function paintHomeSectionsNow(wrap, data){
   );
   if(secHulk){ built['hulk'] = secHulk; wireHomeLogoFallback(secHulk, 'hulk'); }
 
-  const vingadoresRoot = resolveLargestHomeCollectionRoot(allFolders,allComics,['colecao vingadores']);
+  const vingadoresRoot = resolveKnownHomeCollectionRoot(allFolders,allComics,HOME_COLLECTION_ROOTS.vingadores);
   const secVingadores = buildHomeSection(
     `Coleção: <span class="section-logo-text hidden" data-logo-text="vingadores">Vingadores</span><img class="section-logo" data-logo="vingadores" src="${logoSrc('vingadores')}" alt="Vingadores" loading="eager" decoding="async">`,
     vingadoresFolders,
@@ -11964,7 +12001,7 @@ function paintHomeSectionsNow(wrap, data){
   );
   if(secVingadores){ built['vingadores'] = secVingadores; wireHomeLogoFallback(secVingadores, 'vingadores'); }
 
-  const justiceiroRoot = resolveLargestHomeCollectionRoot(allFolders,allComics,['colecao justiceiro']);
+  const justiceiroRoot = resolveKnownHomeCollectionRoot(allFolders,allComics,HOME_COLLECTION_ROOTS.justiceiro);
   const secJusticeiro = buildHomeSection(
     `Coleção: <span class="section-logo-text hidden" data-logo-text="justiceiro">Justiceiro</span><img class="section-logo" data-logo="justiceiro" src="${logoSrc('justiceiro')}" alt="Justiceiro" loading="eager" decoding="async">`,
     justiceiroFolders,
@@ -12359,7 +12396,12 @@ function homeSectionsSignature({aranhaFolders, xmenFolders, mangaFolders, batman
   // IDs de caminho/raiz entram na assinatura para a tela velha em cache ser
   // substituída assim que a varredura atualizada descobrir as raízes físicas.
   const namedIds = arr => (arr||[]).map(x=>x.id+':'+x.name+':'+(x._mangaFolderId||'')+':'+((x._pathIds||[]).join('/'))+':'+((x._collectionRoot&&x._collectionRoot.id)||'')).join(',');
-  return [ids(aranhaFolders), ids(xmenFolders), ids(mangaFolders), ids(batmanFolders), ids(salvatFolders), ids(hulkFolders), ids(lanternaFolders), ids(ironmanFolders), ids(supermanFolders), ids(universoAbsolutoFolders), ids(mulherMaravilhaFolders), ids(doomsdayFolders), ids(thanosFolders), ids(darkseidFolders), ids(quartetoFolders), ids(deadpoolFolders), ids(wolverineFolders), ids(motoqueiroFolders), ids(vingadoresFolders), ids(justiceiroFolders), folderIds(allFolders), namedIds(allComics)].join('|');
+  const directItems=Object.values(HOME_COLLECTION_ROOTS).map(collection=>{
+    const root=resolveKnownHomeCollectionRoot(allFolders,allComics,collection);
+    const listing=root && state.folderCache && state.folderCache[String(root.id)];
+    return root ? `${root.id}:${listing?[...(listing.folders||[]),...(listing.files||[])].map(item=>item.id+':'+item.name).join(','):''}` : '';
+  }).join(';');
+  return [ids(aranhaFolders), ids(xmenFolders), ids(mangaFolders), ids(batmanFolders), ids(salvatFolders), ids(hulkFolders), ids(lanternaFolders), ids(ironmanFolders), ids(supermanFolders), ids(universoAbsolutoFolders), ids(mulherMaravilhaFolders), ids(doomsdayFolders), ids(thanosFolders), ids(darkseidFolders), ids(quartetoFolders), ids(deadpoolFolders), ids(wolverineFolders), ids(motoqueiroFolders), ids(vingadoresFolders), ids(justiceiroFolders), folderIds(allFolders), namedIds(allComics), directItems].join('|');
 }
 let lastPaintedHomeSignature = null;
 
