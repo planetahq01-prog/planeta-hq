@@ -10456,6 +10456,14 @@ function cachedChildrenOfNamedFolder(allFolders,targetNames){
   return folders.filter(folder=>String(folder._parentId!=null?folder._parentId:folder.parentId)===String(root.id))
     .map(folder=>({...folder,_collectionRoot:{id:root.id,name:root.name}}));
 }
+function cachedDirectCollectionItems(cacheRecord, allFolders, allComics, rootId){
+  if(cacheRecord && Array.isArray(cacheRecord.items) && cacheRecord.items.length) return cacheRecord.items;
+  const parentOf=item=>item&&(item._parentId!=null?item._parentId:item.parentId);
+  return [
+    ...(Array.isArray(allFolders)?allFolders:[]).filter(item=>String(parentOf(item))===String(rootId)),
+    ...(Array.isArray(allComics)?allComics:[]).filter(item=>String(parentOf(item))===String(rootId))
+  ];
+}
 
 // Varredura ÚNICA de toda a biblioteca, usada pra montar as 5 seções da
 // Home de uma vez só (Aranha, X-Men, Mangás e Todos os quadrinhos/
@@ -10871,11 +10879,14 @@ function resolveKnownHomeCollectionRoot(allFolders, allComics, collection){
   const folders=Array.isArray(allFolders)?allFolders:[];
   const exact=folders.find(folder=>String(folder.id)===String(collection.id));
   if(exact) return {id:exact.id,name:exact.name};
-  const named=resolveLargestHomeCollectionRoot(allFolders,allComics,collection.names);
-  if(named) return named;
+  // Na biblioteca padrão os IDs já foram conferidos no Drive. Não usar uma
+  // pasta homônima (ou um atalho para outra coleção) como substituta enquanto
+  // o índice ainda não trouxe a raiz correta.
   if(CONFIG && String(CONFIG.rootFolderId)===String(DEFAULT_CONFIG.rootFolderId)){
     return {id:collection.id,name:collection.name};
   }
+  const named=resolveLargestHomeCollectionRoot(allFolders,allComics,collection.names);
+  if(named) return named;
   return null;
 }
 
@@ -10885,17 +10896,25 @@ function mixedHomeItems(root, seedItems, data){
   const hasFolderIndex = Array.isArray(data.allFolders);
   const hasComicIndex = Array.isArray(data.allComics);
   const directMap=data.directHomeCollectionItemsByRoot;
-  const hasDirectItems=directMap instanceof Map && directMap.has(String(root.id));
-  const directItems=hasDirectItems?(directMap.get(String(root.id))||[]):[];
+  const hasDirectItems=directMap instanceof Map
+    ? directMap.has(String(root.id))
+    : !!directMap && Object.prototype.hasOwnProperty.call(directMap,String(root.id));
+  const candidateDirectItems=hasDirectItems
+    ? (directMap instanceof Map?directMap.get(String(root.id)):directMap[String(root.id)])||[]
+    : [];
+  // Uma lista vazia não prova que a coleção esteja vazia; pode ser cache
+  // antigo/incompleto. Nesse caso, use os índices e as sementes disponíveis.
+  const directItems=Array.isArray(candidateDirectItems)?candidateDirectItems:[];
+  const hasUsableDirectItems=directItems.length>0;
   const folderBuckets=data.foldersByParent;
   const comicBuckets=data.comicsByParent;
   const parentIdOf=item=>item && (item._parentId!=null ? item._parentId : item.parentId);
-  let folders = hasDirectItems
+  let folders = hasUsableDirectItems
     ? directItems.filter(isHomeFolderItem)
     : hasFolderIndex
     ? (folderBuckets instanceof Map ? (folderBuckets.get(root.id)||[]) : data.allFolders.filter(item=>item && String(parentIdOf(item))===String(root.id)))
     : (seedItems||[]).filter(isHomeFolderItem);
-  let comics = hasDirectItems
+  let comics = hasUsableDirectItems
     ? directItems.filter(item=>item && !isHomeFolderItem(item))
     : hasComicIndex
     ? (comicBuckets instanceof Map ? (comicBuckets.get(root.id)||[]) : data.allComics.filter(item=>item && String(parentIdOf(item))===String(root.id)))
@@ -10907,7 +10926,7 @@ function mixedHomeItems(root, seedItems, data){
   const seeds=Array.isArray(seedItems)?seedItems:[];
   const seededFolders=seeds.filter(isHomeFolderItem);
   const seededComics=seeds.filter(item=>item && !isHomeFolderItem(item));
-  if(!hasDirectItems){
+  if(!hasUsableDirectItems){
     if(!folders.length && seededFolders.length) folders=seededFolders;
     if(!comics.length && seededComics.length) comics=seededComics;
   }
@@ -11041,6 +11060,8 @@ const QUARTETO_CACHE_KEY = 'planetahq_quarteto_cache_v1';
 const DEADPOOL_CACHE_KEY = 'planetahq_deadpool_cache_v1';
 const WOLVERINE_CACHE_KEY = 'planetahq_wolverine_cache_v1';
 const MOTOQUEIRO_CACHE_KEY = 'planetahq_motoqueiro_cache_v1';
+const VINGADORES_DIRECT_CACHE_KEY = 'planetahq_vingadores_direct_cache_v2';
+const JUSTICEIRO_DIRECT_CACHE_KEY = 'planetahq_justiceiro_direct_cache_v2';
 const HOME_CACHE_MAX_AGE = 6*3600*1000;
 const DRIVE_CATALOG_REVALIDATE_INTERVAL = 60*1000;
 let lastSuccessfulDriveReconcileAt = 0;
@@ -11051,7 +11072,8 @@ const HOME_CATALOG_CACHE_KEYS = [
   LANTERNA_CACHE_KEY, IRONMAN_CACHE_KEY, SUPERMAN_CACHE_KEY,
   UNIVERSO_ABSOLUTO_CACHE_KEY, MULHER_MARAVILHA_CACHE_KEY, DOOMSDAY_CACHE_KEY,
   THANOS_CACHE_KEY, DARKSEID_CACHE_KEY, QUARTETO_CACHE_KEY, DEADPOOL_CACHE_KEY,
-  WOLVERINE_CACHE_KEY, MOTOQUEIRO_CACHE_KEY
+  WOLVERINE_CACHE_KEY, MOTOQUEIRO_CACHE_KEY, VINGADORES_DIRECT_CACHE_KEY,
+  JUSTICEIRO_DIRECT_CACHE_KEY
 ];
 async function invalidateHomeCatalogCache(){
   await Promise.all(HOME_CATALOG_CACHE_KEYS.map(key=>idbDelete('homeCache',key).catch(()=>false)));
@@ -11162,7 +11184,7 @@ async function getLibrarySections(forceRefresh){
 
   if(!forceRefresh){
     const now = Date.now();
-    const [cAranha, cXMen, cManga, cComics, cAllFolders, cBatman, cSalvat, cHulk, cLanterna, cIronman, cSuperman, cUniversoAbsoluto, cMulherMaravilha, cDoomsday, cThanos, cDarkseid, cQuarteto, cDeadpool, cWolverine, cMotoqueiro] = await Promise.all([
+    const [cAranha, cXMen, cManga, cComics, cAllFolders, cBatman, cSalvat, cHulk, cLanterna, cIronman, cSuperman, cUniversoAbsoluto, cMulherMaravilha, cDoomsday, cThanos, cDarkseid, cQuarteto, cDeadpool, cWolverine, cMotoqueiro, cVingadoresDirect, cJusticeiroDirect] = await Promise.all([
       readHomeCache(ARANHA_CACHE_KEY, 'folders'),
       readHomeCache(XMEN_CACHE_KEY, 'folders'),
       readHomeCache(MANGA_CACHE_KEY, 'folders'),
@@ -11182,7 +11204,9 @@ async function getLibrarySections(forceRefresh){
       readHomeCache(QUARTETO_CACHE_KEY, 'folders'),
       readHomeCache(DEADPOOL_CACHE_KEY, 'folders'),
       readHomeCache(WOLVERINE_CACHE_KEY, 'folders'),
-      readHomeCache(MOTOQUEIRO_CACHE_KEY, 'folders')
+      readHomeCache(MOTOQUEIRO_CACHE_KEY, 'folders'),
+      readHomeCache(VINGADORES_DIRECT_CACHE_KEY, 'items'),
+      readHomeCache(JUSTICEIRO_DIRECT_CACHE_KEY, 'items')
     ]);
     const fresh = c=>c && (now - c.savedAt < HOME_CACHE_MAX_AGE);
     if(fresh(cAranha) && fresh(cXMen) && fresh(cManga) && fresh(cComics) && fresh(cAllFolders) && fresh(cBatman) && fresh(cSalvat) && fresh(cHulk) && fresh(cLanterna) && fresh(cIronman) && fresh(cSuperman) && fresh(cUniversoAbsoluto) && fresh(cMulherMaravilha) && fresh(cDoomsday) && fresh(cThanos) && fresh(cDarkseid) && fresh(cQuarteto) && fresh(cDeadpool) && fresh(cWolverine) && fresh(cMotoqueiro)){
@@ -11209,6 +11233,10 @@ async function getLibrarySections(forceRefresh){
         motoqueiroFolders: cMotoqueiro.folders,
         vingadoresFolders: cachedChildrenOfNamedFolder(cAllFolders.folders,['colecao vingadores']),
         justiceiroFolders: cachedChildrenOfNamedFolder(cAllFolders.folders,['colecao justiceiro']),
+        directHomeCollectionItemsByRoot:{
+          [HOME_COLLECTION_ROOTS.vingadores.id]:cachedDirectCollectionItems(cVingadoresDirect,cAllFolders.folders,cComics.comics,HOME_COLLECTION_ROOTS.vingadores.id),
+          [HOME_COLLECTION_ROOTS.justiceiro.id]:cachedDirectCollectionItems(cJusticeiroDirect,cAllFolders.folders,cComics.comics,HOME_COLLECTION_ROOTS.justiceiro.id)
+        },
         hadError: false,
         errorMessage: null
       };
@@ -11239,6 +11267,18 @@ async function getLibrarySections(forceRefresh){
       partial:errorState.hadError && !wasAborted,
       confirmedChildren:snapshotDriveChildren()
     };
+    const directHomeCollectionItemsByRoot={};
+    for(const [key,collection] of Object.entries(HOME_COLLECTION_ROOTS)){
+      const root=resolveKnownHomeCollectionRoot(raw.folders,raw.comics,collection);
+      const listing=root && state.folderCache && state.folderCache[String(root.id)];
+      if(!root || !listing || !Array.isArray(listing.folders) || !Array.isArray(listing.files)) continue;
+      const items=[...listing.folders,...listing.files].map(item=>({...item,_parentId:root.id,_collectionRoot:{id:root.id,name:root.name||collection.name}}));
+      directHomeCollectionItemsByRoot[String(collection.id)]=items;
+      if(!wasAborted){
+        const cacheKey=key==='vingadores'?VINGADORES_DIRECT_CACHE_KEY:JUSTICEIRO_DIRECT_CACHE_KEY;
+        await writeHomeCache(cacheKey,'items',items);
+      }
+    }
     if(!skipWrite){
       lastSuccessfulDriveReconcileAt = Date.now();
       revalidateFolderCovers();
@@ -11265,7 +11305,7 @@ async function getLibrarySections(forceRefresh){
       finalizeHomeSectionResult(WOLVERINE_CACHE_KEY, 'folders', raw.wolverineFolders, syncInfo),
       finalizeHomeSectionResult(MOTOQUEIRO_CACHE_KEY, 'folders', raw.motoqueiroFolders, syncInfo)
     ]);
-    return { aranhaFolders, xmenFolders, mangaFolders, comics, allFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders, deadpoolFolders, wolverineFolders, motoqueiroFolders, vingadoresFolders: raw.vingadoresFolders || [], justiceiroFolders: raw.justiceiroFolders || [],
+    return { aranhaFolders, xmenFolders, mangaFolders, comics, allFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders, deadpoolFolders, wolverineFolders, motoqueiroFolders, vingadoresFolders: raw.vingadoresFolders || [], justiceiroFolders: raw.justiceiroFolders || [], directHomeCollectionItemsByRoot,
       hadError: errorState.hadError,
       errorMessage: errorState.lastError ? errorState.lastError.message : null };
   })();
@@ -11897,10 +11937,15 @@ function paintHomeSectionsNow(wrap, data){
   // verdade: o índice global deduplica IDs compartilhados entre pastas e pode
   // perder a relação pai-filho necessária para mostrar um item nesta seção.
   const directHomeCollectionItemsByRoot=new Map();
+  if(data.directHomeCollectionItemsByRoot instanceof Map){
+    data.directHomeCollectionItemsByRoot.forEach((items,id)=>directHomeCollectionItemsByRoot.set(String(id),items));
+  }else if(data.directHomeCollectionItemsByRoot){
+    Object.entries(data.directHomeCollectionItemsByRoot).forEach(([id,items])=>directHomeCollectionItemsByRoot.set(String(id),items));
+  }
   Object.values(HOME_COLLECTION_ROOTS).forEach(collection=>{
     const root=resolveKnownHomeCollectionRoot(allFolderItems,data.allComics,collection);
     const listing=root && state.folderCache && state.folderCache[String(root.id)];
-    if(!root || !listing || !Array.isArray(listing.folders) || !Array.isArray(listing.files)) return;
+    if(!root || directHomeCollectionItemsByRoot.has(String(root.id)) || !listing || !Array.isArray(listing.folders) || !Array.isArray(listing.files)) return;
     const rootInfo={id:root.id,name:root.name||collection.name};
     const directItems=[...listing.folders,...listing.files].map(item=>({...item,_parentId:root.id,_collectionRoot:rootInfo}));
     directHomeCollectionItemsByRoot.set(String(root.id),directItems);
@@ -12390,7 +12435,7 @@ function paintHomeSectionsNow(wrap, data){
 // pra comparar "o que já está na tela" com "o que acabou de chegar do
 // Drive" e decidir se vale a pena redesenhar tudo de novo (ver
 // lastPaintedHomeSignature abaixo).
-function homeSectionsSignature({aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders, deadpoolFolders, wolverineFolders, motoqueiroFolders, vingadoresFolders, justiceiroFolders, allComics, allFolders}){
+function homeSectionsSignature({aranhaFolders, xmenFolders, mangaFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders, deadpoolFolders, wolverineFolders, motoqueiroFolders, vingadoresFolders, justiceiroFolders, allComics, allFolders, directHomeCollectionItemsByRoot}){
   const ids = arr => (arr||[]).map(x=>x.id+':'+((x._collectionRoot&&x._collectionRoot.id)||'')).join(',');
   const folderIds = arr => (arr||[]).map(x=>x.id+':'+x.name+':'+(x._parentId!=null?x._parentId:(x.parentId||''))).join(',');
   // IDs de caminho/raiz entram na assinatura para a tela velha em cache ser
@@ -12399,13 +12444,41 @@ function homeSectionsSignature({aranhaFolders, xmenFolders, mangaFolders, batman
   const directItems=Object.values(HOME_COLLECTION_ROOTS).map(collection=>{
     const root=resolveKnownHomeCollectionRoot(allFolders,allComics,collection);
     const listing=root && state.folderCache && state.folderCache[String(root.id)];
-    return root ? `${root.id}:${listing?[...(listing.folders||[]),...(listing.files||[])].map(item=>item.id+':'+item.name).join(','):''}` : '';
+    const cached=directHomeCollectionItemsByRoot instanceof Map
+      ? directHomeCollectionItemsByRoot.get(String(root&&root.id))
+      : directHomeCollectionItemsByRoot && directHomeCollectionItemsByRoot[String(collection.id)];
+    const items=Array.isArray(cached)?cached:(listing?[...(listing.folders||[]),...(listing.files||[])]:[]);
+    return root ? `${root.id}:${items.map(item=>item.id+':'+item.name).join(',')}` : '';
   }).join(';');
   return [ids(aranhaFolders), ids(xmenFolders), ids(mangaFolders), ids(batmanFolders), ids(salvatFolders), ids(hulkFolders), ids(lanternaFolders), ids(ironmanFolders), ids(supermanFolders), ids(universoAbsolutoFolders), ids(mulherMaravilhaFolders), ids(doomsdayFolders), ids(thanosFolders), ids(darkseidFolders), ids(quartetoFolders), ids(deadpoolFolders), ids(wolverineFolders), ids(motoqueiroFolders), ids(vingadoresFolders), ids(justiceiroFolders), folderIds(allFolders), namedIds(allComics), directItems].join('|');
 }
 let lastPaintedHomeSignature = null;
 
 let homeToken = 0;
+async function primeDirectHomeCollectionCaches(wrap, token, missingKeys){
+  if(!missingKeys || !missingKeys.length || navigator.onLine===false) return;
+  const refreshed={};
+  await Promise.all(missingKeys.map(async key=>{
+    const collection=HOME_COLLECTION_ROOTS[key];
+    try{
+      const listing=await driveListFolder(collection.id);
+      const items=[...(listing.folders||[]),...(listing.files||[])].map(item=>({...item,_parentId:collection.id,_collectionRoot:{id:collection.id,name:collection.name}}));
+      refreshed[String(collection.id)]=items;
+      const cacheKey=key==='vingadores'?VINGADORES_DIRECT_CACHE_KEY:JUSTICEIRO_DIRECT_CACHE_KEY;
+      await writeHomeCache(cacheKey,'items',items);
+    }catch(error){
+      logErr('[PlanetaHQ] Falha ao aquecer o cache direto de uma coleção da Home.',collection.id,error);
+    }
+  }));
+  if(token!==homeToken || !Object.keys(refreshed).length) return;
+  const current=lastHomeSectionsData;
+  if(!current) return;
+  const existing=current.directHomeCollectionItemsByRoot||{};
+  const direct={...(existing instanceof Map?Object.fromEntries(existing):existing),...refreshed};
+  const updated={...current,directHomeCollectionItemsByRoot:direct};
+  paintHomeSections(wrap,updated);
+  lastPaintedHomeSignature=homeSectionsSignature(updated);
+}
 async function renderHomeSections(forceRefresh, onProgress, {invalidatePersistentCache=false}={}){
   const wrap = $('#home-sections');
   if(!wrap) return;
@@ -12431,7 +12504,7 @@ async function renderHomeSections(forceRefresh, onProgress, {invalidatePersisten
   // o cache antes de buscar de novo, e por isso todas as seções sumiam da
   // tela até a busca nova terminar). A busca de verdade (item 2 abaixo)
   // troca pelos dados frescos assim que chegar, sem travar nada.
-  const [cachedAranha, cachedXMen, cachedManga, cachedComics, cachedAllFolders, continueItemsFast, cachedBatman, cachedSalvat, cachedHulk, cachedLanterna, cachedIronman, cachedSuperman, cachedUniversoAbsoluto, cachedMulherMaravilha, cachedDoomsday, cachedThanos, cachedDarkseid, cachedQuarteto, cachedDeadpool, cachedWolverine, cachedMotoqueiro] = await Promise.all([
+  const [cachedAranha, cachedXMen, cachedManga, cachedComics, cachedAllFolders, continueItemsFast, cachedBatman, cachedSalvat, cachedHulk, cachedLanterna, cachedIronman, cachedSuperman, cachedUniversoAbsoluto, cachedMulherMaravilha, cachedDoomsday, cachedThanos, cachedDarkseid, cachedQuarteto, cachedDeadpool, cachedWolverine, cachedMotoqueiro, cachedVingadoresDirect, cachedJusticeiroDirect] = await Promise.all([
     readHomeCache(ARANHA_CACHE_KEY, 'folders'),
     readHomeCache(XMEN_CACHE_KEY, 'folders'),
     readHomeCache(MANGA_CACHE_KEY, 'folders'),
@@ -12452,7 +12525,9 @@ async function renderHomeSections(forceRefresh, onProgress, {invalidatePersisten
     readHomeCache(QUARTETO_CACHE_KEY, 'folders'),
     readHomeCache(DEADPOOL_CACHE_KEY, 'folders'),
     readHomeCache(WOLVERINE_CACHE_KEY, 'folders'),
-    readHomeCache(MOTOQUEIRO_CACHE_KEY, 'folders')
+    readHomeCache(MOTOQUEIRO_CACHE_KEY, 'folders'),
+    readHomeCache(VINGADORES_DIRECT_CACHE_KEY, 'items'),
+    readHomeCache(JUSTICEIRO_DIRECT_CACHE_KEY, 'items')
   ]);
   if(isStale(myToken)) return;
 
@@ -12480,6 +12555,10 @@ async function renderHomeSections(forceRefresh, onProgress, {invalidatePersisten
       motoqueiroFolders: cachedMotoqueiro ? cachedMotoqueiro.folders : [],
       vingadoresFolders: cachedChildrenOfNamedFolder(cachedAllFolders ? cachedAllFolders.folders : [],['colecao vingadores']),
       justiceiroFolders: cachedChildrenOfNamedFolder(cachedAllFolders ? cachedAllFolders.folders : [],['colecao justiceiro']),
+      directHomeCollectionItemsByRoot:{
+        [HOME_COLLECTION_ROOTS.vingadores.id]:cachedDirectCollectionItems(cachedVingadoresDirect,cachedAllFolders?cachedAllFolders.folders:[],cachedComics?cachedComics.comics:[],HOME_COLLECTION_ROOTS.vingadores.id),
+        [HOME_COLLECTION_ROOTS.justiceiro.id]:cachedDirectCollectionItems(cachedJusticeiroDirect,cachedAllFolders?cachedAllFolders.folders:[],cachedComics?cachedComics.comics:[],HOME_COLLECTION_ROOTS.justiceiro.id)
+      },
       allComics: cachedComics ? cachedComics.comics : undefined,
       allFolders: cachedAllFolders ? cachedAllFolders.folders : undefined
     };
@@ -12488,6 +12567,10 @@ async function renderHomeSections(forceRefresh, onProgress, {invalidatePersisten
       paintHomeSections(wrap, fastData);
       lastPaintedHomeSignature = fastSignature;
     }
+    const missingDirect=[];
+    if(!cachedVingadoresDirect || !Array.isArray(cachedVingadoresDirect.items) || !cachedVingadoresDirect.items.length) missingDirect.push('vingadores');
+    if(!cachedJusticeiroDirect || !Array.isArray(cachedJusticeiroDirect.items) || !cachedJusticeiroDirect.items.length) missingDirect.push('justiceiro');
+    if(missingDirect.length) void primeDirectHomeCollectionCaches(wrap,myToken,missingDirect);
   } else {
     wrap.innerHTML = `<div class="home-section"><div class="home-section-title">Carregando seções…</div></div>`;
     wrap.classList.remove('hidden');
