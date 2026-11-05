@@ -4130,7 +4130,12 @@ async function runInitialLoad(){
    6) Biblioteca — navegação e renderização
    --------------------------------------------------------------------- */
 async function loadConfig(){
-  const raw = localStorage.getItem(CONFIG_KEY);
+  let raw = null;
+  try{ raw = localStorage.getItem(CONFIG_KEY); }
+  catch(e){
+    console.warn('[PlanetaHQ] Armazenamento local indisponível ao ler configuração; usando a configuração padrão.',e);
+    return false;
+  }
   if(raw){
     try{
       CONFIG = JSON.parse(raw);
@@ -4146,7 +4151,8 @@ async function loadConfig(){
       // inteiro do app numa tela branca, sem chance de reconfigurar. Agora
       // descarta o valor inválido e volta pra tela de configuração.
       console.warn('[PlanetaHQ] Configuração salva estava corrompida, resetando.', e);
-      localStorage.removeItem(CONFIG_KEY);
+      try{ localStorage.removeItem(CONFIG_KEY); }
+      catch(storageError){ console.warn('[PlanetaHQ] Não foi possível remover a configuração local inválida.',storageError); }
     }
   }
   return false;
@@ -4225,7 +4231,9 @@ function requireAccessCodeImpl(initialMessage){
 // aceito pelo Worker) ou pede um novo. É o único ponto que decide se a
 // biblioteca chega a abrir.
 async function ensureAccessCode(){
-  const saved = normalizeAccessCode(localStorage.getItem(ACCESS_CODE_KEY) || '');
+  let saved = '';
+  try{ saved = normalizeAccessCode(localStorage.getItem(ACCESS_CODE_KEY) || ''); }
+  catch(e){ console.warn('[PlanetaHQ] Armazenamento local indisponível ao ler o código de acesso.',e); }
   let denyReason = null;
   if(saved){
     try{
@@ -4684,7 +4692,10 @@ function renderFolderCard(f, opts){
   card.appendChild(cover);
   card.appendChild(el('div','label', f.name));
   card.onclick = async ()=>{
-    await loadCustomDetailMetadata(f.id);
+    // A busca pode alcançar fichas mantidas no Worker que não estão embutidas
+    // neste HTML. Espere a carga compartilhada completa antes de decidir se
+    // abre a ficha do item ou apenas navega para dentro da pasta.
+    await loadCustomDetailMetadata();
     if(hasCustomDetailMetadata(f,f._parentId)&&!isDescendantOfDetailedCollection(f,f._parentId)){
       const parentId=f._parentId!=null?f._parentId:(state.path[state.path.length-1]&&state.path[state.path.length-1].id);
       openCollectionDetails({...f,_parentId:parentId},parentId); return;
@@ -4710,14 +4721,14 @@ function renderComicCard(f, opts){
   card.onclick = async ()=>{
     const pid = f._parentId!=null ? f._parentId : (state.path[state.path.length-1] && state.path[state.path.length-1].id);
     if(opts.onOpen){
-      await loadCustomDetailMetadata(f.id);
+      await loadCustomDetailMetadata();
       if(hasCustomDetailMetadata(f,pid)&&!isDescendantOfDetailedCollection(f,pid)){ openCollectionDetails({...f,_parentId:pid},pid); return; }
       await opts.onOpen(f); return;
     }
     if(card.classList.contains('loading')) return;
     card.classList.add('loading');
     try{
-      await loadCustomDetailMetadata(f.id);
+      await loadCustomDetailMetadata();
       if(hasCustomDetailMetadata(f,pid)&&!isDescendantOfDetailedCollection(f,pid)){ openCollectionDetails({...f,_parentId:pid},pid); return; }
       await openReader(f, undefined, pid);
     }finally{ card.classList.remove('loading'); }
@@ -8720,6 +8731,32 @@ function searchItemScore(item,tokens){
   return (name===joined?0:0) + (name.startsWith(joined)?1:0) +
     (name.includes(joined)?2:0) + (haystack===joined?0:0);
 }
+function searchItemHasDetail(item, foldersById){
+  if(!item) return false;
+  const ancestors=new Set();
+  const parent=item._parentId??item.parentId;
+  if(parent!=null) ancestors.add(String(parent));
+  (Array.isArray(item._pathIds)?item._pathIds:[]).forEach(id=>{if(id!=null) ancestors.add(String(id));});
+  let cursor=parent==null?null:foldersById.get(String(parent));
+  while(cursor){
+    const id=String(cursor.id);
+    if(ancestors.has(id) && id!==String(parent)) break;
+    ancestors.add(id);
+    const next=cursor._parentId??cursor.parentId;
+    cursor=next==null?null:foldersById.get(String(next));
+  }
+  // Uma pasta com ficha já é a entrada para seu conteúdo. Não liste também
+  // as edições/subpastas descendentes, mesmo que tenham metadados próprios:
+  // isso evita duplicar no resultado o que já aparece dentro da ficha.
+  for(const id of ancestors){
+    if(hasCustomDetailMetadata(id) || Object.prototype.hasOwnProperty.call(COLLECTION_DETAIL_ROOT_FALLBACKS,String(id))) return false;
+  }
+  if(hasCustomDetailMetadata(item)) return true;
+  for(const id of ancestors){
+    if(hasCustomDetailMetadata(item,id)) return true;
+  }
+  return false;
+}
 
 async function searchLibrary(normTerm, rawTerm, token, isStale){
   // getAllFoldersCached/getAllComicsCached podem iniciar uma varredura total
@@ -8750,13 +8787,25 @@ async function searchLibrary(normTerm, rawTerm, token, isStale){
     allComics = indexData.comics || [];
   }
 
+  // A busca também inclui fichas mantidas no Worker/metadata.json e, em
+  // coleções detalhadas, itens cuja ficha é herdada da coleção ancestral.
+  // Carregue esses metadados antes do filtro; se a rede estiver pendurada,
+  // continue com as fichas locais após um limite curto.
+  try{
+    await withStallTimeout(loadCustomDetailMetadata(),8000,'Tempo esgotado ao carregar fichas da biblioteca.');
+  }catch(error){
+    logWarn('[PlanetaHQ] Fichas remotas indisponíveis durante a pesquisa; usando as fichas locais.',error);
+  }
+  if(isStale(token)) return {folders: [], files: []};
+
   const tokens=searchTokensFor(rawTerm || normTerm);
+  const foldersById=new Map(allFolders.filter(Boolean).map(folder=>[String(folder.id),folder]));
   const folders = allFolders
-    .filter(f=>f && searchItemMatches(f,tokens))
+    .filter(f=>f && searchItemMatches(f,tokens) && searchItemHasDetail(f,foldersById))
     .sort((a,b)=>searchItemScore(a,tokens)-searchItemScore(b,tokens) || a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
   const comics = allComics
     .map(f=>({...f, _ext:f._ext || guessExt(f)}))
-    .filter(f=>f._ext && searchItemMatches(f,tokens))
+    .filter(f=>f._ext && searchItemMatches(f,tokens) && searchItemHasDetail(f,foldersById))
     .sort((a,b)=>searchItemScore(a,tokens)-searchItemScore(b,tokens) || a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
   return {folders, files:comics};
 }
@@ -10458,11 +10507,10 @@ function cachedChildrenOfNamedFolder(allFolders,targetNames){
 }
 function cachedDirectCollectionItems(cacheRecord, allFolders, allComics, rootId){
   if(cacheRecord && Array.isArray(cacheRecord.items) && cacheRecord.items.length) return cacheRecord.items;
-  const parentOf=item=>item&&(item._parentId!=null?item._parentId:item.parentId);
-  return [
-    ...(Array.isArray(allFolders)?allFolders:[]).filter(item=>String(parentOf(item))===String(rootId)),
-    ...(Array.isArray(allComics)?allComics:[]).filter(item=>String(parentOf(item))===String(rootId))
-  ];
+  // O índice global deduplica arquivos compartilhados/atalhos por ID e pode
+  // omitir filhos deste parent. Sem snapshot confirmado, devolva vazio para
+  // mixedHomeItems cair no índice/sementes e o aquecimento buscar a lista real.
+  return [];
 }
 function directCollectionItemsOrCache(freshMap, cacheRecord, allFolders, allComics, rootId){
   const freshItems=freshMap instanceof Map?freshMap.get(String(rootId)):freshMap&&freshMap[String(rootId)];
@@ -10878,6 +10926,7 @@ function resolveLargestHomeCollectionRoot(allFolders, allComics, folderNames){
 }
 
 const HOME_COLLECTION_ROOTS = Object.freeze({
+  aranha:{id:HOMEM_ARANHA_COLLECTION_FOLDER_ID,name:'Coleção Homem-Aranha',names:['colecao homem aranha']},
   vingadores:{id:'10_-0abpL9gAon4hvQWr69sFXA135bXRg',name:'Coleção: Vingadores',names:['colecao vingadores']},
   justiceiro:{id:'1XCQPJXU8byvpYrVAQU2yD-sZzcJzv8tC',name:'Coleção: Justiceiro',names:['colecao justiceiro']}
 });
@@ -10998,8 +11047,8 @@ function buildHomeSection(titleHtml, items, builder, opts){
   items.forEach(it=>{
     const card = builder ? builder(it) : buildMixedCarouselCard(it);
     if(!card) return;
-    if(isDemolidorSection) card.onclick=()=>openCollectionDetails(it,root?.id||DEMOLIDOR_COLLECTION_FOLDER_ID);
-    if(opts.detailsRootFolderId) card.onclick=()=>openCollectionDetails(it,opts.detailsRootFolderId);
+    if(isDemolidorSection) card.onclick=async()=>{ await loadCustomDetailMetadata(); openCollectionDetails(it,root?.id||DEMOLIDOR_COLLECTION_FOLDER_ID); };
+    if(opts.detailsRootFolderId) card.onclick=async()=>{ await loadCustomDetailMetadata(); openCollectionDetails(it,opts.detailsRootFolderId); };
     carousel.appendChild(card);
   });
   carousel.appendChild(el('div','carousel-end'));
@@ -11068,9 +11117,15 @@ const WOLVERINE_CACHE_KEY = 'planetahq_wolverine_cache_v1';
 const MOTOQUEIRO_CACHE_KEY = 'planetahq_motoqueiro_cache_v1';
 const VINGADORES_DIRECT_CACHE_KEY = 'planetahq_vingadores_direct_cache_v2';
 const JUSTICEIRO_DIRECT_CACHE_KEY = 'planetahq_justiceiro_direct_cache_v2';
+const ARANHA_DIRECT_CACHE_KEY = 'planetahq_aranha_direct_cache_v1';
 const HOME_CACHE_MAX_AGE = 6*3600*1000;
 const DRIVE_CATALOG_REVALIDATE_INTERVAL = 60*1000;
 let lastSuccessfulDriveReconcileAt = 0;
+function homeDirectCacheKey(collectionKey){
+  return collectionKey==='aranha'?ARANHA_DIRECT_CACHE_KEY
+    :collectionKey==='vingadores'?VINGADORES_DIRECT_CACHE_KEY
+    :collectionKey==='justiceiro'?JUSTICEIRO_DIRECT_CACHE_KEY:null;
+}
 
 const HOME_CATALOG_CACHE_KEYS = [
   ARANHA_CACHE_KEY, XMEN_CACHE_KEY, MANGA_CACHE_KEY, ALLCOMICS_CACHE_KEY,
@@ -11079,7 +11134,7 @@ const HOME_CATALOG_CACHE_KEYS = [
   UNIVERSO_ABSOLUTO_CACHE_KEY, MULHER_MARAVILHA_CACHE_KEY, DOOMSDAY_CACHE_KEY,
   THANOS_CACHE_KEY, DARKSEID_CACHE_KEY, QUARTETO_CACHE_KEY, DEADPOOL_CACHE_KEY,
   WOLVERINE_CACHE_KEY, MOTOQUEIRO_CACHE_KEY, VINGADORES_DIRECT_CACHE_KEY,
-  JUSTICEIRO_DIRECT_CACHE_KEY
+  JUSTICEIRO_DIRECT_CACHE_KEY, ARANHA_DIRECT_CACHE_KEY
 ];
 async function invalidateHomeCatalogCache(){
   await Promise.all(HOME_CATALOG_CACHE_KEYS.map(key=>idbDelete('homeCache',key).catch(()=>false)));
@@ -11190,7 +11245,7 @@ async function getLibrarySections(forceRefresh){
 
   if(!forceRefresh){
     const now = Date.now();
-    const [cAranha, cXMen, cManga, cComics, cAllFolders, cBatman, cSalvat, cHulk, cLanterna, cIronman, cSuperman, cUniversoAbsoluto, cMulherMaravilha, cDoomsday, cThanos, cDarkseid, cQuarteto, cDeadpool, cWolverine, cMotoqueiro, cVingadoresDirect, cJusticeiroDirect] = await Promise.all([
+    const [cAranha, cXMen, cManga, cComics, cAllFolders, cBatman, cSalvat, cHulk, cLanterna, cIronman, cSuperman, cUniversoAbsoluto, cMulherMaravilha, cDoomsday, cThanos, cDarkseid, cQuarteto, cDeadpool, cWolverine, cMotoqueiro, cVingadoresDirect, cJusticeiroDirect, cAranhaDirect] = await Promise.all([
       readHomeCache(ARANHA_CACHE_KEY, 'folders'),
       readHomeCache(XMEN_CACHE_KEY, 'folders'),
       readHomeCache(MANGA_CACHE_KEY, 'folders'),
@@ -11212,7 +11267,8 @@ async function getLibrarySections(forceRefresh){
       readHomeCache(WOLVERINE_CACHE_KEY, 'folders'),
       readHomeCache(MOTOQUEIRO_CACHE_KEY, 'folders'),
       readHomeCache(VINGADORES_DIRECT_CACHE_KEY, 'items'),
-      readHomeCache(JUSTICEIRO_DIRECT_CACHE_KEY, 'items')
+      readHomeCache(JUSTICEIRO_DIRECT_CACHE_KEY, 'items'),
+      readHomeCache(ARANHA_DIRECT_CACHE_KEY, 'items')
     ]);
     const fresh = c=>c && (now - c.savedAt < HOME_CACHE_MAX_AGE);
     const freshDirect = c=>fresh(c) && Array.isArray(c.items) && c.items.length>0;
@@ -11241,6 +11297,7 @@ async function getLibrarySections(forceRefresh){
         vingadoresFolders: cachedChildrenOfNamedFolder(cAllFolders.folders,['colecao vingadores']),
         justiceiroFolders: cachedChildrenOfNamedFolder(cAllFolders.folders,['colecao justiceiro']),
         directHomeCollectionItemsByRoot:{
+          [HOME_COLLECTION_ROOTS.aranha.id]:cachedDirectCollectionItems(cAranhaDirect,cAllFolders.folders,cComics.comics,HOME_COLLECTION_ROOTS.aranha.id),
           [HOME_COLLECTION_ROOTS.vingadores.id]:cachedDirectCollectionItems(cVingadoresDirect,cAllFolders.folders,cComics.comics,HOME_COLLECTION_ROOTS.vingadores.id),
           [HOME_COLLECTION_ROOTS.justiceiro.id]:cachedDirectCollectionItems(cJusticeiroDirect,cAllFolders.folders,cComics.comics,HOME_COLLECTION_ROOTS.justiceiro.id)
         },
@@ -11282,8 +11339,8 @@ async function getLibrarySections(forceRefresh){
       const items=[...listing.folders,...listing.files].map(item=>({...item,_parentId:root.id,_collectionRoot:{id:root.id,name:root.name||collection.name}}));
       if(items.length) directHomeCollectionItemsByRoot[String(collection.id)]=items;
       if(!wasAborted && items.length){
-        const cacheKey=key==='vingadores'?VINGADORES_DIRECT_CACHE_KEY:JUSTICEIRO_DIRECT_CACHE_KEY;
-        await writeHomeCache(cacheKey,'items',items);
+        const cacheKey=homeDirectCacheKey(key);
+        if(cacheKey) await writeHomeCache(cacheKey,'items',items);
       }
     }
     if(!skipWrite){
@@ -12472,8 +12529,8 @@ async function primeDirectHomeCollectionCaches(wrap, token, missingKeys){
       const items=[...(listing.folders||[]),...(listing.files||[])].map(item=>({...item,_parentId:collection.id,_collectionRoot:{id:collection.id,name:collection.name}}));
       if(!items.length) return;
       refreshed[String(collection.id)]=items;
-      const cacheKey=key==='vingadores'?VINGADORES_DIRECT_CACHE_KEY:JUSTICEIRO_DIRECT_CACHE_KEY;
-      await writeHomeCache(cacheKey,'items',items);
+      const cacheKey=homeDirectCacheKey(key);
+      if(cacheKey) await writeHomeCache(cacheKey,'items',items);
     }catch(error){
       logErr('[PlanetaHQ] Falha ao aquecer o cache direto de uma coleção da Home.',collection.id,error);
     }
@@ -12512,7 +12569,7 @@ async function renderHomeSections(forceRefresh, onProgress, {invalidatePersisten
   // o cache antes de buscar de novo, e por isso todas as seções sumiam da
   // tela até a busca nova terminar). A busca de verdade (item 2 abaixo)
   // troca pelos dados frescos assim que chegar, sem travar nada.
-  const [cachedAranha, cachedXMen, cachedManga, cachedComics, cachedAllFolders, continueItemsFast, cachedBatman, cachedSalvat, cachedHulk, cachedLanterna, cachedIronman, cachedSuperman, cachedUniversoAbsoluto, cachedMulherMaravilha, cachedDoomsday, cachedThanos, cachedDarkseid, cachedQuarteto, cachedDeadpool, cachedWolverine, cachedMotoqueiro, cachedVingadoresDirect, cachedJusticeiroDirect] = await Promise.all([
+  const [cachedAranha, cachedXMen, cachedManga, cachedComics, cachedAllFolders, continueItemsFast, cachedBatman, cachedSalvat, cachedHulk, cachedLanterna, cachedIronman, cachedSuperman, cachedUniversoAbsoluto, cachedMulherMaravilha, cachedDoomsday, cachedThanos, cachedDarkseid, cachedQuarteto, cachedDeadpool, cachedWolverine, cachedMotoqueiro, cachedVingadoresDirect, cachedJusticeiroDirect, cachedAranhaDirect] = await Promise.all([
     readHomeCache(ARANHA_CACHE_KEY, 'folders'),
     readHomeCache(XMEN_CACHE_KEY, 'folders'),
     readHomeCache(MANGA_CACHE_KEY, 'folders'),
@@ -12535,7 +12592,8 @@ async function renderHomeSections(forceRefresh, onProgress, {invalidatePersisten
     readHomeCache(WOLVERINE_CACHE_KEY, 'folders'),
     readHomeCache(MOTOQUEIRO_CACHE_KEY, 'folders'),
     readHomeCache(VINGADORES_DIRECT_CACHE_KEY, 'items'),
-    readHomeCache(JUSTICEIRO_DIRECT_CACHE_KEY, 'items')
+    readHomeCache(JUSTICEIRO_DIRECT_CACHE_KEY, 'items'),
+    readHomeCache(ARANHA_DIRECT_CACHE_KEY, 'items')
   ]);
   if(isStale(myToken)) return;
 
@@ -12564,6 +12622,7 @@ async function renderHomeSections(forceRefresh, onProgress, {invalidatePersisten
       vingadoresFolders: cachedChildrenOfNamedFolder(cachedAllFolders ? cachedAllFolders.folders : [],['colecao vingadores']),
       justiceiroFolders: cachedChildrenOfNamedFolder(cachedAllFolders ? cachedAllFolders.folders : [],['colecao justiceiro']),
       directHomeCollectionItemsByRoot:{
+        [HOME_COLLECTION_ROOTS.aranha.id]:cachedDirectCollectionItems(cachedAranhaDirect,cachedAllFolders?cachedAllFolders.folders:[],cachedComics?cachedComics.comics:[],HOME_COLLECTION_ROOTS.aranha.id),
         [HOME_COLLECTION_ROOTS.vingadores.id]:cachedDirectCollectionItems(cachedVingadoresDirect,cachedAllFolders?cachedAllFolders.folders:[],cachedComics?cachedComics.comics:[],HOME_COLLECTION_ROOTS.vingadores.id),
         [HOME_COLLECTION_ROOTS.justiceiro.id]:cachedDirectCollectionItems(cachedJusticeiroDirect,cachedAllFolders?cachedAllFolders.folders:[],cachedComics?cachedComics.comics:[],HOME_COLLECTION_ROOTS.justiceiro.id)
       },
@@ -12576,6 +12635,7 @@ async function renderHomeSections(forceRefresh, onProgress, {invalidatePersisten
       lastPaintedHomeSignature = fastSignature;
     }
     const missingDirect=[];
+    if(!cachedAranhaDirect || !Array.isArray(cachedAranhaDirect.items) || !cachedAranhaDirect.items.length) missingDirect.push('aranha');
     if(!cachedVingadoresDirect || !Array.isArray(cachedVingadoresDirect.items) || !cachedVingadoresDirect.items.length) missingDirect.push('vingadores');
     if(!cachedJusticeiroDirect || !Array.isArray(cachedJusticeiroDirect.items) || !cachedJusticeiroDirect.items.length) missingDirect.push('justiceiro');
     if(missingDirect.length) void primeDirectHomeCollectionCaches(wrap,myToken,missingDirect);
@@ -12623,6 +12683,7 @@ async function renderHomeSections(forceRefresh, onProgress, {invalidatePersisten
         vingadoresFolders: [],
         justiceiroFolders: [],
         directHomeCollectionItemsByRoot:{
+          [HOME_COLLECTION_ROOTS.aranha.id]:cachedDirectCollectionItems(cachedAranhaDirect,cachedAllFolders?cachedAllFolders.folders:[],cachedComics?cachedComics.comics:[],HOME_COLLECTION_ROOTS.aranha.id),
           [HOME_COLLECTION_ROOTS.vingadores.id]:cachedDirectCollectionItems(cachedVingadoresDirect,cachedAllFolders?cachedAllFolders.folders:[],cachedComics?cachedComics.comics:[],HOME_COLLECTION_ROOTS.vingadores.id),
           [HOME_COLLECTION_ROOTS.justiceiro.id]:cachedDirectCollectionItems(cachedJusticeiroDirect,cachedAllFolders?cachedAllFolders.folders:[],cachedComics?cachedComics.comics:[],HOME_COLLECTION_ROOTS.justiceiro.id)
         },
@@ -12667,6 +12728,7 @@ async function renderHomeSections(forceRefresh, onProgress, {invalidatePersisten
     vingadoresFolders: sections.vingadoresFolders,
     justiceiroFolders: sections.justiceiroFolders,
     directHomeCollectionItemsByRoot:{
+      [HOME_COLLECTION_ROOTS.aranha.id]:directCollectionItemsOrCache(sections.directHomeCollectionItemsByRoot,cachedAranhaDirect,cachedAllFolders?cachedAllFolders.folders:[],cachedComics?cachedComics.comics:[],HOME_COLLECTION_ROOTS.aranha.id),
       [HOME_COLLECTION_ROOTS.vingadores.id]:directCollectionItemsOrCache(sections.directHomeCollectionItemsByRoot,cachedVingadoresDirect,cachedAllFolders?cachedAllFolders.folders:[],cachedComics?cachedComics.comics:[],HOME_COLLECTION_ROOTS.vingadores.id),
       [HOME_COLLECTION_ROOTS.justiceiro.id]:directCollectionItemsOrCache(sections.directHomeCollectionItemsByRoot,cachedJusticeiroDirect,cachedAllFolders?cachedAllFolders.folders:[],cachedComics?cachedComics.comics:[],HOME_COLLECTION_ROOTS.justiceiro.id)
     },
@@ -13284,8 +13346,34 @@ function reloadAfterServiceWorkerUpdate(){
   swReloadRequested=true;
   location.reload();
 }
+function showFatalBootError(error){
+  console.error('[PlanetaHQ] Falha fatal durante a inicialização.',error);
+  if(document.getElementById('fatal-boot-error')) return;
+  const panel=document.createElement('section');
+  panel.id='fatal-boot-error';
+  panel.setAttribute('role','alert');
+  panel.style.cssText='position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:24px;background:#080d18;color:#f4f7ff;font:16px/1.5 system-ui,sans-serif;text-align:center;';
+  const content=document.createElement('div');
+  content.style.cssText='width:min(100%,420px);';
+  const title=document.createElement('h1');
+  title.textContent='O Planeta HQ não conseguiu iniciar';
+  title.style.cssText='font-size:22px;margin:0 0 12px;';
+  const message=document.createElement('p');
+  message.textContent='Feche e abra o app novamente. Se continuar, envie esta tela ao suporte para investigarmos.';
+  const detail=document.createElement('p');
+  detail.textContent='Diagnóstico: '+String(error&&error.name||'erro de inicialização');
+  detail.style.cssText='font-size:13px;opacity:.75;';
+  const button=document.createElement('button');
+  button.type='button';
+  button.textContent='Tentar novamente';
+  button.style.cssText='margin-top:8px;padding:12px 22px;border:0;border-radius:8px;background:#4169f5;color:white;font:inherit;font-weight:700;';
+  button.addEventListener('click',()=>location.reload());
+  content.append(title,message,detail,button);
+  panel.appendChild(content);
+  document.body.appendChild(panel);
+}
 const appBootPromise=boot();
-appBootPromise.then(()=>{appBootComplete=true;if(pendingSWReload)reloadAfterServiceWorkerUpdate();},()=>{appBootComplete=true;if(pendingSWReload)reloadAfterServiceWorkerUpdate();});
+appBootPromise.then(()=>{appBootComplete=true;if(pendingSWReload)reloadAfterServiceWorkerUpdate();},error=>{appBootComplete=true;showFatalBootError(error);});
 
 if('serviceWorker' in navigator){
   // Guarda ANTES de registrar se esta aba já era controlada por algum
