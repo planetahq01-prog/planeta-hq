@@ -617,8 +617,9 @@
 /* v172: quando uma pasta com ficha aparece, oculta da pesquisa suas edições/subpastas descendentes. */
 /* v173: revertidas proteções de tela preta do precache/navegação a pedido do usuário. */
 /* v174: libera a camada gráfica das páginas do leitor quando o zoom volta ao tamanho normal. */
+/* v175: reduz composição forçada no zoom Android e evita inserir páginas do leitor antes do decode. */
 // v156: o worker CBR extrai páginas vizinhas em uma única passagem do RAR.
-const CACHE_VERSION = 'v174';
+const CACHE_VERSION = 'v175';
 // Cache das capas: separado do da casca do app e mantido entre versões.
 const COVERS_CACHE = 'planeta-hq-covers-v1';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;

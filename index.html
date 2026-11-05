@@ -10012,25 +10012,43 @@ async function buildScrollReader(doc){
   }else container.dataset.restoring='';
 }
 async function loadScrollPage(doc, i, pageDiv){
-  if(pageDiv.dataset.loaded) return;
-  pageDiv.dataset.loaded = '1';
+  if(!pageDiv || pageDiv.dataset.loaded==='1' || pageDiv.dataset.loading==='1') return;
+  const generation=Number(pageDiv.dataset.loadGeneration)||0;
+  pageDiv.dataset.loading='1';
+  const isCurrent=()=>generation===(Number(pageDiv.dataset.loadGeneration)||0)&&pageDiv.isConnected&&state.reader.doc===doc;
   try{
-    const url = await doc.getPage(i);
-    const img = el('img');
-    img.src = url;
-    img.loading = 'lazy';
-    img.alt = `Página ${i+1}`;
-    pageDiv.classList.remove('skeleton');
-    pageDiv.innerHTML = '';
+    const url=await doc.getPage(i);
+    if(!isCurrent()) return;
+    const img=el('img');
+    img.alt=`Página ${i+1}`;
+    img.decoding='async';
+    img.loading='eager';
+    img.src=url;
+    // O observer já decide quando solicitar a página; aguardar a decodificação
+    // evita trocar o skeleton por um retângulo preto enquanto o navegador ainda
+    // prepara uma imagem grande para pintura/composição.
+    if(typeof img.decode==='function'){
+      try{await img.decode();}
+      catch(error){if(!img.complete||!img.naturalWidth)throw error;}
+    }
+    if(!isCurrent()) return;
+    pageDiv.innerHTML='';
     pageDiv.appendChild(img);
+    pageDiv.dataset.loaded='1';
+    pageDiv.classList.remove('skeleton');
   }catch(e){
-    pageDiv.dataset.loaded = '';
+    if(isCurrent()) pageDiv.classList.add('skeleton');
+  }finally{
+    if(generation===(Number(pageDiv.dataset.loadGeneration)||0)) pageDiv.dataset.loading='';
   }
 }
 function unloadScrollPage(pageDiv){
-  if(!pageDiv || !pageDiv.dataset.loaded) return;
-  pageDiv.dataset.loaded = '';
-  pageDiv.innerHTML = '';
+  if(!pageDiv) return;
+  pageDiv.dataset.loadGeneration=String((Number(pageDiv.dataset.loadGeneration)||0)+1);
+  pageDiv.dataset.loading='';
+  if(pageDiv.dataset.loaded!=='1') return;
+  pageDiv.dataset.loaded='';
+  pageDiv.innerHTML='';
   pageDiv.classList.add('skeleton');
 }
 /* =========================================================================
@@ -10055,7 +10073,10 @@ function unloadScrollPage(pageDiv){
    ampliada, o arrasto deixa de mexer nela e (no modo rolagem) a lista
    continua rolando normalmente.
    ========================================================================= */
-const PINCH_MAX_SCALE = 4;
+// Android WebView pode piscar imagens grandes quando um <img> é forçado a
+// virar camada transformada de alta resolução. No Android, mantemos o zoom
+// útil até 3x e deixamos o compositor escolher a estratégia sem will-change.
+const PINCH_MAX_SCALE = /Android/i.test(navigator.userAgent) ? 3 : 4;
 const PINCH_MIN_SCALE = 1;
 
 function pinchDist(a,b){ return Math.hypot(a.clientX-b.clientX, a.clientY-b.clientY); }
@@ -10069,10 +10090,10 @@ function getPinchState(img){
 function applyPinchTransform(img){
   const z = getPinchState(img);
   img.style.transformOrigin = '0 0';
-  // Promover a camada só enquanto a página está realmente ampliada. Deixar
-  // will-change preso em cada página após reset acumula texturas GPU em HQs
-  // longas e pode causar quadros pretos/piscadas em WebViews Android.
-  img.style.willChange = (z.scale>1.01 || z.tx!==0 || z.ty!==0) ? 'transform' : 'auto';
+  // Não forçar promoção a camada GPU: em alguns WebViews Android, imagens
+  // grandes piscam durante pinch quando will-change:transform pede uma
+  // textura ampliada. O transform 2D continua aplicado sem essa dica.
+  img.style.willChange = 'auto';
   img.style.transform = (z.scale===1 && z.tx===0 && z.ty===0) ? 'none' : `translate(${z.tx}px,${z.ty}px) scale(${z.scale})`;
 }
 
