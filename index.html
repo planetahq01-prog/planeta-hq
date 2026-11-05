@@ -4130,12 +4130,7 @@ async function runInitialLoad(){
    6) Biblioteca — navegação e renderização
    --------------------------------------------------------------------- */
 async function loadConfig(){
-  let raw = null;
-  try{ raw = localStorage.getItem(CONFIG_KEY); }
-  catch(e){
-    console.warn('[PlanetaHQ] Armazenamento local indisponível ao ler configuração; usando a configuração padrão.',e);
-    return false;
-  }
+  const raw = localStorage.getItem(CONFIG_KEY);
   if(raw){
     try{
       CONFIG = JSON.parse(raw);
@@ -4151,8 +4146,7 @@ async function loadConfig(){
       // inteiro do app numa tela branca, sem chance de reconfigurar. Agora
       // descarta o valor inválido e volta pra tela de configuração.
       console.warn('[PlanetaHQ] Configuração salva estava corrompida, resetando.', e);
-      try{ localStorage.removeItem(CONFIG_KEY); }
-      catch(storageError){ console.warn('[PlanetaHQ] Não foi possível remover a configuração local inválida.',storageError); }
+      localStorage.removeItem(CONFIG_KEY);
     }
   }
   return false;
@@ -4231,9 +4225,7 @@ function requireAccessCodeImpl(initialMessage){
 // aceito pelo Worker) ou pede um novo. É o único ponto que decide se a
 // biblioteca chega a abrir.
 async function ensureAccessCode(){
-  let saved = '';
-  try{ saved = normalizeAccessCode(localStorage.getItem(ACCESS_CODE_KEY) || ''); }
-  catch(e){ console.warn('[PlanetaHQ] Armazenamento local indisponível ao ler o código de acesso.',e); }
+  const saved = normalizeAccessCode(localStorage.getItem(ACCESS_CODE_KEY) || '');
   let denyReason = null;
   if(saved){
     try{
@@ -13346,34 +13338,8 @@ function reloadAfterServiceWorkerUpdate(){
   swReloadRequested=true;
   location.reload();
 }
-function showFatalBootError(error){
-  console.error('[PlanetaHQ] Falha fatal durante a inicialização.',error);
-  if(document.getElementById('fatal-boot-error')) return;
-  const panel=document.createElement('section');
-  panel.id='fatal-boot-error';
-  panel.setAttribute('role','alert');
-  panel.style.cssText='position:fixed;inset:0;z-index:2147483647;display:flex;align-items:center;justify-content:center;padding:24px;background:#080d18;color:#f4f7ff;font:16px/1.5 system-ui,sans-serif;text-align:center;';
-  const content=document.createElement('div');
-  content.style.cssText='width:min(100%,420px);';
-  const title=document.createElement('h1');
-  title.textContent='O Planeta HQ não conseguiu iniciar';
-  title.style.cssText='font-size:22px;margin:0 0 12px;';
-  const message=document.createElement('p');
-  message.textContent='Feche e abra o app novamente. Se continuar, envie esta tela ao suporte para investigarmos.';
-  const detail=document.createElement('p');
-  detail.textContent='Diagnóstico: '+String(error&&error.name||'erro de inicialização');
-  detail.style.cssText='font-size:13px;opacity:.75;';
-  const button=document.createElement('button');
-  button.type='button';
-  button.textContent='Tentar novamente';
-  button.style.cssText='margin-top:8px;padding:12px 22px;border:0;border-radius:8px;background:#4169f5;color:white;font:inherit;font-weight:700;';
-  button.addEventListener('click',()=>location.reload());
-  content.append(title,message,detail,button);
-  panel.appendChild(content);
-  document.body.appendChild(panel);
-}
 const appBootPromise=boot();
-appBootPromise.then(()=>{appBootComplete=true;if(pendingSWReload)reloadAfterServiceWorkerUpdate();},error=>{appBootComplete=true;showFatalBootError(error);});
+appBootPromise.then(()=>{appBootComplete=true;if(pendingSWReload)reloadAfterServiceWorkerUpdate();},()=>{appBootComplete=true;if(pendingSWReload)reloadAfterServiceWorkerUpdate();});
 
 if('serviceWorker' in navigator){
   // Guarda ANTES de registrar se esta aba já era controlada por algum

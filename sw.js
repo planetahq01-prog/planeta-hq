@@ -612,12 +612,12 @@
 /* v166: snapshots diretos das coleções são cacheados para pintar Justiceiro/Vingadores junto com as demais seções. */
 /* v167: correção de raiz e descarte de snapshots vazios da otimização cache-first. */
 /* v168: preserva os filhos diretos no repaint da varredura para não ocultar as coleções. */
-/* v169: exige index.html válido no precache e oferece erro visível em falha fatal de navegação/boot. */
 /* v170: espera metadados de ficha remotos e preserva os itens diretos da coleção Homem-Aranha. */
 /* v171: a pesquisa limita resultados a itens com ficha, carregando os metadados remotos antes do filtro. */
 /* v172: quando uma pasta com ficha aparece, oculta da pesquisa suas edições/subpastas descendentes. */
+/* v173: revertidas proteções de tela preta do precache/navegação a pedido do usuário. */
 // v156: o worker CBR extrai páginas vizinhas em uma única passagem do RAR.
-const CACHE_VERSION = 'v172';
+const CACHE_VERSION = 'v173';
 // Cache das capas: separado do da casca do app e mantido entre versões.
 const COVERS_CACHE = 'planeta-hq-covers-v1';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
@@ -878,10 +878,9 @@ const APP_SHELL = [
 // URLs absolutas resolvidas uma única vez, pra comparar por igualdade exata
 // (nunca mais por sufixo/heurística) na hora de decidir o que é "casca".
 const APP_SHELL_URLS = new Set(APP_SHELL.map((u) => new URL(u, self.location.href).href));
-const REQUIRED_LOCAL_ASSETS = new Set([
-  new URL('./index.html', self.location.href).href,
-  ...APP_SHELL.filter((u) => u.startsWith('./vendor/')).map((u) => new URL(u, self.location.href).href)
-]);
+const REQUIRED_LOCAL_ASSETS = new Set(
+  APP_SHELL.filter((u) => u.startsWith('./vendor/')).map((u) => new URL(u, self.location.href).href)
+);
 
 // Os assets do CBR agora são locais/same-origin: não precisam de fetch
 // CORS nem de CDN e são armazenados como respostas normais do app.
@@ -909,14 +908,7 @@ async function precacheAppShell(cache){
 }
 self.addEventListener('install',(event)=>{
   self.skipWaiting();
-  event.waitUntil((async()=>{
-    const cache=await caches.open(CACHE_NAME);
-    try{ await precacheAppShell(cache); }
-    catch(error){
-      await caches.delete(CACHE_NAME);
-      throw error;
-    }
-  })());
+  event.waitUntil(caches.open(CACHE_NAME).then((cache)=>precacheAppShell(cache)));
 });
 
 self.addEventListener('activate', (event) => {
@@ -941,18 +933,9 @@ self.addEventListener('fetch', (event) => {
   // versão nova — fazendo parecer que o app "não atualizou" mesmo com o
   // arquivo já trocado no servidor e internet disponível.
   if (req.mode === 'navigate') {
-    event.respondWith((async()=>{
-      try{
-        const response=await fetch(req,{cache:'no-store'});
-        const contentType=(response.headers.get('content-type')||'').toLowerCase();
-        const looksLikeHtml=!contentType || contentType.includes('text/html') || contentType.includes('application/xhtml+xml');
-        const explicitlyEmpty=response.headers.get('content-length')==='0';
-        if(response.ok && looksLikeHtml && !explicitlyEmpty) return response;
-      }catch(error){}
-      const cached=await caches.match(new URL('./index.html',self.location.href).href);
-      if(cached) return cached;
-      return new Response('<!doctype html><html lang="pt-BR"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Planeta HQ indisponível</title><body style="margin:0;min-height:100vh;display:grid;place-items:center;background:#080d18;color:#f4f7ff;font:16px system-ui,sans-serif;text-align:center"><main style="max-width:420px;padding:24px"><h1>Não foi possível abrir o Planeta HQ</h1><p>Confira a conexão e tente novamente.</p><a href="./" style="color:#9db4ff">Tentar novamente</a></main></body></html>',{status:503,headers:{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store'}});
-    })());
+    event.respondWith(
+      fetch(req, { cache: 'no-store' }).catch(() => caches.match('./index.html'))
+    );
     return;
   }
 
