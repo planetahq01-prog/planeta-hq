@@ -8737,11 +8737,11 @@ function searchItemHasDetail(item, foldersById){
     const next=cursor._parentId??cursor.parentId;
     cursor=next==null?null:foldersById.get(String(next));
   }
-  // Uma pasta com ficha já é a entrada para seu conteúdo. Não liste também
-  // as edições/subpastas descendentes, mesmo que tenham metadados próprios:
-  // isso evita duplicar no resultado o que já aparece dentro da ficha.
+  // Uma pasta com ficha própria já é a entrada para seu conteúdo. Não liste
+  // também seus descendentes. O fallback genérico da coleção é diferente:
+  // ele fornece ficha padrão aos itens da seção e não deve ocultá-los todos.
   for(const id of ancestors){
-    if(hasCustomDetailMetadata(id) || Object.prototype.hasOwnProperty.call(COLLECTION_DETAIL_ROOT_FALLBACKS,String(id))) return false;
+    if(hasCustomDetailMetadata(id)) return false;
   }
   if(hasCustomDetailMetadata(item)) return true;
   for(const id of ancestors){
