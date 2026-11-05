@@ -1971,7 +1971,9 @@ function navCurrentDepth(){
   const searchOpen = !$('#view-search').classList.contains('hidden');
   const searchDepth = searchOpen ? 1 + (searchQueryNavActive ? 1 : 0) + searchFolderStack.length : 0;
   const detailDepth = activeCollectionDetail ? collectionDetailStack.length + 1 : 0;
-  return (readerOpen ? 1 : 0) + tabDepth + folderDepth + offlineFolderDepth + searchDepth + detailDepth;
+  const stackedChapterDepth = collectionDetailStackTabs.filter(tab=>tab==='chapters').length;
+  const currentChapterDepth = activeCollectionDetail && collectionDetailTab==='chapters' ? 1 : 0;
+  return (readerOpen ? 1 : 0) + tabDepth + folderDepth + offlineFolderDepth + searchDepth + detailDepth + stackedChapterDepth + currentChapterDepth;
 }
 // Chamar depois de uma ação de UI que faz o usuário "voltar" (clique na
 // seta de voltar, no breadcrumb, no X do leitor, na aba biblioteca) —
@@ -1985,7 +1987,6 @@ function navSyncAfterBack(){
 window.addEventListener('popstate', ()=>{
   if(navSuppressPop){ navSuppressPop = false; return; }
   let consumed = false;
-  let restoredDetailEntry = false;
   // O leitor é a camada mais profunda, mesmo quando foi aberto sobre a busca.
   if(!$('#view-reader').classList.contains('hidden')){
     closeReader();
@@ -1993,7 +1994,6 @@ window.addEventListener('popstate', ()=>{
   } else if(activeCollectionDetail){
     if(collectionDetailTab==='chapters'){
       collectionDetailTab='details'; renderCollectionDetails();
-      try{ history.pushState({appNav:true},''); restoredDetailEntry=true; }catch(e){}
     }
     else if(collectionDetailStack.length){ activeCollectionDetail = collectionDetailStack.pop(); collectionDetailTab=collectionDetailStackTabs.pop()||'details'; renderCollectionDetails(); }
     else closeCollectionDetails(false);
@@ -2028,7 +2028,7 @@ window.addEventListener('popstate', ()=>{
     }
     consumed = true;
   }
-  if(consumed && !restoredDetailEntry) navPushedCount = Math.max(0, navPushedCount - 1);
+  if(consumed) navPushedCount = Math.max(0, navPushedCount - 1);
 });
 
 function loadReaderPrefs(){
@@ -7378,8 +7378,11 @@ function closeCollectionDetails(syncNav=true){
 function setCollectionDetailTab(tab){
   const next=tab==='chapters'?'chapters':'details';
   if(!activeCollectionDetail||next===collectionDetailTab) return;
+  const returningToDetails=collectionDetailTab==='chapters'&&next==='details';
+  if(next==='chapters') navPushLevel();
   collectionDetailTab=next;
   renderCollectionDetails();
+  if(returningToDetails) navSyncAfterBack();
 }
 async function sumCollectionContentSize(folderId, visited=new Set()){
   const key=String(folderId||'');
