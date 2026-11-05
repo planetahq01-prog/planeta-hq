@@ -897,7 +897,7 @@ body.menu-open{overflow:hidden;}
 .search-screen{
   position:fixed;inset:0;z-index:45;display:flex;flex-direction:column;
   background:radial-gradient(ellipse 700px 340px at 50% -5%,rgba(255,194,61,.13),transparent 70%),#0d0c12;
-  color:var(--paper);overflow:hidden;
+  color:var(--paper);overflow:hidden;overscroll-behavior-x:none;touch-action:pan-y;
 }
 .search-screen-header{
   flex-shrink:0;display:grid;grid-template-columns:42px 1fr 42px;align-items:center;
@@ -907,7 +907,7 @@ body.menu-open{overflow:hidden;}
 .search-screen-brand{text-align:center;color:#fff;font-size:18px;font-weight:400;letter-spacing:0;display:flex;align-items:center;justify-content:center;gap:4px;font-family:'Anton',sans-serif;}
 .search-screen-brand span{color:var(--accent);}
 .search-header-spacer{width:40px;}
-.search-screen-body{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding:26px 18px calc(32px + env(safe-area-inset-bottom));}
+.search-screen-body{flex:1;min-width:0;overflow-y:auto;overflow-x:hidden;overscroll-behavior-x:none;touch-action:pan-y;-webkit-overflow-scrolling:touch;padding:26px 18px calc(32px + env(safe-area-inset-bottom));}
 .search-intro{margin:8px 0 22px;}
 .search-kicker{color:var(--accent);margin-bottom:9px;}
 .search-intro h1{margin:0 0 8px;color:#fff;font-size:clamp(25px,7vw,34px);font-weight:800;letter-spacing:-.055em;line-height:1.1;}
@@ -926,8 +926,10 @@ body.menu-open{overflow:hidden;}
 .search-chip{padding:10px 14px;border:1px solid rgba(255,255,255,.1);border-radius:999px;background:rgba(255,255,255,.045);color:#e8e4ef;font-size:12px;font-weight:600;transition:background .15s ease,border-color .15s ease;}
 .search-chip:active{background:rgba(255,194,61,.15);border-color:rgba(255,194,61,.45);}
 .search-results-heading{display:flex;align-items:center;gap:10px;margin:27px 0 4px;color:#d5d0df;}
+.search-results-heading span:first-child{min-width:0;overflow-wrap:anywhere;}
 .results-accent{width:26px;height:2px;border-radius:2px;background:var(--accent);}
-.search-grid{padding:12px 0 28px;}
+.search-grid{min-width:0;padding:12px 0 28px;}
+.search-grid>*{min-width:0;}
 .search-grid .empty-state{padding:32px 14px;}
 .search-grid .card.folder .label{font-size:12px;}
 
@@ -1207,6 +1209,7 @@ body.layout-tablet .detail-chapter-filters{display:flex;}
 .detail-view-btn{min-height:32px;padding:0 10px;border:0;border-radius:7px;background:transparent;color:#b9c0cb;font-size:11px;font-weight:800;}
 .detail-view-btn.active{background:var(--accent);color:#15120a;}
 .detail-chapter-list{display:grid;gap:8px;padding:14px 14px 28px;}
+.detail-chapter-list .fav-btn{display:none !important;}
 .detail-chapter-list.grid-mode{grid-template-columns:repeat(3,minmax(0,1fr));gap:12px 9px;}
 .detail-chapter-card{position:relative;min-width:0;padding:0;border:0;background:transparent;color:var(--paper);text-align:left;}
 .detail-chapter-card-open{display:block;width:100%;min-width:0;padding:0;border:0;background:transparent;color:inherit;text-align:left;font:inherit;}
@@ -1860,8 +1863,10 @@ const COLLECTION_DETAIL_RESEARCH = {"1MwMiqGLJjjvQ5AscSEFeYCOxqTEgHZ25":{"public
 const COLLECTION_PUBLICATION_DATE_OVERRIDES = {};
 let activeCollectionDetail = null;
 let collectionDetailStack = [];
+let collectionDetailStackTabs = [];
 let collectionDetailTab = 'details';
 let collectionDetailChapterMode = 'grid';
+let detailChapterBrowseRootId = null;
 
 const DEVICE_ID_KEY = 'planetahq_device_id';
 let CONFIG = null;
@@ -1980,12 +1985,17 @@ function navSyncAfterBack(){
 window.addEventListener('popstate', ()=>{
   if(navSuppressPop){ navSuppressPop = false; return; }
   let consumed = false;
+  let restoredDetailEntry = false;
   // O leitor é a camada mais profunda, mesmo quando foi aberto sobre a busca.
   if(!$('#view-reader').classList.contains('hidden')){
     closeReader();
     consumed = true;
   } else if(activeCollectionDetail){
-    if(collectionDetailStack.length){ activeCollectionDetail = collectionDetailStack.pop(); renderCollectionDetails(); }
+    if(collectionDetailTab==='chapters'){
+      collectionDetailTab='details'; renderCollectionDetails();
+      try{ history.pushState({appNav:true},''); restoredDetailEntry=true; }catch(e){}
+    }
+    else if(collectionDetailStack.length){ activeCollectionDetail = collectionDetailStack.pop(); collectionDetailTab=collectionDetailStackTabs.pop()||'details'; renderCollectionDetails(); }
     else closeCollectionDetails(false);
     consumed = true;
   } else if(!$('#view-search').classList.contains('hidden')){
@@ -2018,7 +2028,7 @@ window.addEventListener('popstate', ()=>{
     }
     consumed = true;
   }
-  if(consumed) navPushedCount = Math.max(0, navPushedCount - 1);
+  if(consumed && !restoredDetailEntry) navPushedCount = Math.max(0, navPushedCount - 1);
 });
 
 function loadReaderPrefs(){
@@ -4440,6 +4450,7 @@ async function goToBreadcrumbIndex(idx){
     $('#view-library').classList.remove('collection-grid-mode');
   }
   state.path = state.path.slice(0, idx+1);
+  if(detailChapterBrowseRootId && !state.path.some(part=>String(part.id)===String(detailChapterBrowseRootId))) detailChapterBrowseRootId=null;
   $('#search-input').value = '';
   renderBreadcrumb();
   // Ao voltar para a Home, não chamamos renderLibrary(root): essa função
@@ -4503,9 +4514,16 @@ async function applyLibraryFilterSort(files){
   return list;
 }
 
-function openCollectionFolder(root){
+function openCollectionFolder(root,{fromChapters=false}={}){
   if(!root || !root.id) return;
+  detailChapterBrowseRootId=fromChapters?String(root.id):null;
   enterFolder(root.id, root.name || 'Coleção', {collectionRoot:true});
+}
+function isDetailChapterBrowseActive(){
+  if(!detailChapterBrowseRootId || state.currentTab!=='library') return false;
+  const searchView=$('#view-search');
+  if(searchView && !searchView.classList.contains('hidden')) return false;
+  return (state.path||[]).some(part=>String(part.id)===String(detailChapterBrowseRootId));
 }
 function openVirtualCollection(title, items){
   const list=Array.isArray(items)?items:[];
@@ -4680,7 +4698,7 @@ function renderFolderCard(f, opts){
     const ph = elHtml('div','cover-placeholder skeleton', ICONS.folder);
     cover.appendChild(ph);
   }
-  cover.appendChild(buildFavButton(f));
+  cover.appendChild(isDetailChapterBrowseActive()?buildFolderCornerDownloadButton(f):buildFavButton(f));
   card.appendChild(cover);
   card.appendChild(el('div','label', f.name));
   card.onclick = async ()=>{
@@ -4708,7 +4726,7 @@ function renderComicCard(f, opts){
   card.appendChild(el('div','label', f.name.replace(/\.(pdf|cbz|cbr)$/i,'')));
   // O download continua disponível na ficha; sobre a capa fica apenas o
   // favorito, evitando dois ícones concorrentes no mesmo canto.
-  card.appendChild(buildFavButton(f));
+  card.appendChild(isDetailChapterBrowseActive()?buildCornerDownloadButton(f):buildFavButton(f));
 
   card.onclick = async ()=>{
     const pid = f._parentId!=null ? f._parentId : (state.path[state.path.length-1] && state.path[state.path.length-1].id);
@@ -7331,13 +7349,14 @@ function openCollectionDetails(item, parentId, nested){
   // mas nunca criam outra tela de detalhes.
   if(isDescendantOfDetailedCollection(item,parentId)){
     collectionDetailStack.length=0;
+    collectionDetailStackTabs.length=0;
     if(activeCollectionDetail) closeCollectionDetails(false);
-    if(detailIsFolder(item)) openCollectionFolder(item);
+    if(detailIsFolder(item)) openCollectionFolder(item,{fromChapters:!!nested});
     else openReader(item,undefined,parentId||item._parentId);
     return;
   }
-  if(activeCollectionDetail){ collectionDetailStack.push(activeCollectionDetail); }
-  activeCollectionDetail={item:{...item},parentId:parentId||item._parentId||item._collectionRoot?.id||DEMOLIDOR_COLLECTION_FOLDER_ID,listing:null,loading:false,error:null};
+  if(activeCollectionDetail){ collectionDetailStack.push(activeCollectionDetail); collectionDetailStackTabs.push(collectionDetailTab); }
+  activeCollectionDetail={item:{...item},parentId:parentId||item._parentId||item._collectionRoot?.id||DEMOLIDOR_COLLECTION_FOLDER_ID,listing:null,loading:false,error:null,openedFromChapters:!!nested};
   collectionDetailTab='details';
   collectionDetailChapterMode='grid';
   renderCollectionDetails();
@@ -7346,13 +7365,21 @@ function openCollectionDetails(item, parentId, nested){
 function closeCollectionDetails(syncNav=true){
   if(collectionDetailStack.length){
     activeCollectionDetail=collectionDetailStack.pop();
+    collectionDetailTab=collectionDetailStackTabs.pop()||'details';
     renderCollectionDetails();
   }else{
     const screen=document.getElementById('collection-details-screen');
     if(screen) screen.remove();
     activeCollectionDetail=null;
+    collectionDetailStackTabs.length=0;
   }
   if(syncNav) navSyncAfterBack();
+}
+function setCollectionDetailTab(tab){
+  const next=tab==='chapters'?'chapters':'details';
+  if(!activeCollectionDetail||next===collectionDetailTab) return;
+  collectionDetailTab=next;
+  renderCollectionDetails();
 }
 async function sumCollectionContentSize(folderId, visited=new Set()){
   const key=String(folderId||'');
@@ -7414,8 +7441,9 @@ function renderCollectionDetails(){
       ${author?`<section class="detail-section"><h3>Autores</h3><p class="detail-credit">${escapeHtml(author)}</p></section>`:''}</main>
     ` : `<div class="detail-chapters-toolbar"><div class="detail-chapters-status" data-chapters-status>${detail.loading?'Carregando capítulos…':detail.error?'Não foi possível carregar esta lista. Toque para tentar novamente.':'Carregando capítulos…'}</div><div class="detail-view-switch" role="group" aria-label="Organização das edições"><button class="detail-view-btn ${collectionDetailChapterMode==='grid'?'active':''}" type="button" data-chapter-view="grid" aria-pressed="${collectionDetailChapterMode==='grid'}">Capas</button><button class="detail-view-btn ${collectionDetailChapterMode==='list'?'active':''}" type="button" data-chapter-view="list" aria-pressed="${collectionDetailChapterMode==='list'}">Lista</button></div></div><div class="detail-chapter-list ${collectionDetailChapterMode==='grid'?'grid-mode':'list-mode'}" data-detail-chapter-list></div>`}
   `;
-  screen.querySelector('.detail-screen-back').onclick=()=>closeCollectionDetails(true);
-  screen.querySelectorAll('[data-detail-tab]').forEach(btn=>btn.onclick=()=>{ collectionDetailTab=btn.dataset.detailTab; renderCollectionDetails(); if(collectionDetailTab==='chapters') loadCollectionDetailChapters(); });
+  if(detail.openedFromChapters){ const favoriteButton=screen.querySelector('.detail-favorite'); if(favoriteButton) favoriteButton.remove(); }
+  screen.querySelector('.detail-screen-back').onclick=()=>collectionDetailTab==='chapters'?setCollectionDetailTab('details'):closeCollectionDetails(true);
+  screen.querySelectorAll('[data-detail-tab]').forEach(btn=>btn.onclick=()=>setCollectionDetailTab(btn.dataset.detailTab));
   screen.querySelectorAll('[data-chapter-view]').forEach(btn=>btn.onclick=()=>{ collectionDetailChapterMode=btn.dataset.chapterView; renderCollectionDetails(); });
   const coverSlot=screen.querySelector('.detail-cover .cover-placeholder');
   if(coverSlot){
@@ -7464,7 +7492,7 @@ function renderCollectionDetails(){
         await openReader({...progress,parentId:item.id,_parentId:item.id},undefined,item.id);
         return;
       }
-      collectionDetailTab='chapters'; renderCollectionDetails(); await loadCollectionDetailChapters();
+      setCollectionDetailTab('chapters');
     };
   }
   if(isFolder && !detail.listing && !detail.loading){
@@ -8737,11 +8765,16 @@ function searchItemHasDetail(item, foldersById){
     const next=cursor._parentId??cursor.parentId;
     cursor=next==null?null:foldersById.get(String(next));
   }
-  // Uma pasta com ficha própria já é a entrada para seu conteúdo. Não liste
-  // também seus descendentes. O fallback genérico da coleção é diferente:
-  // ele fornece ficha padrão aos itens da seção e não deve ocultá-los todos.
+  // A raiz de uma seção com ficha padrão é estrutural: não deve esconder
+  // todos os itens da coleção. Já uma subpasta com ficha (própria ou herdada
+  // da coleção) é a entrada para seu conteúdo, então suas edições descendentes
+  // não devem aparecer separadamente na pesquisa.
   for(const id of ancestors){
-    if(hasCustomDetailMetadata(id)) return false;
+    const folderId=String(id);
+    if(hasCustomDetailMetadata(folderId)) return false;
+    if(Object.prototype.hasOwnProperty.call(COLLECTION_DETAIL_ROOT_FALLBACKS,folderId)) continue;
+    const ancestorFolder=foldersById.get(folderId);
+    if(ancestorFolder && hasCustomDetailMetadata(ancestorFolder)) return false;
   }
   if(hasCustomDetailMetadata(item)) return true;
   for(const id of ancestors){
