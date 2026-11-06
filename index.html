@@ -1973,7 +1973,9 @@ function navCurrentDepth(){
   const detailDepth = activeCollectionDetail ? collectionDetailStack.length + 1 : 0;
   const stackedChapterDepth = collectionDetailStackTabs.filter(tab=>tab==='chapters').length;
   const currentChapterDepth = activeCollectionDetail && collectionDetailTab==='chapters' ? 1 : 0;
-  return (readerOpen ? 1 : 0) + tabDepth + folderDepth + offlineFolderDepth + searchDepth + detailDepth + stackedChapterDepth + currentChapterDepth;
+  const stackedChapterFolderDepth = collectionDetailStack.reduce((sum,detail)=>sum+(detail.chapterFolderStack?.length||0),0);
+  const currentChapterFolderDepth = activeCollectionDetail ? (activeCollectionDetail.chapterFolderStack?.length||0) : 0;
+  return (readerOpen ? 1 : 0) + tabDepth + folderDepth + offlineFolderDepth + searchDepth + detailDepth + stackedChapterDepth + currentChapterDepth + stackedChapterFolderDepth + currentChapterFolderDepth;
 }
 // Chamar depois de uma ação de UI que faz o usuário "voltar" (clique na
 // seta de voltar, no breadcrumb, no X do leitor, na aba biblioteca) —
@@ -1993,7 +1995,9 @@ window.addEventListener('popstate', ()=>{
     consumed = true;
   } else if(activeCollectionDetail){
     if(collectionDetailTab==='chapters'){
-      collectionDetailTab='details'; renderCollectionDetails();
+      const chapterFolders=activeCollectionDetail.chapterFolderStack||[];
+      if(chapterFolders.length){ chapterFolders.pop(); renderCollectionDetails(); scrollCollectionDetailsToTop(); }
+      else { collectionDetailTab='details'; renderCollectionDetails(); scrollCollectionDetailsToTop(); }
     }
     else if(collectionDetailStack.length){ activeCollectionDetail = collectionDetailStack.pop(); collectionDetailTab=collectionDetailStackTabs.pop()||'details'; renderCollectionDetails(); }
     else closeCollectionDetails(false);
@@ -7342,6 +7346,10 @@ function detailTitleWithDateAndCredits(name,author){
   return {title:title||info.title,date:info.date};
 }
 function detailIsFolder(item){ return item && (item.mimeType==='application/vnd.google-apps.folder' || item.isFolder===true); }
+function currentCollectionChapterFrame(detail){
+  const frames=detail?.chapterFolderStack;
+  return Array.isArray(frames)&&frames.length?frames[frames.length-1]:null;
+}
 function openCollectionDetails(item, parentId, nested){
   if(!item) return;
   // Barreira central: qualquer caminho (biblioteca, busca, Home ou capítulos)
@@ -7356,7 +7364,7 @@ function openCollectionDetails(item, parentId, nested){
     return;
   }
   if(activeCollectionDetail){ collectionDetailStack.push(activeCollectionDetail); collectionDetailStackTabs.push(collectionDetailTab); }
-  activeCollectionDetail={item:{...item},parentId:parentId||item._parentId||item._collectionRoot?.id||DEMOLIDOR_COLLECTION_FOLDER_ID,listing:null,loading:false,error:null,openedFromChapters:!!nested};
+  activeCollectionDetail={item:{...item},parentId:parentId||item._parentId||item._collectionRoot?.id||DEMOLIDOR_COLLECTION_FOLDER_ID,listing:null,loading:false,error:null,openedFromChapters:!!nested,chapterFolderStack:[]};
   collectionDetailTab='details';
   collectionDetailChapterMode='grid';
   renderCollectionDetails();
@@ -7375,13 +7383,23 @@ function closeCollectionDetails(syncNav=true){
   }
   if(syncNav) navSyncAfterBack();
 }
+function scrollCollectionDetailsToTop(){
+  const screen=document.getElementById('collection-details-screen');
+  if(!screen) return;
+  screen.scrollTop=0;
+  const main=screen.querySelector('.detail-main');
+  if(main) main.scrollTop=0;
+  requestAnimationFrame(()=>{ if(screen.isConnected) screen.scrollTop=0; if(main&&main.isConnected) main.scrollTop=0; });
+}
 function setCollectionDetailTab(tab){
   const next=tab==='chapters'?'chapters':'details';
   if(!activeCollectionDetail||next===collectionDetailTab) return;
   const returningToDetails=collectionDetailTab==='chapters'&&next==='details';
   if(next==='chapters') navPushLevel();
+  if(returningToDetails && activeCollectionDetail.chapterFolderStack) activeCollectionDetail.chapterFolderStack.length=0;
   collectionDetailTab=next;
   renderCollectionDetails();
+  scrollCollectionDetailsToTop();
   if(returningToDetails) navSyncAfterBack();
 }
 async function sumCollectionContentSize(folderId, visited=new Set()){
@@ -7417,6 +7435,9 @@ function renderCollectionDetails(){
   let screen=document.getElementById('collection-details-screen');
   if(!screen){ screen=el('section',''); screen.id='collection-details-screen'; screen.setAttribute('aria-label','Detalhes da HQ'); document.body.appendChild(screen); }
   const item=detail.item, isFolder=detailIsFolder(item), meta=collectionDetailMeta(item);
+  const chapterFrame=currentCollectionChapterFrame(detail);
+  const chaptersLoading=chapterFrame?chapterFrame.loading:detail.loading;
+  const chaptersError=chapterFrame?chapterFrame.error:detail.error;
   const author=detailVisibleAuthor(meta.author);
   const creatorNames=Array.isArray(meta.creators)?meta.creators.filter(name=>String(name||'').trim()):[];
   const inlineAuthorText=creatorNames.length?author:detailAuthorInlineSummary(author);
@@ -7442,10 +7463,14 @@ function renderCollectionDetails(){
       <section class="detail-section"><h3>Gêneros</h3><div class="detail-chips">${meta.genres.map(g=>`<span class="detail-chip">${escapeHtml(g)}</span>`).join('')}</div></section>
       <section class="detail-section"><h3>Sinopse</h3><p class="detail-synopsis">${escapeHtml(meta.synopsis)}</p></section>
       ${author?`<section class="detail-section"><h3>Autores</h3><p class="detail-credit">${escapeHtml(author)}</p></section>`:''}</main>
-    ` : `<div class="detail-chapters-toolbar"><div class="detail-chapters-status" data-chapters-status>${detail.loading?'Carregando capítulos…':detail.error?'Não foi possível carregar esta lista. Toque para tentar novamente.':'Carregando capítulos…'}</div><div class="detail-view-switch" role="group" aria-label="Organização das edições"><button class="detail-view-btn ${collectionDetailChapterMode==='grid'?'active':''}" type="button" data-chapter-view="grid" aria-pressed="${collectionDetailChapterMode==='grid'}">Capas</button><button class="detail-view-btn ${collectionDetailChapterMode==='list'?'active':''}" type="button" data-chapter-view="list" aria-pressed="${collectionDetailChapterMode==='list'}">Lista</button></div></div><div class="detail-chapter-list ${collectionDetailChapterMode==='grid'?'grid-mode':'list-mode'}" data-detail-chapter-list></div>`}
+    ` : `<div class="detail-chapters-toolbar"><div class="detail-chapters-status" data-chapters-status>${chaptersLoading?'Carregando capítulos…':chaptersError?'Não foi possível carregar esta lista. Toque para tentar novamente.':'Carregando capítulos…'}</div><div class="detail-view-switch" role="group" aria-label="Organização das edições"><button class="detail-view-btn ${collectionDetailChapterMode==='grid'?'active':''}" type="button" data-chapter-view="grid" aria-pressed="${collectionDetailChapterMode==='grid'}">Capas</button><button class="detail-view-btn ${collectionDetailChapterMode==='list'?'active':''}" type="button" data-chapter-view="list" aria-pressed="${collectionDetailChapterMode==='list'}">Lista</button></div></div><div class="detail-chapter-list ${collectionDetailChapterMode==='grid'?'grid-mode':'list-mode'}" data-detail-chapter-list></div>`}
   `;
   if(detail.openedFromChapters){ const favoriteButton=screen.querySelector('.detail-favorite'); if(favoriteButton) favoriteButton.remove(); }
-  screen.querySelector('.detail-screen-back').onclick=()=>collectionDetailTab==='chapters'?setCollectionDetailTab('details'):closeCollectionDetails(true);
+  screen.querySelector('.detail-screen-back').onclick=()=>{
+    if(collectionDetailTab==='chapters' && detail.chapterFolderStack?.length){ detail.chapterFolderStack.pop(); renderCollectionDetails(); scrollCollectionDetailsToTop(); navSyncAfterBack(); }
+    else if(collectionDetailTab==='chapters') setCollectionDetailTab('details');
+    else closeCollectionDetails(true);
+  };
   screen.querySelectorAll('[data-detail-tab]').forEach(btn=>btn.onclick=()=>setCollectionDetailTab(btn.dataset.detailTab));
   screen.querySelectorAll('[data-chapter-view]').forEach(btn=>btn.onclick=()=>{ collectionDetailChapterMode=btn.dataset.chapterView; renderCollectionDetails(); });
   const coverSlot=screen.querySelector('.detail-cover .cover-placeholder');
@@ -7523,21 +7548,35 @@ async function loadCollectionDetailChapters(){
   const listEl=document.querySelector('#collection-details-screen [data-detail-chapter-list]');
   const status=document.querySelector('#collection-details-screen [data-chapters-status]');
   if(!listEl || !status) return;
-  if(!detailIsFolder(detail.item)){
+  const frame=currentCollectionChapterFrame(detail);
+  const folder=frame?frame.item:detail.item;
+  const listing=frame?frame.listing:detail.listing;
+  const loading=frame?frame.loading:detail.loading;
+  if(!detailIsFolder(folder)){
     renderCollectionChapterRows(detail); return;
   }
-  if(detail.listing){ renderCollectionChapterRows(detail); return; }
-  if(detail.loading) return;
-  detail.loading=true; detail.error=null; status.textContent='Carregando capítulos…';
-  try{ detail.listing=await withStallTimeout(driveListFolder(detail.item.id),20000,'A lista de capítulos demorou demais para responder. Toque para tentar novamente.'); detail.error=null; }
-  catch(e){ detail.error=e; }
-  detail.loading=false;
-  if(activeCollectionDetail===detail && collectionDetailTab==='chapters') renderCollectionChapterRows(detail);
+  if(listing){ renderCollectionChapterRows(detail); return; }
+  if(loading) return;
+  if(frame){ frame.loading=true; frame.error=null; }
+  else { detail.loading=true; detail.error=null; }
+  status.textContent=frame?`Carregando ${detailCleanTitle(folder.name)}…`:'Carregando capítulos…';
+  try{
+    const fresh=await withStallTimeout(driveListFolder(folder.id),20000,'A lista de capítulos demorou demais para responder. Toque para tentar novamente.');
+    if(frame){ frame.listing=fresh; frame.error=null; }
+    else { detail.listing=fresh; detail.error=null; }
+  }catch(e){ if(frame) frame.error=e; else detail.error=e; }
+  if(frame) frame.loading=false; else detail.loading=false;
+  if(activeCollectionDetail===detail && collectionDetailTab==='chapters' && currentCollectionChapterFrame(detail)===frame) renderCollectionChapterRows(detail);
 }
 async function renderCollectionChapterRows(detail){
   const screen=document.getElementById('collection-details-screen'); if(!screen || activeCollectionDetail!==detail) return;
   const status=screen.querySelector('[data-chapters-status]'), listEl=screen.querySelector('[data-detail-chapter-list]');
   if(!status || !listEl) return;
+  const frame=currentCollectionChapterFrame(detail);
+  const chapterFolder=frame?frame.item:detail.item;
+  const listing=frame?frame.listing:detail.listing;
+  const error=frame?frame.error:detail.error;
+  const loading=frame?frame.loading:detail.loading;
   // A aba pode disparar mais de uma renderização para a mesma listagem (por
   // exemplo, a resposta de driveListFolder e a chamada iniciada ao abrir a
   // aba podem terminar quase juntas). Como a leitura do progresso abaixo é
@@ -7549,9 +7588,11 @@ async function renderCollectionChapterRows(detail){
   listEl.innerHTML='';
   listEl.classList.toggle('grid-mode',collectionDetailChapterMode==='grid');
   listEl.classList.toggle('list-mode',collectionDetailChapterMode==='list');
-  if(detail.error){ status.textContent='Não foi possível carregar os capítulos. Toque aqui para tentar novamente.'; status.onclick=()=>{detail.listing=null;detail.loading=false;detail.error=null;loadCollectionDetailChapters();}; return; }
-  const folders=detailIsFolder(detail.item)?(detail.listing?.folders||[]):[];
-  const files=detailIsFolder(detail.item)?(detail.listing?.files||[]):[detail.item];
+  if(error){ status.textContent='Não foi possível carregar esta lista. Toque aqui para tentar novamente.'; status.onclick=()=>{if(frame){frame.listing=null;frame.loading=false;frame.error=null;}else{detail.listing=null;detail.loading=false;detail.error=null;}loadCollectionDetailChapters();}; return; }
+  status.onclick=null;
+  if(loading&&!listing){ status.textContent=frame?`Carregando ${detailCleanTitle(chapterFolder.name)}…`:'Carregando capítulos…'; return; }
+  const folders=detailIsFolder(chapterFolder)?(listing?.folders||[]):[];
+  const files=detailIsFolder(chapterFolder)?(listing?.files||[]):[chapterFolder];
   const rows=[...folders.map(x=>({...x,isFolder:true})),...files];
   const progressEntries=await Promise.all(rows.map(async entry=>({entry,progress:await idbGet('progress',entry.id).catch(()=>null)})));
   if(activeCollectionDetail!==detail || collectionDetailTab!=='chapters' || detail.chapterRenderToken!==renderToken) return;
@@ -7560,15 +7601,17 @@ async function renderCollectionChapterRows(detail){
   // válida, mas iniciada antes, fique misturada à pintura atual.
   listEl.innerHTML='';
   let visible=progressEntries;
-  status.textContent=`${visible.length} ${visible.length===1?'capítulo':'capítulos'}`;
+  const countLabel=`${visible.length} ${visible.length===1?'capítulo':'capítulos'}`;
+  status.textContent=frame?`${detailCleanTitle(chapterFolder.name)} · ${countLabel}`:countLabel;
   if(!visible.length){ listEl.innerHTML='<p class="detail-chapters-status">Nenhum capítulo corresponde a esta aba.</p>'; return; }
-  visible.forEach(({entry},index)=>listEl.appendChild(collectionDetailChapterMode==='grid' ? buildCollectionChapterCard(entry,index+1,detail.item.id) : buildCollectionChapterRow(entry,index+1,detail.item.id)));
+  visible.forEach(({entry},index)=>listEl.appendChild(collectionDetailChapterMode==='grid' ? buildCollectionChapterCard(entry,index+1,chapterFolder.id||detail.item.id) : buildCollectionChapterRow(entry,index+1,chapterFolder.id||detail.item.id)));
 }
 function collectionChapterOfflineMeta(entry){
   const current=activeCollectionDetail?.item;
   const statePath=(state.path||[]).map(p=>p && p.name).filter(Boolean);
   const itemPath=Array.isArray(current?._path)?current._path.slice():statePath;
   if(current?.name && itemPath[itemPath.length-1]!==current.name) itemPath.push(current.name);
+  (activeCollectionDetail?.chapterFolderStack||[]).forEach(frame=>{if(frame.item?.name&&itemPath[itemPath.length-1]!==frame.item.name)itemPath.push(frame.item.name);});
   return {...entry,_path:itemPath};
 }
 function buildFolderCornerDownloadButton(folder){
@@ -7609,10 +7652,22 @@ function buildCollectionChapterCard(entry,index,parentId){
   return card;
 }
 async function openCollectionChapter(entry,parentId){
-  if(detailIsFolder(entry)){ openCollectionDetails(entry,parentId,true); return; }
+  if(detailIsFolder(entry)){
+    const detail=activeCollectionDetail;
+    if(detail && collectionDetailTab==='chapters'){
+      if(!Array.isArray(detail.chapterFolderStack)) detail.chapterFolderStack=[];
+      detail.chapterFolderStack.push({item:{...entry,isFolder:true,_parentId:parentId},parentId,listing:null,loading:false,error:null});
+      navPushLevel();
+      renderCollectionDetails();
+      scrollCollectionDetailsToTop();
+      return;
+    }
+    openCollectionDetails(entry,parentId,true); return;
+  }
   await loadCustomDetailMetadata(entry.id);
   if(hasCustomDetailMetadata(entry,parentId)&&!isDescendantOfDetailedCollection(entry,parentId)){ openCollectionDetails({...entry,_parentId:parentId},parentId,true); return; }
-  state.currentListContext=(activeCollectionDetail?.listing?.files)||[entry]; state.currentListIsLocal=false;
+  const frame=currentCollectionChapterFrame(activeCollectionDetail);
+  state.currentListContext=(frame?.listing?.files)||(activeCollectionDetail?.listing?.files)||[entry]; state.currentListIsLocal=false;
   return openReader(entry,undefined,parentId);
 }
 function buildCollectionChapterRow(entry,index,parentId){

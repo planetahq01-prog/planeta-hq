@@ -622,8 +622,9 @@
 /* v177: oculta edições sem ficha dentro de subpastas detalhadas, sem esconder os itens diretos da coleção. */
 /* v178: fixa a pesquisa no eixo horizontal e usa Download no lugar de Favoritar no fluxo de capítulos. */
 /* v179: empilha Capítulos como nível de navegação para que dois Back consecutivos não saiam do app. */
+/* v180: navega subpastas dentro de Capítulos, volta ao nível pai e redefine Detalhes no topo. */
 // v156: o worker CBR extrai páginas vizinhas em uma única passagem do RAR.
-const CACHE_VERSION = 'v179';
+const CACHE_VERSION = 'v180';
 // Cache das capas: separado do da casca do app e mantido entre versões.
 const COVERS_CACHE = 'planeta-hq-covers-v1';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
