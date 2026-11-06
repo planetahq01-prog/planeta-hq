@@ -625,8 +625,9 @@
 /* v180: navega subpastas dentro de Capítulos, volta ao nível pai e redefine Detalhes no topo. */
 /* v181: abre fichas de coleções sem bloquear o toque pela busca remota de metadata. */
 /* v182: ficha própria de pasta/HQ prevalece sobre ficha ancestral da coleção. */
+/* v183: Vingadores/Justiceiro sempre abrem ficha; Vingadores vem antes do Quarteto. */
 // v156: o worker CBR extrai páginas vizinhas em uma única passagem do RAR.
-const CACHE_VERSION = 'v182';
+const CACHE_VERSION = 'v183';
 // Cache das capas: separado do da casca do app e mantido entre versões.
 const COVERS_CACHE = 'planeta-hq-covers-v1';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;

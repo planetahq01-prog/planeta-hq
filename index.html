@@ -10972,7 +10972,7 @@ function buildCarouselCard(item, opts){
   if(!hasImmediateCover) lazyLoadCover(btn, loadCover);
 
   btn.onclick = async ()=>{
-    const pid = item.parentId!=null ? item.parentId : (item._parentId!=null ? item._parentId : CONFIG.rootFolderId);
+    const pid = item.parentId!=null ? item.parentId : (item._parentId!=null ? item._parentId : (item._collectionRoot?.id!=null ? item._collectionRoot.id : CONFIG.rootFolderId));
     const hasOwnDetail=hasOwnCustomDetailMetadata(item);
     const hasDetail=hasCustomDetailMetadata(item,pid);
     const isDetailedDescendant=isDescendantOfDetailedCollection(item,pid);
@@ -12060,7 +12060,7 @@ const SHELVES = {
   marvel: {
     key: 'marvel', label: 'Marvel',
     logo: MARVEL_LOGO,
-    sections: ['vingadores','aranha','especiaisAranha','hulk','ironman','demolidor','justiceiro','capitaoamerica','doomsday','xmen','wolverine','deadpool','motoqueiro','quarteto','classicoAvengers','thanos','salvat'],
+    sections: ['aranha','especiaisAranha','hulk','ironman','demolidor','justiceiro','capitaoamerica','doomsday','xmen','wolverine','deadpool','motoqueiro','vingadores','quarteto','classicoAvengers','thanos','salvat'],
     pathKeywords: ['colecao homem aranha','edicoes especiais homem aranha','colecao hulk','colecao homem de ferro','colecao demolidor','colecao justiceiro','colecao capitao america','colecao vingadores','doomsday','x men','xmen','colecao wolverine','colecao deadpool','colecao motoqueiro fantasma','colecao quarteto fantastico','vingadores classico','colecao thanos','graphic novels marvel']
   },
   dc: {
@@ -12073,7 +12073,6 @@ const SHELVES = {
 // Ordem das seções da estante padrão "Marvel + DC" (definida pelo usuário —
 // as duas listas ficam misturadas, não Marvel e depois DC).
 SHELVES.todas.sections = [
-  'vingadores',        // Vingadores
   'aranha',            // Homem-Aranha
   'batman',            // Batman
   'ironman',           // Homem de Ferro
@@ -12091,6 +12090,7 @@ SHELVES.todas.sections = [
   'especiaisAranha',   // Edições Especiais: Homem-Aranha
   'lanterna',          // Lanterna Verde
   'mulhermaravilha',   // Mulher Maravilha
+  'vingadores',        // Vingadores, imediatamente antes do Quarteto Fantástico
   'quarteto',          // Quarteto Fantástico
   'xmen',              // X-Men
   'wolverine',         // Wolverine
@@ -12291,7 +12291,7 @@ function paintHomeSectionsNow(wrap, data){
     `Coleção: <span class="section-logo-text hidden" data-logo-text="vingadores">Vingadores</span><img class="section-logo" data-logo="vingadores" src="${logoSrc('vingadores')}" alt="Vingadores" loading="eager" decoding="async">`,
     vingadoresFolders,
     null,
-    {kind:SECTION_KINDS.MISTA,folderNames:['colecao vingadores'],rootFolder:vingadoresRoot,collectionTitle:'Coleção: Vingadores'}
+    {kind:SECTION_KINDS.MISTA,folderNames:['colecao vingadores'],rootFolder:vingadoresRoot,detailsRootFolderId:vingadoresRoot?.id||HOME_COLLECTION_ROOTS.vingadores.id,collectionTitle:'Coleção: Vingadores'}
   );
   if(secVingadores){ built['vingadores'] = secVingadores; wireHomeLogoFallback(secVingadores, 'vingadores'); }
 
@@ -12300,7 +12300,7 @@ function paintHomeSectionsNow(wrap, data){
     `Coleção: <span class="section-logo-text hidden" data-logo-text="justiceiro">Justiceiro</span><img class="section-logo" data-logo="justiceiro" src="${logoSrc('justiceiro')}" alt="Justiceiro" loading="eager" decoding="async">`,
     justiceiroFolders,
     null,
-    {kind:SECTION_KINDS.MISTA,folderNames:['colecao justiceiro'],rootFolder:justiceiroRoot,collectionTitle:'Coleção: Justiceiro'}
+    {kind:SECTION_KINDS.MISTA,folderNames:['colecao justiceiro'],rootFolder:justiceiroRoot,detailsRootFolderId:justiceiroRoot?.id||HOME_COLLECTION_ROOTS.justiceiro.id,collectionTitle:'Coleção: Justiceiro'}
   );
   if(secJusticeiro){ built['justiceiro'] = secJusticeiro; wireHomeLogoFallback(secJusticeiro, 'justiceiro'); }
 
