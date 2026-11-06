@@ -2460,6 +2460,7 @@ function resolveShortcuts(rawFiles){
     if(f.mimeType === 'application/vnd.google-apps.shortcut' && f.shortcutDetails){
       return {
         id: f.shortcutDetails.targetId,
+        _shortcutId: f.id,
         name: f.name,
         mimeType: f.shortcutDetails.targetMimeType,
         size: f.size,
@@ -4730,12 +4731,12 @@ function renderFolderCard(f, opts){
     const hasOwnDetail=hasOwnCustomDetailMetadata(f);
     const hasDetail=hasCustomDetailMetadata(f,parentId);
     const isDetailedDescendant=isDescendantOfDetailedCollection(f,parentId);
-    if(hasOwnDetail || (hasDetail&&!isDetailedDescendant)){ void loadCustomDetailMetadata(f.id); openCollectionDetails({...f,_parentId:parentId},parentId); return; }
+    if(hasOwnDetail || (hasDetail&&!isDetailedDescendant)){ void loadCustomDetailMetadata(f); openCollectionDetails({...f,_parentId:parentId},parentId); return; }
     if(opts.onOpen){
       if(card.classList.contains('loading')) return;
       card.classList.add('loading');
       try{
-        await loadCustomDetailMetadata(f.id);
+        await loadCustomDetailMetadata(f);
         if(hasOwnCustomDetailMetadata(f)){ openCollectionDetails({...f,_parentId:parentId},parentId); return; }
         await opts.onOpen(f); return;
       }finally{ card.classList.remove('loading'); }
@@ -4744,7 +4745,7 @@ function renderFolderCard(f, opts){
     if(card.classList.contains('loading')) return;
     card.classList.add('loading');
     try{
-      await loadCustomDetailMetadata(f.id);
+      await loadCustomDetailMetadata(f);
       if(hasOwnCustomDetailMetadata(f)|| (hasCustomDetailMetadata(f,parentId)&&!isDescendantOfDetailedCollection(f,parentId))){ openCollectionDetails({...f,_parentId:parentId},parentId); return; }
       enterFolder(f.id,f.name);
     }finally{ card.classList.remove('loading'); }
@@ -4769,20 +4770,20 @@ function renderComicCard(f, opts){
     const hasDetail=hasCustomDetailMetadata(f,pid);
     const isDetailedDescendant=isDescendantOfDetailedCollection(f,pid);
     if(opts.onOpen){
-      if(hasOwnDetail || (hasDetail&&!isDetailedDescendant)){ void loadCustomDetailMetadata(f.id); openCollectionDetails({...f,_parentId:pid},pid); return; }
+      if(hasOwnDetail || (hasDetail&&!isDetailedDescendant)){ void loadCustomDetailMetadata(f); openCollectionDetails({...f,_parentId:pid},pid); return; }
       if(card.classList.contains('loading')) return;
       card.classList.add('loading');
       try{
-        await loadCustomDetailMetadata(f.id);
+        await loadCustomDetailMetadata(f);
         if(hasOwnCustomDetailMetadata(f)){ openCollectionDetails({...f,_parentId:pid},pid); return; }
         await opts.onOpen(f); return;
       }finally{ card.classList.remove('loading'); }
     }
     if(card.classList.contains('loading')) return;
-    if(hasOwnDetail || (hasDetail&&!isDetailedDescendant)){ void loadCustomDetailMetadata(f.id); openCollectionDetails({...f,_parentId:pid},pid); return; }
+    if(hasOwnDetail || (hasDetail&&!isDetailedDescendant)){ void loadCustomDetailMetadata(f); openCollectionDetails({...f,_parentId:pid},pid); return; }
     card.classList.add('loading');
     try{
-      await loadCustomDetailMetadata(f.id);
+      await loadCustomDetailMetadata(f);
       if(hasOwnCustomDetailMetadata(f)|| (hasCustomDetailMetadata(f,pid)&&!isDescendantOfDetailedCollection(f,pid))){ openCollectionDetails({...f,_parentId:pid},pid); return; }
       await openReader(f, undefined, pid);
     }finally{ card.classList.remove('loading'); }
@@ -7204,8 +7205,8 @@ const DETAIL_COLLECTION_ID_ALIASES = {
 };
 let CUSTOM_DETAIL_METADATA = mergeCustomDetailMetadata();
 let customDetailMetadataPromise = null;
-function loadCustomDetailMetadata(itemId){
-  const hasInlineItem=itemId!=null&&Object.prototype.hasOwnProperty.call(INLINE_CUSTOM_DETAIL_METADATA,String(itemId));
+const customDetailMetadataRequests = new Map();
+function loadAllCustomDetailMetadata(){
   if(!customDetailMetadataPromise){
     customDetailMetadataPromise=(async()=>{
       const requestJson=async(url,cache)=>{
@@ -7223,7 +7224,7 @@ function loadCustomDetailMetadata(itemId){
       try{
         const payload=await requestJson(`${CONFIG.proxyUrl}?detail_metadata=1`,'no-store');
         if(payload&&payload.items&&typeof payload.items==='object'&&!Array.isArray(payload.items)){
-          CUSTOM_DETAIL_METADATA=mergeCustomDetailMetadata(payload.items);
+          CUSTOM_DETAIL_METADATA=mergeCustomDetailMetadata(Object.assign(Object.create(null),CUSTOM_DETAIL_METADATA,payload.items));
           applyCustomCoversToVisibleCards();
           if(activeCollectionDetail) renderCollectionDetails();
           return;
@@ -7232,7 +7233,7 @@ function loadCustomDetailMetadata(itemId){
       try{
         const payload=await requestJson(new URL('./metadata.json',document.baseURI),'no-cache');
         if(payload?.items&&typeof payload.items==='object'&&!Array.isArray(payload.items)){
-          CUSTOM_DETAIL_METADATA=mergeCustomDetailMetadata(payload.items);
+          CUSTOM_DETAIL_METADATA=mergeCustomDetailMetadata(Object.assign(Object.create(null),CUSTOM_DETAIL_METADATA,payload.items));
           applyCustomCoversToVisibleCards();
         }
       }catch(_){}
@@ -7241,13 +7242,44 @@ function loadCustomDetailMetadata(itemId){
   }
   // As fichas incluídas no index.html já estão prontas. Atualizações remotas
   // continuam carregando em segundo plano para os demais itens/edições manuais.
-  return hasInlineItem?Promise.resolve():customDetailMetadataPromise;
+  return customDetailMetadataPromise;
+}
+function loadCustomDetailMetadata(itemOrId){
+  if(itemOrId==null) return loadAllCustomDetailMetadata();
+  const ids=detailMetadataIdCandidates(itemOrId);
+  if(!ids.length || ids.some(id=>Object.prototype.hasOwnProperty.call(INLINE_CUSTOM_DETAIL_METADATA,id))) return Promise.resolve(true);
+  if(customDetailRecordForItem(itemOrId)) return Promise.resolve(true);
+  const requestKey=ids.slice().sort().join('|');
+  if(customDetailMetadataRequests.has(requestKey)) return customDetailMetadataRequests.get(requestKey);
+  const request=(async()=>{
+    if(!CONFIG.proxyUrl) return false;
+    const params=new URLSearchParams({detail_metadata:'1'});
+    ids.slice(0,50).forEach(id=>params.append('id',id));
+    const controller=typeof AbortController==='function'?new AbortController():null;
+    const abortTimer=setTimeout(()=>{if(controller) controller.abort();},8500);
+    try{
+      const response=await withStallTimeout(fetch(`${CONFIG.proxyUrl}?${params.toString()}`,{cache:'no-store',...(controller?{signal:controller.signal}:{})}),5000,'Tempo esgotado ao carregar a ficha.');
+      if(!response.ok) return false;
+      const payload=await withStallTimeout(response.json(),3000,'Tempo esgotado ao ler a ficha.');
+      if(!payload?.items || typeof payload.items!=='object' || Array.isArray(payload.items)) return false;
+      CUSTOM_DETAIL_METADATA=mergeCustomDetailMetadata(Object.assign(Object.create(null),CUSTOM_DETAIL_METADATA,payload.items));
+      applyCustomCoversToVisibleCards();
+      if(activeCollectionDetail && detailMetadataIdCandidates(activeCollectionDetail.item).some(id=>ids.includes(id))) renderCollectionDetails();
+      return !!customDetailRecordForItem(itemOrId);
+    }catch(error){
+      if(controller) controller.abort();
+      logWarn('[PlanetaHQ] Não foi possível carregar a ficha específica do item.',error);
+      return false;
+    }finally{ clearTimeout(abortTimer); }
+  })().finally(()=>customDetailMetadataRequests.delete(requestKey));
+  customDetailMetadataRequests.set(requestKey,request);
+  return request;
 }
 function applyCustomCoversToVisibleCards(){
   if(!document.body) return;
   for(const card of document.querySelectorAll('.card[data-id],.carousel-card[data-id]')){
     const itemId=card.dataset.id;
-    const coverFile=getCustomDetailCoverFile(itemId);
+    const coverFile=getCustomDetailCoverFile({id:itemId,_shortcutId:card.dataset.shortcutId||''});
     if(!coverFile) continue;
     const coverBox=card.querySelector('.folder-cover,.cc-cover')||card;
     const prior=coverBox.querySelector('img.cover');
@@ -7264,9 +7296,10 @@ function applyCustomCoversToVisibleCards(){
   }
 }
 function collectionDetailMeta(item){
-  const manual=customDetailRecordForItem(item?.id)||{};
-  const research=COLLECTION_DETAIL_RESEARCH[item?.id] || {};
-  const known=DEMOLIDOR_DETAIL_METADATA[item.id] || BATMAN_DETAIL_METADATA[item.id] || HULK_DETAIL_METADATA[item.id] || IRONMAN_DETAIL_METADATA[item.id];
+  const itemIds=detailMetadataIdCandidates(item);
+  const manual=customDetailRecordForItem(item)||{};
+  const research=itemIds.map(id=>COLLECTION_DETAIL_RESEARCH[id]).find(Boolean)||{};
+  const known=itemIds.map(id=>DEMOLIDOR_DETAIL_METADATA[id]||BATMAN_DETAIL_METADATA[id]||HULK_DETAIL_METADATA[id]||IRONMAN_DETAIL_METADATA[id]).find(Boolean);
   if(known) return {...known,...research,...manual};
   const rootId=activeCollectionDetail?.parentId || item?._parentId || item?._collectionRoot?.id;
   const collection=COLLECTION_DETAIL_ROOT_FALLBACKS[rootId];
@@ -7523,7 +7556,7 @@ function renderCollectionDetails(){
   if(coverSlot){
     const loadCover=async()=>{
       let coverFile=item;
-      const customCoverFile=getCustomDetailCoverFile(item.id);
+      const customCoverFile=getCustomDetailCoverFile(item);
       if(customCoverFile) coverFile=customCoverFile;
       else if(isFolder){ try{ coverFile=await resolveFolderCoverFile(item.id); }catch(e){ coverFile=null; } }
       if(!coverFile){ const fb=screen.querySelector('.detail-cover-fallback'); if(fb) fb.classList.remove('hidden'); coverSlot.remove(); return; }
@@ -7702,7 +7735,7 @@ async function openCollectionChapter(entry,parentId){
     if(hasOwnCustomDetailMetadata(entry)){
       openCollectionDetails({...entry,_parentId:parentId},parentId,true); return;
     }
-    await loadCustomDetailMetadata(entry.id);
+    await loadCustomDetailMetadata(entry);
     if(hasOwnCustomDetailMetadata(entry)){
       openCollectionDetails({...entry,_parentId:parentId},parentId,true); return;
     }
@@ -7717,7 +7750,7 @@ async function openCollectionChapter(entry,parentId){
     }
     openCollectionDetails(entry,parentId,true); return;
   }
-  await loadCustomDetailMetadata(entry.id);
+  await loadCustomDetailMetadata(entry);
   if(hasOwnCustomDetailMetadata(entry)|| (hasCustomDetailMetadata(entry,parentId)&&!isDescendantOfDetailedCollection(entry,parentId))){ openCollectionDetails({...entry,_parentId:parentId},parentId,true); return; }
   const frame=currentCollectionChapterFrame(activeCollectionDetail);
   state.currentListContext=(frame?.listing?.files)||(activeCollectionDetail?.listing?.files)||[entry]; state.currentListIsLocal=false;
@@ -7986,36 +8019,39 @@ function detailCoverUrl(fileId){
   if(!CONFIG.proxyUrl||!fileId) return null;
   return `${CONFIG.proxyUrl}?detail_cover=1&id=${encodeURIComponent(fileId)}&code=${encodeURIComponent(ACCESS_CODE || '')}&device=${encodeURIComponent(getDeviceId())}&type=${encodeURIComponent(getDeviceType())}`;
 }
-function customDetailRecordForItem(itemId){
-  const id=String(itemId??'');
-  if(!id) return null;
-  if(Object.prototype.hasOwnProperty.call(CUSTOM_DETAIL_METADATA,id)) return CUSTOM_DETAIL_METADATA[id];
-  // A busca pode devolver o ID real do destino enquanto a ficha foi salva
-  // no ID do atalho do Drive (ou vice-versa). Reconhece ambos os sentidos.
-  const aliasIds=DETAIL_COLLECTION_ID_ALIASES[id];
-  for(const aliasId of (Array.isArray(aliasIds)?aliasIds:(aliasIds?[aliasIds]:[])))
-    if(CUSTOM_DETAIL_METADATA[aliasId]) return CUSTOM_DETAIL_METADATA[aliasId];
-  for(const [targetId,ids] of Object.entries(DETAIL_COLLECTION_ID_ALIASES)){
-    const values=Array.isArray(ids)?ids:[ids];
-    if(values.some(aliasId=>String(aliasId)===id) && CUSTOM_DETAIL_METADATA[targetId]) return CUSTOM_DETAIL_METADATA[targetId];
+function detailMetadataIdCandidates(itemOrId){
+  const item=itemOrId&&typeof itemOrId==='object'?itemOrId:null;
+  const ids=[];
+  const add=value=>{const id=String(value??'').trim();if(id&&!ids.includes(id))ids.push(id);};
+  if(item){
+    add(item.id); add(item._shortcutId); add(item.shortcutId); add(item.shortcutDetails?.targetId);
+    (Array.isArray(item._detailAliasIds)?item._detailAliasIds:[]).forEach(add);
+  }else add(itemOrId);
+  for(let i=0;i<ids.length;i++){
+    const id=ids[i];
+    const aliases=DETAIL_COLLECTION_ID_ALIASES[id];
+    (Array.isArray(aliases)?aliases:(aliases?[aliases]:[])).forEach(add);
+    for(const [targetId,valuesRaw] of Object.entries(DETAIL_COLLECTION_ID_ALIASES)){
+      const values=Array.isArray(valuesRaw)?valuesRaw:[valuesRaw];
+      if(values.some(aliasId=>String(aliasId)===id)) add(targetId);
+    }
   }
+  return ids;
+}
+function customDetailRecordForItem(itemOrId){
+  for(const id of detailMetadataIdCandidates(itemOrId))
+    if(Object.prototype.hasOwnProperty.call(CUSTOM_DETAIL_METADATA,id)) return CUSTOM_DETAIL_METADATA[id];
   return null;
 }
 function hasCustomDetailMetadata(itemOrId,parentId){
   const item=itemOrId&&typeof itemOrId==='object'?itemOrId:null;
   const id=String(item?item.id:(itemOrId??''));
   if(!id) return false;
-  if(customDetailRecordForItem(id)) return true;
+  if(customDetailRecordForItem(item||id)) return true;
   const legacyMaps=[DEMOLIDOR_DETAIL_METADATA,BATMAN_DETAIL_METADATA,HULK_DETAIL_METADATA,IRONMAN_DETAIL_METADATA];
   const hasLegacy=key=>legacyMaps.some(map=>Object.prototype.hasOwnProperty.call(map,String(key)));
   if(hasLegacy(id)) return true;
-  const researchIds=[id];
-  const aliases=DETAIL_COLLECTION_ID_ALIASES[id];
-  researchIds.push(...(Array.isArray(aliases)?aliases:(aliases?[aliases]:[])));
-  for(const [targetId,ids] of Object.entries(DETAIL_COLLECTION_ID_ALIASES)){
-    const values=Array.isArray(ids)?ids:[ids];
-    if(values.some(aliasId=>String(aliasId)===id)) researchIds.push(targetId);
-  }
+  const researchIds=detailMetadataIdCandidates(item||id);
   if(researchIds.some(key=>hasLegacy(key)||Object.prototype.hasOwnProperty.call(COLLECTION_DETAIL_RESEARCH,key))) return true;
   // Fichas automáticas por regra/default: na pesquisa, o item pode não ter
   // registro próprio; a tela é definida pelo ID da coleção-raiz de seu pai.
@@ -8031,8 +8067,10 @@ function hasCustomDetailMetadata(itemOrId,parentId){
   return false;
 }
 function hasOwnCustomDetailMetadata(itemOrId){
-  const id=itemOrId&&typeof itemOrId==='object'?itemOrId.id:itemOrId;
-  return id!=null&&hasCustomDetailMetadata(String(id));
+  const ids=detailMetadataIdCandidates(itemOrId);
+  if(!ids.length) return false;
+  const legacyMaps=[DEMOLIDOR_DETAIL_METADATA,BATMAN_DETAIL_METADATA,HULK_DETAIL_METADATA,IRONMAN_DETAIL_METADATA];
+  return !!customDetailRecordForItem(itemOrId) || ids.some(id=>legacyMaps.some(map=>Object.prototype.hasOwnProperty.call(map,id))||Object.prototype.hasOwnProperty.call(COLLECTION_DETAIL_RESEARCH,id));
 }
 function customDetailCoverRecord(itemId){
   const record=customDetailRecordForItem(itemId);
@@ -8764,7 +8802,7 @@ function getFolderCoverOverride(name){
 
 async function attachFolderCoverAsync(card, folderObj){
   const placeholder = card.querySelector('.cover-placeholder');
-  const customCoverFile=getCustomDetailCoverFile(folderObj.id);
+  const customCoverFile=getCustomDetailCoverFile(folderObj);
   if(customCoverFile){
     card.classList.add('has-cover');
     await attachCoverToEl(placeholder,customCoverFile);
@@ -10902,6 +10940,7 @@ function buildCarouselCard(item, opts){
   const isFolder = !!opts.isFolder;
   const btn = el('button','carousel-card');
   btn.dataset.id = item.id;
+  if(item._shortcutId) btn.dataset.shortcutId=item._shortcutId;
 
   const cover = el('div','cc-cover');
   // Mesma ideia dos cards de coleção da biblioteca: se a capa (de coleção ou
@@ -10913,7 +10952,7 @@ function buildCarouselCard(item, opts){
     : (getCustomDetailCoverSrc(item.id) || (typeof coverMemoryCache.get(item.id) === 'string' ? coverMemoryCache.get(item.id) : null));
   let hasImmediateCover = false;
   if(immediateSrc){
-    const customCoverFile=isFolder?getCustomDetailCoverFile(item.id):null;
+    const customCoverFile=isFolder?getCustomDetailCoverFile(item):null;
     const img = buildCoverNode(immediateSrc, isFolder ? (customCoverFile||null) : item);
     img.classList.add('loaded');
     if(isFolder&&!customCoverFile) wireImmediateFolderCoverRetry(img, item);
@@ -10927,7 +10966,7 @@ function buildCarouselCard(item, opts){
   cover.appendChild(buildFavButton(item, 'span'));
   btn.appendChild(cover);
 
-  const customTitle=String(customDetailRecordForItem(item.id)?.displayTitle||'').trim();
+  const customTitle=String(customDetailRecordForItem(item)?.displayTitle||'').trim();
   const nameLabel=el('div','cc-name', customTitle||item.name.replace(/\.(pdf|cbz|cbr)$/i,''));
   btn.appendChild(nameLabel);
 
@@ -10936,7 +10975,7 @@ function buildCarouselCard(item, opts){
     try{
       let src, coverFile;
       if(isFolder){
-        const customCoverFile=getCustomDetailCoverFile(item.id);
+        const customCoverFile=getCustomDetailCoverFile(item);
         const override = getFolderCoverOverride(item.name);
         if(customCoverFile){
           coverFile=customCoverFile;
@@ -10977,20 +11016,20 @@ function buildCarouselCard(item, opts){
     const hasDetail=hasCustomDetailMetadata(item,pid);
     const isDetailedDescendant=isDescendantOfDetailedCollection(item,pid);
     if(hasOwnDetail || (hasDetail&&!isDetailedDescendant)){
-      void loadCustomDetailMetadata(item.id);
+      void loadCustomDetailMetadata(item);
       openCollectionDetails({...item,_parentId:pid},pid); return;
     }
     if(isFolder){
       if(opts.openDetailsOnFolder){
-        void loadCustomDetailMetadata(item.id);
+        void loadCustomDetailMetadata(item);
         openCollectionDetails({...item,_continueProgress:opts.continueProgress||item._continueProgress},item.parentId||item._parentId||null,false,true);
       }
       else{
         if(btn.classList.contains('loading')) return;
         btn.classList.add('loading');
         try{
-          await loadCustomDetailMetadata(item.id);
-          const loadedCustomTitle=String(customDetailRecordForItem(item.id)?.displayTitle||'').trim();
+          await loadCustomDetailMetadata(item);
+          const loadedCustomTitle=String(customDetailRecordForItem(item)?.displayTitle||'').trim();
           if(loadedCustomTitle) nameLabel.textContent=loadedCustomTitle;
           if(hasOwnCustomDetailMetadata(item)|| (hasCustomDetailMetadata(item,pid)&&!isDescendantOfDetailedCollection(item,pid))) openCollectionDetails({...item,_parentId:pid},pid);
           else enterFolder(item.id,item.name);
@@ -11002,8 +11041,8 @@ function buildCarouselCard(item, opts){
     btn.classList.add('loading');
     if(pid!=null){
       try{
-        await loadCustomDetailMetadata(item.id);
-        const loadedCustomTitle=String(customDetailRecordForItem(item.id)?.displayTitle||'').trim();
+        await loadCustomDetailMetadata(item);
+        const loadedCustomTitle=String(customDetailRecordForItem(item)?.displayTitle||'').trim();
         if(loadedCustomTitle) nameLabel.textContent=loadedCustomTitle;
         if(hasOwnCustomDetailMetadata(item)|| (hasCustomDetailMetadata(item,pid)&&!isDescendantOfDetailedCollection(item,pid))){ openCollectionDetails({...item,_parentId:pid},pid); return; }
         const {files} = await driveListFolder(pid);
@@ -11019,7 +11058,7 @@ function buildCarouselCard(item, opts){
       }
     } else {
       try{
-        await loadCustomDetailMetadata(item.id);
+        await loadCustomDetailMetadata(item);
         if(hasOwnCustomDetailMetadata(item)|| (hasCustomDetailMetadata(item,pid)&&!isDescendantOfDetailedCollection(item,pid))){ openCollectionDetails({...item,_parentId:pid},pid); return; }
         await openReader(item);
       }finally{ btn.classList.remove('loading'); }
@@ -11183,6 +11222,28 @@ function buildMixedCarouselCard(item){
   return card;
 }
 
+function homeDetailItemWithKnownAlias(item,parentId){
+  const listing=state.folderCache[String(parentId)];
+  if(!listing) return item;
+  const entries=[...(listing.folders||[]),...(listing.files||[])];
+  const sameName=entries.find(candidate=>String(candidate.id)===String(item.id)&&String(candidate.name||'')===String(item.name||''));
+  const idMatches=entries.filter(candidate=>String(candidate.id)===String(item.id));
+  const match=sameName||(idMatches.length===1?idMatches[0]:null);
+  return match?{...item,...match,_parentId:parentId,_collectionRoot:item._collectionRoot||{id:parentId,name:''}}:item;
+}
+async function hydrateHomeDetailAlias(item,parentId,expectedDetail){
+  try{
+    const listing=state.folderCache[String(parentId)]||await driveListFolder(parentId);
+    const entries=[...(listing.folders||[]),...(listing.files||[])];
+    const sameName=entries.find(candidate=>String(candidate.id)===String(item.id)&&String(candidate.name||'')===String(item.name||''));
+    const idMatches=entries.filter(candidate=>String(candidate.id)===String(item.id));
+    const match=sameName||(idMatches.length===1?idMatches[0]:null);
+    if(!match||!match._shortcutId||activeCollectionDetail!==expectedDetail) return;
+    expectedDetail.item={...expectedDetail.item,...match,_parentId:parentId,_collectionRoot:expectedDetail.item._collectionRoot||{id:parentId,name:''}};
+    void loadCustomDetailMetadata(expectedDetail.item);
+    renderCollectionDetails();
+  }catch(error){ logWarn('[PlanetaHQ] Não foi possível reconciliar o ID do atalho da ficha.',error); }
+}
 function buildHomeSection(titleHtml, items, builder, opts){
   opts = opts || {};
   items = Array.isArray(items) ? items : [];
@@ -11232,8 +11293,13 @@ function buildHomeSection(titleHtml, items, builder, opts){
   items.forEach(it=>{
     const card = builder ? builder(it) : buildMixedCarouselCard(it);
     if(!card) return;
-    if(isDemolidorSection) card.onclick=()=>{ void loadCustomDetailMetadata(it.id); openCollectionDetails(it,root?.id||DEMOLIDOR_COLLECTION_FOLDER_ID,false,true); };
-    if(opts.detailsRootFolderId) card.onclick=()=>{ void loadCustomDetailMetadata(it.id); openCollectionDetails(it,opts.detailsRootFolderId,false,true); };
+    if(isDemolidorSection) card.onclick=()=>{ void loadCustomDetailMetadata(it); openCollectionDetails(it,root?.id||DEMOLIDOR_COLLECTION_FOLDER_ID,false,true); };
+    if(opts.detailsRootFolderId) card.onclick=()=>{
+      const itemWithAlias=homeDetailItemWithKnownAlias(it,opts.detailsRootFolderId);
+      void loadCustomDetailMetadata(itemWithAlias);
+      openCollectionDetails(itemWithAlias,opts.detailsRootFolderId,false,true);
+      if(opts.resolveDetailsAliases&&!itemWithAlias._shortcutId&&!customDetailRecordForItem(itemWithAlias)) void hydrateHomeDetailAlias(itemWithAlias,opts.detailsRootFolderId,activeCollectionDetail);
+    };
     carousel.appendChild(card);
   });
   carousel.appendChild(el('div','carousel-end'));
@@ -11300,8 +11366,8 @@ const QUARTETO_CACHE_KEY = 'planetahq_quarteto_cache_v1';
 const DEADPOOL_CACHE_KEY = 'planetahq_deadpool_cache_v1';
 const WOLVERINE_CACHE_KEY = 'planetahq_wolverine_cache_v1';
 const MOTOQUEIRO_CACHE_KEY = 'planetahq_motoqueiro_cache_v1';
-const VINGADORES_DIRECT_CACHE_KEY = 'planetahq_vingadores_direct_cache_v2';
-const JUSTICEIRO_DIRECT_CACHE_KEY = 'planetahq_justiceiro_direct_cache_v2';
+const VINGADORES_DIRECT_CACHE_KEY = 'planetahq_vingadores_direct_cache_v3';
+const JUSTICEIRO_DIRECT_CACHE_KEY = 'planetahq_justiceiro_direct_cache_v3';
 const ARANHA_DIRECT_CACHE_KEY = 'planetahq_aranha_direct_cache_v1';
 const HOME_CACHE_MAX_AGE = 6*3600*1000;
 const DRIVE_CATALOG_REVALIDATE_INTERVAL = 60*1000;
@@ -12204,7 +12270,7 @@ function paintHomeSectionsNow(wrap, data){
   const resolvedContinueItems=(continueItems||[]).map(item=>{
     if(!item) return item;
     const folder=foldersById.get(String(item.id));
-    const customTitle=String(customDetailRecordForItem(item.id)?.displayTitle||'').trim();
+    const customTitle=String(customDetailRecordForItem(item)?.displayTitle||'').trim();
     const canonicalName=customTitle || (isHomeFolderItem(item)&&folder?folder.name:'') || item.name;
     const canonicalParentId=isHomeFolderItem(item)&&folder?(folder._parentId!=null?folder._parentId:folder.parentId):item.parentId;
     const nameChanged=canonicalName&&canonicalName!==item.name;
@@ -12291,7 +12357,7 @@ function paintHomeSectionsNow(wrap, data){
     `Coleção: <span class="section-logo-text hidden" data-logo-text="vingadores">Vingadores</span><img class="section-logo" data-logo="vingadores" src="${logoSrc('vingadores')}" alt="Vingadores" loading="eager" decoding="async">`,
     vingadoresFolders,
     null,
-    {kind:SECTION_KINDS.MISTA,folderNames:['colecao vingadores'],rootFolder:vingadoresRoot,detailsRootFolderId:vingadoresRoot?.id||HOME_COLLECTION_ROOTS.vingadores.id,collectionTitle:'Coleção: Vingadores'}
+    {kind:SECTION_KINDS.MISTA,folderNames:['colecao vingadores'],rootFolder:vingadoresRoot,detailsRootFolderId:vingadoresRoot?.id||HOME_COLLECTION_ROOTS.vingadores.id,resolveDetailsAliases:true,collectionTitle:'Coleção: Vingadores'}
   );
   if(secVingadores){ built['vingadores'] = secVingadores; wireHomeLogoFallback(secVingadores, 'vingadores'); }
 
@@ -12300,7 +12366,7 @@ function paintHomeSectionsNow(wrap, data){
     `Coleção: <span class="section-logo-text hidden" data-logo-text="justiceiro">Justiceiro</span><img class="section-logo" data-logo="justiceiro" src="${logoSrc('justiceiro')}" alt="Justiceiro" loading="eager" decoding="async">`,
     justiceiroFolders,
     null,
-    {kind:SECTION_KINDS.MISTA,folderNames:['colecao justiceiro'],rootFolder:justiceiroRoot,detailsRootFolderId:justiceiroRoot?.id||HOME_COLLECTION_ROOTS.justiceiro.id,collectionTitle:'Coleção: Justiceiro'}
+    {kind:SECTION_KINDS.MISTA,folderNames:['colecao justiceiro'],rootFolder:justiceiroRoot,detailsRootFolderId:justiceiroRoot?.id||HOME_COLLECTION_ROOTS.justiceiro.id,resolveDetailsAliases:true,collectionTitle:'Coleção: Justiceiro'}
   );
   if(secJusticeiro){ built['justiceiro'] = secJusticeiro; wireHomeLogoFallback(secJusticeiro, 'justiceiro'); }
 
@@ -12697,7 +12763,7 @@ function homeSectionsSignature({aranhaFolders, xmenFolders, mangaFolders, batman
       ? directHomeCollectionItemsByRoot.get(String(root&&root.id))
       : directHomeCollectionItemsByRoot && directHomeCollectionItemsByRoot[String(collection.id)];
     const items=Array.isArray(cached)?cached:(listing?[...(listing.folders||[]),...(listing.files||[])]:[]);
-    return root ? `${root.id}:${items.map(item=>item.id+':'+item.name).join(',')}` : '';
+    return root ? `${root.id}:${items.map(item=>item.id+':'+item.name+':'+(item._shortcutId||'')).join(',')}` : '';
   }).join(';');
   return [ids(aranhaFolders), ids(xmenFolders), ids(mangaFolders), ids(batmanFolders), ids(salvatFolders), ids(hulkFolders), ids(lanternaFolders), ids(ironmanFolders), ids(supermanFolders), ids(universoAbsolutoFolders), ids(mulherMaravilhaFolders), ids(doomsdayFolders), ids(thanosFolders), ids(darkseidFolders), ids(quartetoFolders), ids(deadpoolFolders), ids(wolverineFolders), ids(motoqueiroFolders), ids(vingadoresFolders), ids(justiceiroFolders), folderIds(allFolders), namedIds(allComics), directItems].join('|');
 }
