@@ -4664,8 +4664,26 @@ function buildFolderOfflineButton(folderMeta){
   return btn;
 }
 
+function isStructuralDetailCollectionRoot(rootId){
+  if(rootId==null) return false;
+  const id=String(rootId);
+  if(Object.prototype.hasOwnProperty.call(COLLECTION_DETAIL_ROOT_FALLBACKS,id)) return true;
+  const explicitRoots=[
+    DEMOLIDOR_COLLECTION_FOLDER_ID,BATMAN_COLLECTION_FOLDER_ID,HULK_COLLECTION_FOLDER_ID,
+    IRONMAN_COLLECTION_FOLDER_ID,MOTOQUEIRO_COLLECTION_FOLDER_ID,CAPITAO_AMERICA_COLLECTION_FOLDER_ID,
+    DEADPOOL_COLLECTION_FOLDER_ID,UNIVERSO_ABSOLUTO_COLLECTION_FOLDER_ID,HOMEM_ARANHA_COLLECTION_FOLDER_ID,
+    SUPERMAN_COLLECTION_FOLDER_ID,DARKSEID_COLLECTION_FOLDER_ID,THANOS_COLLECTION_FOLDER_ID
+  ];
+  if(explicitRoots.some(root=>root!=null&&String(root)===id)) return true;
+  const mixedHomeRoots=[HOMEM_ARANHA_COLLECTION_FOLDER_ID,'10_-0abpL9gAon4hvQWr69sFXA135bXRg','1XCQPJXU8byvpYrVAQU2yD-sZzcJzv8tC'];
+  return mixedHomeRoots.some(root=>root!=null&&String(root)===id);
+}
 function isDescendantOfDetailedCollection(item, parentId){
   if(!item) return false;
+  // Metadata própria do item tem precedência sobre qualquer ficha ancestral.
+  // Sem esta checagem, uma HQ/pasta com ficha dentro de uma coleção detalhada
+  // era aberta como conteúdo (leitor/pasta) antes que sua ficha pudesse abrir.
+  if(hasOwnCustomDetailMetadata(item)) return false;
   const ancestors=new Set();
   if(parentId!=null) ancestors.add(String(parentId));
   if(item._parentId!=null) ancestors.add(String(item._parentId));
@@ -4679,6 +4697,7 @@ function isDescendantOfDetailedCollection(item, parentId){
     (Array.isArray(state.path)?state.path:[]).forEach(part=>{if(part&&part.id!=null&&String(part.id)!==String(item.id))ancestors.add(String(part.id));});
   for(const id of ancestors){
     if(id===String(item.id)) continue;
+    if(String(item._collectionRoot?.id??'')===id || isStructuralDetailCollectionRoot(id)) continue;
     if(hasCustomDetailMetadata(id)) return true;
   }
   return false;
@@ -4708,17 +4727,25 @@ function renderFolderCard(f, opts){
   card.appendChild(el('div','label', f.name));
   card.onclick = async ()=>{
     const parentId=f._parentId!=null?f._parentId:(state.path[state.path.length-1]&&state.path[state.path.length-1].id);
+    const hasOwnDetail=hasOwnCustomDetailMetadata(f);
     const hasDetail=hasCustomDetailMetadata(f,parentId);
     const isDetailedDescendant=isDescendantOfDetailedCollection(f,parentId);
-    if(hasDetail&&!isDetailedDescendant){ void loadCustomDetailMetadata(f.id); openCollectionDetails({...f,_parentId:parentId},parentId); return; }
-    if(opts.onOpen){ void loadCustomDetailMetadata(f.id); await opts.onOpen(f); return; }
+    if(hasOwnDetail || (hasDetail&&!isDetailedDescendant)){ void loadCustomDetailMetadata(f.id); openCollectionDetails({...f,_parentId:parentId},parentId); return; }
+    if(opts.onOpen){
+      if(card.classList.contains('loading')) return;
+      card.classList.add('loading');
+      try{
+        await loadCustomDetailMetadata(f.id);
+        if(hasOwnCustomDetailMetadata(f)){ openCollectionDetails({...f,_parentId:parentId},parentId); return; }
+        await opts.onOpen(f); return;
+      }finally{ card.classList.remove('loading'); }
+    }
     if(opts.fromSearch){ openFolderFromSearch(f); return; }
-    if(isDetailedDescendant){ enterFolder(f.id,f.name); return; }
     if(card.classList.contains('loading')) return;
     card.classList.add('loading');
     try{
       await loadCustomDetailMetadata(f.id);
-      if(hasCustomDetailMetadata(f,parentId)&&!isDescendantOfDetailedCollection(f,parentId)){ openCollectionDetails({...f,_parentId:parentId},parentId); return; }
+      if(hasOwnCustomDetailMetadata(f)|| (hasCustomDetailMetadata(f,parentId)&&!isDescendantOfDetailedCollection(f,parentId))){ openCollectionDetails({...f,_parentId:parentId},parentId); return; }
       enterFolder(f.id,f.name);
     }finally{ card.classList.remove('loading'); }
   };
@@ -4738,19 +4765,25 @@ function renderComicCard(f, opts){
 
   card.onclick = async ()=>{
     const pid = f._parentId!=null ? f._parentId : (state.path[state.path.length-1] && state.path[state.path.length-1].id);
+    const hasOwnDetail=hasOwnCustomDetailMetadata(f);
     const hasDetail=hasCustomDetailMetadata(f,pid);
     const isDetailedDescendant=isDescendantOfDetailedCollection(f,pid);
     if(opts.onOpen){
-      if(hasDetail&&!isDetailedDescendant){ void loadCustomDetailMetadata(f.id); openCollectionDetails({...f,_parentId:pid},pid); return; }
-      void loadCustomDetailMetadata(f.id);
-      await opts.onOpen(f); return;
+      if(hasOwnDetail || (hasDetail&&!isDetailedDescendant)){ void loadCustomDetailMetadata(f.id); openCollectionDetails({...f,_parentId:pid},pid); return; }
+      if(card.classList.contains('loading')) return;
+      card.classList.add('loading');
+      try{
+        await loadCustomDetailMetadata(f.id);
+        if(hasOwnCustomDetailMetadata(f)){ openCollectionDetails({...f,_parentId:pid},pid); return; }
+        await opts.onOpen(f); return;
+      }finally{ card.classList.remove('loading'); }
     }
     if(card.classList.contains('loading')) return;
-    if(hasDetail&&!isDetailedDescendant){ void loadCustomDetailMetadata(f.id); openCollectionDetails({...f,_parentId:pid},pid); return; }
+    if(hasOwnDetail || (hasDetail&&!isDetailedDescendant)){ void loadCustomDetailMetadata(f.id); openCollectionDetails({...f,_parentId:pid},pid); return; }
     card.classList.add('loading');
     try{
-      if(!isDetailedDescendant) await loadCustomDetailMetadata(f.id);
-      if(hasCustomDetailMetadata(f,pid)&&!isDescendantOfDetailedCollection(f,pid)){ openCollectionDetails({...f,_parentId:pid},pid); return; }
+      await loadCustomDetailMetadata(f.id);
+      if(hasOwnCustomDetailMetadata(f)|| (hasCustomDetailMetadata(f,pid)&&!isDescendantOfDetailedCollection(f,pid))){ openCollectionDetails({...f,_parentId:pid},pid); return; }
       await openReader(f, undefined, pid);
     }finally{ card.classList.remove('loading'); }
   };
@@ -7366,10 +7399,9 @@ function currentCollectionChapterFrame(detail){
 function openCollectionDetails(item, parentId, nested, openAsDetail=false){
   if(!item) return;
   // Barreira central para os fluxos de biblioteca, busca e Capítulos:
-  // descendentes abrem seu conteúdo, sem criar outra ficha. `openAsDetail`
-  // fica reservado aos cards de Home configurados explicitamente para abrir
-  // a ficha do item; esse caminho não deve depender de metadata ainda remota.
-  if(!openAsDetail&&isDescendantOfDetailedCollection(item,parentId)){
+  // descendentes sem ficha própria abrem seu conteúdo. `openAsDetail` fica
+  // reservado aos cards de Home configurados explicitamente para abrir ficha.
+  if(!openAsDetail&&!hasOwnCustomDetailMetadata(item)&&isDescendantOfDetailedCollection(item,parentId)){
     collectionDetailStack.length=0;
     collectionDetailStackTabs.length=0;
     if(activeCollectionDetail) closeCollectionDetails(false);
@@ -7667,6 +7699,13 @@ function buildCollectionChapterCard(entry,index,parentId){
 }
 async function openCollectionChapter(entry,parentId){
   if(detailIsFolder(entry)){
+    if(hasOwnCustomDetailMetadata(entry)){
+      openCollectionDetails({...entry,_parentId:parentId},parentId,true); return;
+    }
+    await loadCustomDetailMetadata(entry.id);
+    if(hasOwnCustomDetailMetadata(entry)){
+      openCollectionDetails({...entry,_parentId:parentId},parentId,true); return;
+    }
     const detail=activeCollectionDetail;
     if(detail && collectionDetailTab==='chapters'){
       if(!Array.isArray(detail.chapterFolderStack)) detail.chapterFolderStack=[];
@@ -7679,7 +7718,7 @@ async function openCollectionChapter(entry,parentId){
     openCollectionDetails(entry,parentId,true); return;
   }
   await loadCustomDetailMetadata(entry.id);
-  if(hasCustomDetailMetadata(entry,parentId)&&!isDescendantOfDetailedCollection(entry,parentId)){ openCollectionDetails({...entry,_parentId:parentId},parentId,true); return; }
+  if(hasOwnCustomDetailMetadata(entry)|| (hasCustomDetailMetadata(entry,parentId)&&!isDescendantOfDetailedCollection(entry,parentId))){ openCollectionDetails({...entry,_parentId:parentId},parentId,true); return; }
   const frame=currentCollectionChapterFrame(activeCollectionDetail);
   state.currentListContext=(frame?.listing?.files)||(activeCollectionDetail?.listing?.files)||[entry]; state.currentListIsLocal=false;
   return openReader(entry,undefined,parentId);
@@ -7990,6 +8029,10 @@ function hasCustomDetailMetadata(itemOrId,parentId){
   ];
   if(parent!=null&&explicitDetailRoots.some(root=>String(root)===String(parent))) return true;
   return false;
+}
+function hasOwnCustomDetailMetadata(itemOrId){
+  const id=itemOrId&&typeof itemOrId==='object'?itemOrId.id:itemOrId;
+  return id!=null&&hasCustomDetailMetadata(String(id));
 }
 function customDetailCoverRecord(itemId){
   const record=customDetailRecordForItem(itemId);
@@ -10930,17 +10973,18 @@ function buildCarouselCard(item, opts){
 
   btn.onclick = async ()=>{
     const pid = item.parentId!=null ? item.parentId : (item._parentId!=null ? item._parentId : CONFIG.rootFolderId);
+    const hasOwnDetail=hasOwnCustomDetailMetadata(item);
     const hasDetail=hasCustomDetailMetadata(item,pid);
     const isDetailedDescendant=isDescendantOfDetailedCollection(item,pid);
-    if(hasDetail&&!isDetailedDescendant){
+    if(hasOwnDetail || (hasDetail&&!isDetailedDescendant)){
       void loadCustomDetailMetadata(item.id);
       openCollectionDetails({...item,_parentId:pid},pid); return;
     }
     if(isFolder){
       if(opts.openDetailsOnFolder){
         void loadCustomDetailMetadata(item.id);
-        openCollectionDetails({...item,_continueProgress:opts.continueProgress||item._continueProgress},item.parentId||item._parentId||null);
-      }else if(isDetailedDescendant){ enterFolder(item.id,item.name); }
+        openCollectionDetails({...item,_continueProgress:opts.continueProgress||item._continueProgress},item.parentId||item._parentId||null,false,true);
+      }
       else{
         if(btn.classList.contains('loading')) return;
         btn.classList.add('loading');
@@ -10948,7 +10992,7 @@ function buildCarouselCard(item, opts){
           await loadCustomDetailMetadata(item.id);
           const loadedCustomTitle=String(customDetailRecordForItem(item.id)?.displayTitle||'').trim();
           if(loadedCustomTitle) nameLabel.textContent=loadedCustomTitle;
-          if(hasCustomDetailMetadata(item,pid)&&!isDescendantOfDetailedCollection(item,pid)) openCollectionDetails({...item,_parentId:pid},pid);
+          if(hasOwnCustomDetailMetadata(item)|| (hasCustomDetailMetadata(item,pid)&&!isDescendantOfDetailedCollection(item,pid))) openCollectionDetails({...item,_parentId:pid},pid);
           else enterFolder(item.id,item.name);
         }finally{ btn.classList.remove('loading'); }
       }
@@ -10958,10 +11002,10 @@ function buildCarouselCard(item, opts){
     btn.classList.add('loading');
     if(pid!=null){
       try{
-        if(!isDetailedDescendant) await loadCustomDetailMetadata(item.id);
+        await loadCustomDetailMetadata(item.id);
         const loadedCustomTitle=String(customDetailRecordForItem(item.id)?.displayTitle||'').trim();
         if(loadedCustomTitle) nameLabel.textContent=loadedCustomTitle;
-        if(hasCustomDetailMetadata(item,pid)&&!isDescendantOfDetailedCollection(item,pid)){ openCollectionDetails({...item,_parentId:pid},pid); return; }
+        if(hasOwnCustomDetailMetadata(item)|| (hasCustomDetailMetadata(item,pid)&&!isDescendantOfDetailedCollection(item,pid))){ openCollectionDetails({...item,_parentId:pid},pid); return; }
         const {files} = await driveListFolder(pid);
         state.currentListContext = files;
         state.currentListIsLocal = false;
@@ -10975,8 +11019,8 @@ function buildCarouselCard(item, opts){
       }
     } else {
       try{
-        if(!isDetailedDescendant) await loadCustomDetailMetadata(item.id);
-        if(hasCustomDetailMetadata(item,pid)&&!isDescendantOfDetailedCollection(item,pid)){ openCollectionDetails({...item,_parentId:pid},pid); return; }
+        await loadCustomDetailMetadata(item.id);
+        if(hasOwnCustomDetailMetadata(item)|| (hasCustomDetailMetadata(item,pid)&&!isDescendantOfDetailedCollection(item,pid))){ openCollectionDetails({...item,_parentId:pid},pid); return; }
         await openReader(item);
       }finally{ btn.classList.remove('loading'); }
     }
