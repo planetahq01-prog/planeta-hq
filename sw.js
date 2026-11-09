@@ -627,8 +627,9 @@
 /* v182: ficha própria de pasta/HQ prevalece sobre ficha ancestral da coleção. */
 /* v183: Vingadores/Justiceiro sempre abrem ficha; Vingadores vem antes do Quarteto. */
 /* v184: fichas remotas carregadas por ID sob demanda; IDs de atalhos preservados e snapshots V/J renovados. */
+/* v185: solicita persistência do armazenamento offline e espera commit IndexedDB antes de confirmar o download. */
 // v156: o worker CBR extrai páginas vizinhas em uma única passagem do RAR.
-const CACHE_VERSION = 'v184';
+const CACHE_VERSION = 'v185';
 // Cache das capas: separado do da casca do app e mantido entre versões.
 const COVERS_CACHE = 'planeta-hq-covers-v1';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;

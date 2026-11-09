@@ -2084,6 +2084,40 @@ function syncLibraryFilterUI(){
 const DB_NAME = 'planetahq_db';
 const DB_VERSION = 10;
 let dbPromise = null;
+let offlineStoragePersistencePromise = null;
+let offlineStorageWarningShown = false;
+function requestPersistentOfflineStorage(){
+  if(!navigator.storage || typeof navigator.storage.persist !== 'function'){
+    if(!offlineStorageWarningShown){
+      offlineStorageWarningShown=true;
+      toast('Este navegador não permite confirmar a proteção dos downloads offline contra limpeza automática.');
+    }
+    return Promise.resolve(null);
+  }
+  if(offlineStoragePersistencePromise) return offlineStoragePersistencePromise;
+  try{
+    // Chamado diretamente pelo gesto de baixar. O navegador pode conceder ou
+    // negar a proteção; nunca bloqueamos nem cancelamos o download por isso.
+    offlineStoragePersistencePromise=Promise.resolve(navigator.storage.persist()).then(persisted=>{
+      if(!persisted && !offlineStorageWarningShown){
+        offlineStorageWarningShown=true;
+        toast('Aviso: o navegador não garantiu a preservação dos downloads offline. Uma limpeza do armazenamento do app pode removê-los.');
+      }
+      return !!persisted;
+    }).catch(error=>{
+      logWarn('[PlanetaHQ] Não foi possível solicitar armazenamento persistente para os downloads.',error);
+      if(!offlineStorageWarningShown){
+        offlineStorageWarningShown=true;
+        toast('Não foi possível confirmar a proteção dos downloads offline neste navegador.');
+      }
+      return false;
+    });
+  }catch(error){
+    logWarn('[PlanetaHQ] Storage API indisponível para persistência de downloads.',error);
+    offlineStoragePersistencePromise=Promise.resolve(false);
+  }
+  return offlineStoragePersistencePromise;
+}
 
 // Ponto único de gravação em 'downloads'. Sem teto: o que a pessoa baixa de
 // propósito (aba "Baixados") fica salvo integralmente, sem limite de
@@ -2212,9 +2246,11 @@ async function idbHasKey(store, key){
 async function idbSet(store, value){
   const db = await openDB();
   return new Promise((resolve,reject)=>{
-    const tx = db.transaction(store,'readwrite').objectStore(store).put(value);
-    tx.onsuccess = ()=>resolve(true);
-    tx.onerror = ()=>reject(tx.error);
+    const tx = db.transaction(store,'readwrite');
+    tx.objectStore(store).put(value);
+    tx.oncomplete = ()=>resolve(true);
+    tx.onerror = ()=>reject(tx.error||new Error('Falha ao gravar no armazenamento local.'));
+    tx.onabort = ()=>reject(tx.error||new Error('A gravação no armazenamento local foi cancelada.'));
   });
 }
 async function idbDelete(store, key){
@@ -2711,6 +2747,7 @@ async function runBackgroundDownload(entry){
   }
 }
 function startBackgroundDownload(fileMeta,pathStr){
+  void requestPersistentOfflineStorage();
   const existing=activeDownloads.get(fileMeta.id);
   if(existing){
     if(['paused','error'].includes(existing.status)) resumeBackgroundDownload(fileMeta.id);
@@ -7889,6 +7926,7 @@ function cancelFolderOfflineDownload(){
 }
 
 async function downloadFolderOffline(root){
+  void requestPersistentOfflineStorage();
   if(!root || !root.id) return;
   lastFolderDownloadRoot={id:root.id,name:root.name||'Coleção'};
   if(folderDownloadUI)folderDownloadUI.retry.classList.add('hidden');
@@ -9808,9 +9846,10 @@ function buildCornerDownloadButton(f){
     e.preventDefault();
     const currentTask=activeDownloads.get(f.id);
     if(currentTask){
-      if(['paused','error'].includes(currentTask.status)){resumeBackgroundDownload(f.id);toast('Download retomado na fila');}
+      if(['paused','error'].includes(currentTask.status)){void requestPersistentOfflineStorage();resumeBackgroundDownload(f.id);toast('Download retomado na fila');}
       return;
     }
+    if(!btn.classList.contains('done')) void requestPersistentOfflineStorage();
     if(await idbHasKey('downloads', f.id)){
       await removeOfflineDownloadedFile(f.id);
       showIdle();
@@ -10520,7 +10559,8 @@ async function updateDownloadButtonReader(){
 $('#btn-download-reader').onclick = async ()=>{
   const meta=state.reader.fileMeta;
   const task=activeDownloads.get(meta.id);
-  if(task){if(['paused','error'].includes(task.status)){resumeBackgroundDownload(meta.id);toast('Download retomado na fila');}return;}
+  if(task){if(['paused','error'].includes(task.status)){void requestPersistentOfflineStorage();resumeBackgroundDownload(meta.id);toast('Download retomado na fila');}return;}
+  if($('#btn-download-reader').innerHTML!==ICONS.check) void requestPersistentOfflineStorage();
   const existing=await idbGet('downloads',meta.id);
   if(existing){
     await removeOfflineDownloadedFile(meta.id);
