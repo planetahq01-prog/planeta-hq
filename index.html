@@ -494,6 +494,9 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 #home-sections{padding:8px 0 4px;}
 .home-section{margin-bottom:6px;}
 .home-section-empty{padding:4px 16px 16px;color:var(--text-muted);font-size:14px;}
+#home-sections .hqs-variadas-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px 9px;padding:0 14px 16px;}
+#home-sections .hqs-variadas-grid .carousel-card{flex:0 0 auto;width:100%;min-width:0;scroll-snap-align:none;}
+#home-sections .hqs-variadas-grid .cc-cover{border-radius:6px;}
 .home-section-title{
   font-family:var(--font-body);
   font-size:19px;font-weight:800;color:var(--paper);
@@ -11273,76 +11276,73 @@ function buildMixedCarouselCard(item){
   return card;
 }
 
-// Monta uma lista compacta do conteúdo que não é coberto por nenhuma vitrine:
-// mostra a pasta não classificada mais próxima, em vez de despejar todas as
-// HQs e subpastas que já podem ser abertas dentro dela. Se uma pasta ancestral
-// contém uma coleção que já tem carrossel, percorre somente esse ramo e deixa
-// visíveis os irmãos que não pertencem à coleção.
-function collectUnsectionedHomeItems(built, allFolders, allComics){
-  const folders=Array.isArray(allFolders)?allFolders:[];
-  const comics=Array.isArray(allComics)?allComics:[];
-  const foldersById=new Map(),foldersByParent=new Map(),comicsByParent=new Map();
-  const addByParent=(map,parent,item)=>{
-    if(parent==null)return;
-    const key=String(parent);
-    if(!map.has(key))map.set(key,[]);
-    map.get(key).push(item);
-  };
-  folders.forEach(item=>{
-    if(item?.id!=null)foldersById.set(String(item.id),item);
-    addByParent(foldersByParent,item?._parentId??item?.parentId,item);
-  });
-  comics.forEach(item=>addByParent(comicsByParent,item?._parentId??item?.parentId,item));
-
-  const coveredFolderIds=new Set(),coveredComicIds=new Set();
-  Object.values(built||{}).forEach(section=>{
-    if(!section)return;
-    [section.dataset?.collectionRootId,section.dataset?.detailsRootFolderId].forEach(id=>{
-      if(id)coveredFolderIds.add(String(id));
-    });
-    section.querySelectorAll?.('.carousel-card[data-id]').forEach(card=>{
-      const id=String(card.dataset.id||'');
-      if(!id)return;
-      if(foldersById.has(id))coveredFolderIds.add(id);
-      else coveredComicIds.add(id);
-    });
-  });
-
-  const coveredAncestorIds=new Set();
-  coveredFolderIds.forEach(id=>{
-    let current=foldersById.get(id),parent=current&&(current._parentId??current.parentId);
-    const seen=new Set([id]);
-    while(parent!=null&&String(parent)!==String(CONFIG.rootFolderId)&&!seen.has(String(parent))){
-      const key=String(parent);
-      seen.add(key);coveredAncestorIds.add(key);
-      current=foldersById.get(key);
-      parent=current&&(current._parentId??current.parentId);
-    }
-  });
-
-  const result=[],visitedParents=new Set();
-  function visit(parentId,path){
-    if(parentId==null)return;
-    const parentKey=String(parentId);
-    if(visitedParents.has(parentKey))return;
-    visitedParents.add(parentKey);
-    (foldersByParent.get(parentKey)||[]).forEach(folder=>{
-      const id=String(folder.id);
-      if(coveredFolderIds.has(id))return;
-      if(coveredAncestorIds.has(id)){
-        visit(folder.id,[...path,folder.name]);
-        return;
-      }
-      result.push({...folder,_parentId:folder._parentId??folder.parentId??parentId,_variedPath:path.slice()});
-    });
-    (comicsByParent.get(parentKey)||[]).forEach(comic=>{
-      if(coveredComicIds.has(String(comic.id)))return;
-      result.push({...comic,_parentId:comic._parentId??comic.parentId??parentId,_variedPath:path.slice()});
-    });
+function resolveHQsVariadasFolder(allFolders){
+  const normalize=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('pt-BR').replace(/\s+/g,' ').trim();
+  const matches=(Array.isArray(allFolders)?allFolders:[]).filter(folder=>normalize(folder?.name)==='hqs variadas');
+  if(!matches.length)return null;
+  const rootLevel=matches.find(folder=>String(folder?._parentId??folder?.parentId??'')===String(CONFIG.rootFolderId));
+  return rootLevel||matches[0];
+}
+function hqsVariadasDirectItems(root,allFolders,allComics){
+  if(!root?.id)return [];
+  const rootId=String(root.id);
+  const cached=state.folderCache&&state.folderCache[rootId];
+  let items=cached
+    ? [...(cached.folders||[]),...(cached.files||[])]
+    : [...(Array.isArray(allFolders)?allFolders:[]).filter(item=>String(item?._parentId??item?.parentId??'')===rootId),...(Array.isArray(allComics)?allComics:[]).filter(item=>String(item?._parentId??item?.parentId??'')===rootId)];
+  const seen=new Set();
+  items=items.filter(item=>{
+    const key=String(item?._shortcutId||item?.id||'');
+    if(!key||seen.has(key))return false;
+    seen.add(key);return true;
+  }).map(item=>({...item,_parentId:root.id,_collectionRoot:{id:root.id,name:root.name||'HQs Variadas'}}));
+  items.sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'pt-BR',{numeric:true}));
+  return items;
+}
+function buildHQsVariadasSection(root,items){
+  const section=el('div','home-section');
+  section.dataset.sectionKind='variadas-grid';
+  if(root?.id)section.dataset.collectionRootId=String(root.id);
+  const title=el('div','home-section-title');
+  title.appendChild(elHtml('div','section-heading-content','HQs Variadas'));
+  section.appendChild(title);
+  if(!root){
+    section.appendChild(el('div','home-section-empty','Não encontrei a pasta “HQs Variadas” no Google Drive.'));
+    return section;
   }
-  visit(CONFIG.rootFolderId,[]);
-  result.sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'pt-BR',{numeric:true}));
-  return result;
+  if(!items.length){
+    section.appendChild(el('div','home-section-empty','A pasta “HQs Variadas” está vazia.'));
+    return section;
+  }
+  const grid=el('div','hqs-variadas-grid');
+  items.forEach(item=>{
+    const card=buildMixedCarouselCard(item);
+    if(card)grid.appendChild(card);
+  });
+  section.appendChild(grid);
+  return section;
+}
+async function refreshHQsVariadasFromDrive(wrap,token,data,root){
+  if(!root?.id||navigator.onLine===false)return;
+  const rootId=String(root.id);
+  try{
+    // Revalida só a pasta especial em segundo plano: a grade em cache já
+    // está visível e não depende da varredura completa da biblioteca.
+    folderCacheFetchedAt[rootId]=0;
+    await driveListFolder(root.id);
+    if(token!==homeToken||!wrap?.isConnected)return;
+    const currentData=lastHomeSectionsData||data;
+    const currentRoot=resolveHQsVariadasFolder(currentData?.allFolders)||root;
+    if(String(currentRoot.id)!==rootId)return;
+    const section=buildHQsVariadasSection(currentRoot,hqsVariadasDirectItems(currentRoot,currentData?.allFolders,currentData?.allComics));
+    section.dataset.homeKey='variadas';
+    const existing=wrap.querySelector('.home-section[data-home-key="variadas"]');
+    if(existing)existing.replaceWith(section);
+    else wrap.appendChild(section);
+    lastPaintedHomeSignature=homeSectionsSignature(currentData);
+  }catch(error){
+    logWarn('[PlanetaHQ] Não foi possível atualizar a pasta HQs Variadas em segundo plano.',rootId,error);
+  }
 }
 
 function homeDetailItemWithKnownAlias(item,parentId){
@@ -12831,15 +12831,12 @@ function paintHomeSectionsNow(wrap, data){
 
   // Coloca na tela só as seções da estante atual (SHELVES[currentShelf]),
   // na ordem definida ali — "continuar" vem sempre primeiro, quando existe.
-  // Uma seção que exista mas não pertença a nenhuma estante simplesmente
-  // não aparece em lugar nenhum (é o comportamento certo aqui: as estantes
-  // são vitrines curadas, não "mostra tudo que tiver").
+  // Seções fora da estante atual continuam ocultas; HQs Variadas é a exceção
+  // fixa, adicionada ao final somente com os filhos da pasta homônima no Drive.
   const shelfDef = SHELVES[currentShelf] || SHELVES.marvel;
-  const variedItems=collectUnsectionedHomeItems(built,allFolders,allComics);
-  const secVariadas=buildHomeSection('HQs Variadas',variedItems,buildMixedCarouselCard,{
-    kind:'variadas',hideViewAll:true,keepEmpty:true,
-    emptyMessage:'Pastas e HQs fora das seções aparecerão aqui.'
-  });
+  const variadasRoot=resolveHQsVariadasFolder(allFolders);
+  const variedItems=hqsVariadasDirectItems(variadasRoot,allFolders,allComics);
+  const secVariadas=buildHQsVariadasSection(variadasRoot,variedItems);
   if(secVariadas)built['variadas']=secVariadas;
   const orderedKeys = ['destaques','lancamentos','continuar', ...shelfDef.sections, 'variadas'];
   orderedKeys.forEach(k=>{
@@ -12890,7 +12887,7 @@ function homeSectionsSignature({aranhaFolders, xmenFolders, mangaFolders, batman
   const folderIds = arr => (arr||[]).map(x=>x.id+':'+x.name+':'+(x._parentId!=null?x._parentId:(x.parentId||''))).join(',');
   // IDs de caminho/raiz entram na assinatura para a tela velha em cache ser
   // substituída assim que a varredura atualizada descobrir as raízes físicas.
-  const namedIds = arr => (arr||[]).map(x=>x.id+':'+x.name+':'+(x._mangaFolderId||'')+':'+((x._pathIds||[]).join('/'))+':'+((x._collectionRoot&&x._collectionRoot.id)||'')).join(',');
+  const namedIds = arr => (arr||[]).map(x=>x.id+':'+x.name+':'+(x._parentId??x.parentId??'')+':'+(x._mangaFolderId||'')+':'+((x._pathIds||[]).join('/'))+':'+((x._collectionRoot&&x._collectionRoot.id)||'')).join(',');
   const directItems=Object.values(HOME_COLLECTION_ROOTS).map(collection=>{
     const root=resolveKnownHomeCollectionRoot(allFolders,allComics,collection);
     const listing=root && state.folderCache && state.folderCache[String(root.id)];
@@ -12900,7 +12897,10 @@ function homeSectionsSignature({aranhaFolders, xmenFolders, mangaFolders, batman
     const items=Array.isArray(cached)?cached:(listing?[...(listing.folders||[]),...(listing.files||[])]:[]);
     return root ? `${root.id}:${items.map(item=>item.id+':'+item.name+':'+(item._shortcutId||'')).join(',')}` : '';
   }).join(';');
-  return [ids(aranhaFolders), ids(xmenFolders), ids(mangaFolders), ids(batmanFolders), ids(salvatFolders), ids(hulkFolders), ids(lanternaFolders), ids(ironmanFolders), ids(supermanFolders), ids(universoAbsolutoFolders), ids(mulherMaravilhaFolders), ids(doomsdayFolders), ids(thanosFolders), ids(darkseidFolders), ids(quartetoFolders), ids(deadpoolFolders), ids(wolverineFolders), ids(motoqueiroFolders), ids(vingadoresFolders), ids(justiceiroFolders), folderIds(allFolders), namedIds(allComics), directItems].join('|');
+  const variedRoot=resolveHQsVariadasFolder(allFolders);
+  const variedItems=hqsVariadasDirectItems(variedRoot,allFolders,allComics);
+  const variedSignature=variedRoot?`${variedRoot.id}:${variedItems.map(item=>item.id+':'+item.name+':'+(item._shortcutId||'')).join(',')}`:'sem-pasta-hqs-variadas';
+  return [ids(aranhaFolders), ids(xmenFolders), ids(mangaFolders), ids(batmanFolders), ids(salvatFolders), ids(hulkFolders), ids(lanternaFolders), ids(ironmanFolders), ids(supermanFolders), ids(universoAbsolutoFolders), ids(mulherMaravilhaFolders), ids(doomsdayFolders), ids(thanosFolders), ids(darkseidFolders), ids(quartetoFolders), ids(deadpoolFolders), ids(wolverineFolders), ids(motoqueiroFolders), ids(vingadoresFolders), ids(justiceiroFolders), folderIds(allFolders), namedIds(allComics), directItems, variedSignature].join('|');
 }
 let lastPaintedHomeSignature = null;
 
@@ -12947,6 +12947,7 @@ async function renderHomeSections(forceRefresh, onProgress, {invalidatePersisten
 
   const myToken = ++homeToken;
   const isStale = t=>t!==homeToken;
+  let variedRefreshRootId=null;
 
   // 1) Se já temos algo em cache (mesmo desatualizado, mesmo durante um
   // "Atualizar" forçado), pinta na hora — a sensação é de carregamento
@@ -13019,6 +13020,11 @@ async function renderHomeSections(forceRefresh, onProgress, {invalidatePersisten
     if(!wrap.querySelector('.home-section') || fastSignature !== lastPaintedHomeSignature){
       paintHomeSections(wrap, fastData);
       lastPaintedHomeSignature = fastSignature;
+    }
+    const fastVariedRoot=resolveHQsVariadasFolder(fastData.allFolders);
+    if(fastVariedRoot&&navigator.onLine!==false){
+      variedRefreshRootId=String(fastVariedRoot.id);
+      void refreshHQsVariadasFromDrive(wrap,myToken,fastData,fastVariedRoot);
     }
     const missingDirect=[];
     if(!cachedAranhaDirect || !Array.isArray(cachedAranhaDirect.items) || !cachedAranhaDirect.items.length) missingDirect.push('aranha');
@@ -13132,6 +13138,11 @@ async function renderHomeSections(forceRefresh, onProgress, {invalidatePersisten
   }
   paintHomeSections(wrap, freshData);
   lastPaintedHomeSignature = freshSignature;
+  const freshVariedRoot=resolveHQsVariadasFolder(freshData.allFolders);
+  if(freshVariedRoot&&navigator.onLine!==false&&String(freshVariedRoot.id)!==variedRefreshRootId){
+    variedRefreshRootId=String(freshVariedRoot.id);
+    void refreshHQsVariadasFromDrive(wrap,myToken,freshData,freshVariedRoot);
+  }
 }
 
 /* ---------------------------------------------------------------------
