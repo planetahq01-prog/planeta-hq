@@ -493,6 +493,7 @@ button:focus-visible, input:focus-visible{outline:2px solid var(--accent);outlin
 /* ============ SEÇÕES EM CARROSSEL (estilo Tomato) ============ */
 #home-sections{padding:8px 0 4px;}
 .home-section{margin-bottom:6px;}
+.home-section-empty{padding:4px 16px 16px;color:var(--text-muted);font-size:14px;}
 .home-section-title{
   font-family:var(--font-body);
   font-size:19px;font-weight:800;color:var(--paper);
@@ -2018,11 +2019,11 @@ window.addEventListener('popstate', ()=>{
       consumed = true;
     }
   } else if(state.currentTab === 'library' && state.path.length > 1){
-    goToBreadcrumbIndex(state.path.length - 2);
+    void goToBreadcrumbIndex(state.path.length - 2,{suppressLoading:true});
     consumed = true;
   } else if(state.currentTab === 'downloads' && downloadsFolderViewId){
     downloadsFolderViewId=null;
-    renderDownloads();
+    renderDownloads({suppressLoading:true});
     consumed = true;
   } else if(state.currentTab !== 'library'){
     const libTab = document.querySelector('.tab[data-tab="library"]');
@@ -4485,7 +4486,7 @@ async function enterFolder(id, name, {reset=false, skipHome=false, collectionRoo
   // o app. Não empilha ao (re)carregar a raiz da biblioteca.
   if(id !== CONFIG.rootFolderId) navPushLevel();
 }
-async function goToBreadcrumbIndex(idx){
+async function goToBreadcrumbIndex(idx,{suppressLoading=false}={}){
   const goingHome = idx === 0;
   if(goingHome){
     state.collectionMode=false;
@@ -4522,7 +4523,7 @@ async function goToBreadcrumbIndex(idx){
   // De propósito NÃO rola pro topo aqui: só ENTRAR numa coleção abre lá do
   // início (ver enterFolder). Voltar pra uma coleção anterior não mexe na
   // rolagem.
-  await renderLibrary(state.path[state.path.length-1].id, false);
+  await renderLibrary(state.path[state.path.length-1].id, false, {suppressLoading});
 }
 async function goBack(){
   if(state.path.length<=1) return;
@@ -4555,6 +4556,50 @@ async function applyLibraryFilterSort(files){
   else if(sort==='recent') list.sort((a,b)=> new Date(b.modifiedTime||0) - new Date(a.modifiedTime||0));
   else if(sort==='size') list.sort((a,b)=> (Number(b.size)||0) - (Number(a.size)||0));
   return list;
+}
+
+async function paintLibraryListing(folderId, listing){
+  const grid=$('#grid-library');
+  const folders=Array.isArray(listing?.folders)?listing.folders:[];
+  const allFiles=Array.isArray(listing?.files)?listing.files:[];
+  $('#filter-bar').classList.toggle('hidden', allFiles.length===0);
+  const files=await applyLibraryFilterSort(allFiles);
+  state.currentListContext=files;
+  state.currentListIsLocal=false;
+  releaseCoverObservers(grid);
+  grid.innerHTML='';
+  if(folders.length===0 && allFiles.length===0){
+    const actions=[];
+    if(state.path.length>1)actions.push({label:'Voltar à coleção anterior',primary:true,onClick:goBack});
+    renderAppState(grid,{icon:ICONS.folder,title:'Esta coleção está vazia',message:'Não há HQs ou coleções neste local.',actions});
+    return;
+  }
+  if(folders.length===0 && files.length===0){
+    renderAppState(grid,{icon:ICONS.search,title:'Nenhuma HQ com este filtro',message:'A coleção tem conteúdo, mas nada corresponde ao filtro selecionado.',actions:[{label:'Limpar filtros',primary:true,onClick:()=>{state.libraryFilter='all';persistLibraryPrefs();syncLibraryFilterUI();reRenderCurrentLibraryView();}}]});
+    return;
+  }
+  const isDemolidorRoot=folderId===DEMOLIDOR_COLLECTION_FOLDER_ID;
+  const isDetailsCollectionRoot=isDemolidorRoot || folderId===BATMAN_COLLECTION_FOLDER_ID || folderId===HULK_COLLECTION_FOLDER_ID || folderId===IRONMAN_COLLECTION_FOLDER_ID || folderId===MOTOQUEIRO_COLLECTION_FOLDER_ID || folderId===CAPITAO_AMERICA_COLLECTION_FOLDER_ID || folderId===DEADPOOL_COLLECTION_FOLDER_ID || folderId===UNIVERSO_ABSOLUTO_COLLECTION_FOLDER_ID || folderId===HOMEM_ARANHA_COLLECTION_FOLDER_ID || folderId===SUPERMAN_COLLECTION_FOLDER_ID || folderId===DARKSEID_COLLECTION_FOLDER_ID || folderId===THANOS_COLLECTION_FOLDER_ID;
+  const folderCards=folders.map(f=>{
+    const card=renderFolderCard(f,isDetailsCollectionRoot?{onOpen:item=>openCollectionDetails(item,folderId)}:undefined);
+    if(getCachedFolderOk(f.id)===false)return null;
+    grid.appendChild(card);
+    return {card,f};
+  }).filter(Boolean);
+  const comicCards=files.map(f=>{
+    const card=renderComicCard(f,isDetailsCollectionRoot?{onOpen:item=>openCollectionDetails(item,folderId)}:undefined);
+    grid.appendChild(card);
+    return {card,f};
+  });
+  folderCards.forEach(({card,f})=>{
+    if(card.classList.contains('cover-immediate'))return;
+    lazyLoadCover(card,()=>attachFolderCoverAsync(card,f));
+  });
+  comicCards.forEach(({card,f})=>lazyLoadCover(card,()=>attachCoverAsync(card,f)));
+  runLimited(folderCards.filter(({f})=>getCachedFolderOk(f.id)===undefined),2,async({card,f})=>{
+    const ok=await folderHasQualifyingContent(f.id);
+    if(!ok&&card.isConnected){releaseCoverObservers(card);card.remove();}
+  });
 }
 
 function openCollectionFolder(root,{fromChapters=false}={}){
@@ -4608,7 +4653,7 @@ function renderVirtualCollection(){
   folders.forEach(({card,item})=>{ if(!card.classList.contains('cover-immediate')) lazyLoadCover(card,()=>attachFolderCoverAsync(card,item)); });
   comics.forEach(({card,item})=>lazyLoadCover(card,()=>attachCoverAsync(card,item)));
 }
-async function renderLibrary(folderId, forceRefresh){
+async function renderLibrary(folderId, forceRefresh,{suppressLoading=false}={}){
   cancelStaleCoverWork();
   $('#home-sections').classList.add('hidden');
   const grid = $('#grid-library');
@@ -4635,54 +4680,20 @@ async function renderLibrary(folderId, forceRefresh){
     state.currentListIsLocal = false;
     return;
   }
-  renderAppState(grid,{type:'loading',icon:'<div class="spinner" aria-hidden="true"></div>',title:'Carregando coleção',message:'Buscando HQs e coleções…'});
+  const cachedListing=!forceRefresh?(state.folderCache[String(folderId)]||state.folderCache[folderId]):null;
+  let cachedRendered=false;
+  if(!suppressLoading)renderAppState(grid,{type:'loading',icon:'<div class="spinner" aria-hidden="true"></div>',title:'Carregando coleção',message:'Buscando HQs e coleções…'});
   try{
     if(forceRefresh) delete state.folderCache[folderId];
-    const {folders, files: allFiles} = await driveListFolder(folderId);
-    $('#filter-bar').classList.toggle('hidden', allFiles.length===0);
-    const files = await applyLibraryFilterSort(allFiles);
-    state.currentListContext = files;
-    state.currentListIsLocal = false;
-    grid.innerHTML = '';
-    if(folders.length===0 && allFiles.length===0){
-      const actions=[];
-      if(state.path.length>1)actions.push({label:'Voltar à coleção anterior',primary:true,onClick:goBack});
-      renderAppState(grid,{icon:ICONS.folder,title:'Esta coleção está vazia',message:'Não há HQs ou coleções neste local.',actions});
-      return;
+    if(suppressLoading&&cachedListing){
+      await paintLibraryListing(folderId,cachedListing);
+      cachedRendered=true;
     }
-    if(folders.length===0 && files.length===0){
-      renderAppState(grid,{icon:ICONS.search,title:'Nenhuma HQ com este filtro',message:'A coleção tem conteúdo, mas nada corresponde ao filtro selecionado.',actions:[{label:'Limpar filtros',primary:true,onClick:()=>{state.libraryFilter='all';persistLibraryPrefs();syncLibraryFilterUI();reRenderCurrentLibraryView();}}]});
-      return;
-    }
-    const isDemolidorRoot = folderId === DEMOLIDOR_COLLECTION_FOLDER_ID;
-    const isDetailsCollectionRoot = isDemolidorRoot || folderId === BATMAN_COLLECTION_FOLDER_ID || folderId === HULK_COLLECTION_FOLDER_ID || folderId === IRONMAN_COLLECTION_FOLDER_ID || folderId === MOTOQUEIRO_COLLECTION_FOLDER_ID || folderId === CAPITAO_AMERICA_COLLECTION_FOLDER_ID || folderId === DEADPOOL_COLLECTION_FOLDER_ID || folderId === UNIVERSO_ABSOLUTO_COLLECTION_FOLDER_ID || folderId === HOMEM_ARANHA_COLLECTION_FOLDER_ID || folderId === SUPERMAN_COLLECTION_FOLDER_ID || folderId === DARKSEID_COLLECTION_FOLDER_ID || folderId === THANOS_COLLECTION_FOLDER_ID;
-    const folderCards = folders.map(f=>{
-      const card = renderFolderCard(f, isDetailsCollectionRoot ? {onOpen:item=>openCollectionDetails(item, folderId)} : undefined);
-      // Se já sabemos (cache) que está vazia, nem chega a aparecer.
-      if(getCachedFolderOk(f.id) === false) return null;
-      grid.appendChild(card);
-      return {card, f};
-    }).filter(Boolean);
-    const comicCards = files.map(f=>{
-      const card = renderComicCard(f, isDetailsCollectionRoot ? {onOpen:item=>openCollectionDetails(item, folderId)} : undefined);
-      grid.appendChild(card);
-      return {card, f};
-    });
-    folderCards.forEach(({card, f})=>{
-      // Já nasceu com a capa pintada (ver renderFolderCard) — não precisa
-      // entrar na fila nem no IntersectionObserver pra isso.
-      if(card.classList.contains('cover-immediate')) return;
-      lazyLoadCover(card, ()=>attachFolderCoverAsync(card, f));
-    });
-    comicCards.forEach(({card, f})=>lazyLoadCover(card, ()=>attachCoverAsync(card, f)));
-    // Confere em segundo plano (baixa prioridade, sem travar nada) quais
-    // coleções recém-vistas realmente têm conteúdo, e some com as vazias.
-    runLimited(folderCards.filter(({f})=>getCachedFolderOk(f.id)===undefined), 2, async ({card, f})=>{
-      const ok = await folderHasQualifyingContent(f.id);
-      if(!ok && card.isConnected){ releaseCoverObservers(card); card.remove(); }
-    });
+    const listing=await driveListFolder(folderId);
+    if(listing!==cachedListing)await paintLibraryListing(folderId,listing);
   }catch(err){
     logWarn('[PlanetaHQ] falha ao carregar uma coleção da biblioteca',folderId,err);
+    if(suppressLoading&&cachedRendered)return;
     const actions=[{label:'Tentar novamente',primary:true,onClick:()=>renderLibrary(folderId,true)}];
     if(navigator.onLine===false)actions.push({label:'Ler conteúdo baixado',onClick:openOfflineDownloads});
     if(state.path.length>1)actions.push({label:'Voltar',onClick:goBack});
@@ -9429,9 +9440,9 @@ async function removeOfflineFolderGroup(groupId){
   await renderDownloads();
   toast(`Coleção removida e ${removedCount} HQ(s) apagadas dos downloads offline. Os originais no Drive permanecem intactos.`);
 }
-async function renderDownloads(){
+async function renderDownloads({suppressLoading=false}={}){
   const grid=$('#grid-downloads');
-  if(grid&&!grid.children.length)renderAppState(grid,{type:'loading',icon:'<div class="spinner" aria-hidden="true"></div>',title:'Abrindo seus downloads',message:'Lendo o conteúdo salvo neste aparelho…'});
+  if(grid&&!suppressLoading&&!grid.children.length)renderAppState(grid,{type:'loading',icon:'<div class="spinner" aria-hidden="true"></div>',title:'Abrindo seus downloads',message:'Lendo o conteúdo salvo neste aparelho…'});
   let items,loadedGroups;
   try{[items,loadedGroups]=await Promise.all([idbAllDownloadMetadata(),idbAll('downloadFolders')]);}
   catch(err){
@@ -11262,6 +11273,78 @@ function buildMixedCarouselCard(item){
   return card;
 }
 
+// Monta uma lista compacta do conteúdo que não é coberto por nenhuma vitrine:
+// mostra a pasta não classificada mais próxima, em vez de despejar todas as
+// HQs e subpastas que já podem ser abertas dentro dela. Se uma pasta ancestral
+// contém uma coleção que já tem carrossel, percorre somente esse ramo e deixa
+// visíveis os irmãos que não pertencem à coleção.
+function collectUnsectionedHomeItems(built, allFolders, allComics){
+  const folders=Array.isArray(allFolders)?allFolders:[];
+  const comics=Array.isArray(allComics)?allComics:[];
+  const foldersById=new Map(),foldersByParent=new Map(),comicsByParent=new Map();
+  const addByParent=(map,parent,item)=>{
+    if(parent==null)return;
+    const key=String(parent);
+    if(!map.has(key))map.set(key,[]);
+    map.get(key).push(item);
+  };
+  folders.forEach(item=>{
+    if(item?.id!=null)foldersById.set(String(item.id),item);
+    addByParent(foldersByParent,item?._parentId??item?.parentId,item);
+  });
+  comics.forEach(item=>addByParent(comicsByParent,item?._parentId??item?.parentId,item));
+
+  const coveredFolderIds=new Set(),coveredComicIds=new Set();
+  Object.values(built||{}).forEach(section=>{
+    if(!section)return;
+    [section.dataset?.collectionRootId,section.dataset?.detailsRootFolderId].forEach(id=>{
+      if(id)coveredFolderIds.add(String(id));
+    });
+    section.querySelectorAll?.('.carousel-card[data-id]').forEach(card=>{
+      const id=String(card.dataset.id||'');
+      if(!id)return;
+      if(foldersById.has(id))coveredFolderIds.add(id);
+      else coveredComicIds.add(id);
+    });
+  });
+
+  const coveredAncestorIds=new Set();
+  coveredFolderIds.forEach(id=>{
+    let current=foldersById.get(id),parent=current&&(current._parentId??current.parentId);
+    const seen=new Set([id]);
+    while(parent!=null&&String(parent)!==String(CONFIG.rootFolderId)&&!seen.has(String(parent))){
+      const key=String(parent);
+      seen.add(key);coveredAncestorIds.add(key);
+      current=foldersById.get(key);
+      parent=current&&(current._parentId??current.parentId);
+    }
+  });
+
+  const result=[],visitedParents=new Set();
+  function visit(parentId,path){
+    if(parentId==null)return;
+    const parentKey=String(parentId);
+    if(visitedParents.has(parentKey))return;
+    visitedParents.add(parentKey);
+    (foldersByParent.get(parentKey)||[]).forEach(folder=>{
+      const id=String(folder.id);
+      if(coveredFolderIds.has(id))return;
+      if(coveredAncestorIds.has(id)){
+        visit(folder.id,[...path,folder.name]);
+        return;
+      }
+      result.push({...folder,_parentId:folder._parentId??folder.parentId??parentId,_variedPath:path.slice()});
+    });
+    (comicsByParent.get(parentKey)||[]).forEach(comic=>{
+      if(coveredComicIds.has(String(comic.id)))return;
+      result.push({...comic,_parentId:comic._parentId??comic.parentId??parentId,_variedPath:path.slice()});
+    });
+  }
+  visit(CONFIG.rootFolderId,[]);
+  result.sort((a,b)=>String(a.name||'').localeCompare(String(b.name||''),'pt-BR',{numeric:true}));
+  return result;
+}
+
 function homeDetailItemWithKnownAlias(item,parentId){
   const listing=state.folderCache[String(parentId)];
   if(!listing) return item;
@@ -11302,12 +11385,14 @@ function buildHomeSection(titleHtml, items, builder, opts){
       builder = buildMixedCarouselCard;
     }
   }
-  if(!items.length) return null;
+  if(!items.length && !opts.keepEmpty) return null;
   const section = el('div','home-section');
   section.dataset.sectionKind = opts.kind || SECTION_KINDS.MISTA;
   const title = el('div','home-section-title');
   title.appendChild(elHtml('div','section-heading-content',titleHtml));
   root = opts.rootFolder || (items.find(it=>it && it._collectionRoot) || {})._collectionRoot || root || null;
+  if(root?.id) section.dataset.collectionRootId=String(root.id);
+  if(opts.detailsRootFolderId!=null) section.dataset.detailsRootFolderId=String(opts.detailsRootFolderId);
   const browseItems = opts.browseItems || items;
   if(!opts.hideViewAll && (root || opts.browseLoader || browseItems.length)){
     const viewAll=el('button','section-view-all','Ver tudo');
@@ -11329,6 +11414,10 @@ function buildHomeSection(titleHtml, items, builder, opts){
     title.appendChild(viewAll);
   }
   section.appendChild(title);
+  if(!items.length){
+    section.appendChild(el('div','home-section-empty',opts.emptyMessage||'Não há conteúdo fora das seções no momento.'));
+    return section;
+  }
   const carousel = el('div','carousel');
   items.forEach(it=>{
     const card = builder ? builder(it) : buildMixedCarouselCard(it);
@@ -12746,7 +12835,13 @@ function paintHomeSectionsNow(wrap, data){
   // não aparece em lugar nenhum (é o comportamento certo aqui: as estantes
   // são vitrines curadas, não "mostra tudo que tiver").
   const shelfDef = SHELVES[currentShelf] || SHELVES.marvel;
-  const orderedKeys = ['destaques','lancamentos','continuar', ...shelfDef.sections];
+  const variedItems=collectUnsectionedHomeItems(built,allFolders,allComics);
+  const secVariadas=buildHomeSection('HQs Variadas',variedItems,buildMixedCarouselCard,{
+    kind:'variadas',hideViewAll:true,keepEmpty:true,
+    emptyMessage:'Pastas e HQs fora das seções aparecerão aqui.'
+  });
+  if(secVariadas)built['variadas']=secVariadas;
+  const orderedKeys = ['destaques','lancamentos','continuar', ...shelfDef.sections, 'variadas'];
   orderedKeys.forEach(k=>{
     if(built[k]){
       built[k].dataset.homeKey = k; // âncora estável pra restaurar a posição da Home (ver captureHomeScroll)
