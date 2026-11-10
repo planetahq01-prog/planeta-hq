@@ -2022,11 +2022,11 @@ window.addEventListener('popstate', ()=>{
       consumed = true;
     }
   } else if(state.currentTab === 'library' && state.path.length > 1){
-    void goToBreadcrumbIndex(state.path.length - 2,{suppressLoading:true});
+    void goToBreadcrumbIndex(state.path.length - 2);
     consumed = true;
   } else if(state.currentTab === 'downloads' && downloadsFolderViewId){
     downloadsFolderViewId=null;
-    renderDownloads({suppressLoading:true});
+    renderDownloads();
     consumed = true;
   } else if(state.currentTab !== 'library'){
     const libTab = document.querySelector('.tab[data-tab="library"]');
@@ -4489,7 +4489,7 @@ async function enterFolder(id, name, {reset=false, skipHome=false, collectionRoo
   // o app. Não empilha ao (re)carregar a raiz da biblioteca.
   if(id !== CONFIG.rootFolderId) navPushLevel();
 }
-async function goToBreadcrumbIndex(idx,{suppressLoading=false}={}){
+async function goToBreadcrumbIndex(idx){
   const goingHome = idx === 0;
   if(goingHome){
     state.collectionMode=false;
@@ -4526,7 +4526,7 @@ async function goToBreadcrumbIndex(idx,{suppressLoading=false}={}){
   // De propósito NÃO rola pro topo aqui: só ENTRAR numa coleção abre lá do
   // início (ver enterFolder). Voltar pra uma coleção anterior não mexe na
   // rolagem.
-  await renderLibrary(state.path[state.path.length-1].id, false, {suppressLoading});
+  await renderLibrary(state.path[state.path.length-1].id, false);
 }
 async function goBack(){
   if(state.path.length<=1) return;
@@ -4656,7 +4656,7 @@ function renderVirtualCollection(){
   folders.forEach(({card,item})=>{ if(!card.classList.contains('cover-immediate')) lazyLoadCover(card,()=>attachFolderCoverAsync(card,item)); });
   comics.forEach(({card,item})=>lazyLoadCover(card,()=>attachCoverAsync(card,item)));
 }
-async function renderLibrary(folderId, forceRefresh,{suppressLoading=false}={}){
+async function renderLibrary(folderId, forceRefresh){
   cancelStaleCoverWork();
   $('#home-sections').classList.add('hidden');
   const grid = $('#grid-library');
@@ -4683,20 +4683,13 @@ async function renderLibrary(folderId, forceRefresh,{suppressLoading=false}={}){
     state.currentListIsLocal = false;
     return;
   }
-  const cachedListing=!forceRefresh?(state.folderCache[String(folderId)]||state.folderCache[folderId]):null;
-  let cachedRendered=false;
-  if(!suppressLoading)renderAppState(grid,{type:'loading',icon:'<div class="spinner" aria-hidden="true"></div>',title:'Carregando coleção',message:'Buscando HQs e coleções…'});
+  renderAppState(grid,{type:'loading',icon:'<div class="spinner" aria-hidden="true"></div>',title:'Carregando coleção',message:'Buscando HQs e coleções…'});
   try{
     if(forceRefresh) delete state.folderCache[folderId];
-    if(suppressLoading&&cachedListing){
-      await paintLibraryListing(folderId,cachedListing);
-      cachedRendered=true;
-    }
     const listing=await driveListFolder(folderId);
-    if(listing!==cachedListing)await paintLibraryListing(folderId,listing);
+    await paintLibraryListing(folderId,listing);
   }catch(err){
     logWarn('[PlanetaHQ] falha ao carregar uma coleção da biblioteca',folderId,err);
-    if(suppressLoading&&cachedRendered)return;
     const actions=[{label:'Tentar novamente',primary:true,onClick:()=>renderLibrary(folderId,true)}];
     if(navigator.onLine===false)actions.push({label:'Ler conteúdo baixado',onClick:openOfflineDownloads});
     if(state.path.length>1)actions.push({label:'Voltar',onClick:goBack});
@@ -9443,9 +9436,9 @@ async function removeOfflineFolderGroup(groupId){
   await renderDownloads();
   toast(`Coleção removida e ${removedCount} HQ(s) apagadas dos downloads offline. Os originais no Drive permanecem intactos.`);
 }
-async function renderDownloads({suppressLoading=false}={}){
+async function renderDownloads(){
   const grid=$('#grid-downloads');
-  if(grid&&!suppressLoading&&!grid.children.length)renderAppState(grid,{type:'loading',icon:'<div class="spinner" aria-hidden="true"></div>',title:'Abrindo seus downloads',message:'Lendo o conteúdo salvo neste aparelho…'});
+  if(grid&&!grid.children.length)renderAppState(grid,{type:'loading',icon:'<div class="spinner" aria-hidden="true"></div>',title:'Abrindo seus downloads',message:'Lendo o conteúdo salvo neste aparelho…'});
   let items,loadedGroups;
   try{[items,loadedGroups]=await Promise.all([idbAllDownloadMetadata(),idbAll('downloadFolders')]);}
   catch(err){
@@ -11330,7 +11323,7 @@ async function refreshHQsVariadasFromDrive(wrap,token,data,root){
     // está visível e não depende da varredura completa da biblioteca.
     folderCacheFetchedAt[rootId]=0;
     await driveListFolder(root.id);
-    if(token!==homeToken||!wrap?.isConnected)return;
+    if(token!==homeToken||!wrap?.isConnected||currentShelf!=='variados')return;
     const currentData=lastHomeSectionsData||data;
     const currentRoot=resolveHQsVariadasFolder(currentData?.allFolders)||root;
     if(String(currentRoot.id)!==rootId)return;
@@ -11882,54 +11875,26 @@ function comicsDirectlyInNamedFolder(allComics, targetNames){
 }
 
 function buildLaunchItems(allFolders, allComics){
-  // Lançamentos consideram somente o primeiro nível da biblioteca. Assim,
-  // uma coleção recém-criada aparece como um único item, sem duplicar cada HQ
-  // que está dentro dela. HQs só aparecem quando estão diretamente na raiz.
-  const rootId = CONFIG.rootFolderId;
-  const folders = (allFolders||[]).filter(f=>
-    (f._parentId!=null ? f._parentId : f.parentId) === rootId
+  // Mostra os itens colocados diretamente na raiz configurada do app.
+  // O conteúdo dentro de uma pasta não altera a posição dessa pasta aqui.
+  const rootId = String(CONFIG.rootFolderId||'');
+  const parentIdOf = item=>String(item?._parentId ?? item?.parentId ?? '');
+  const items = [...(allFolders||[]), ...(allComics||[])].filter(item=>
+    parentIdOf(item)===rootId
   );
-  const comics = (allComics||[]).filter(f=>
-    (f._parentId!=null ? f._parentId : f.parentId) === rootId
+  const timestampOf = value=>{
+    if(typeof value==='number' && Number.isFinite(value)) return value < 1e12 ? value*1000 : value;
+    const parsed=Date.parse(String(value||''));
+    return Number.isFinite(parsed)?parsed:0;
+  };
+  const itemTimestamp = item=>Math.max(
+    timestampOf(item?.createdTime),
+    timestampOf(item?.modifiedTime)
   );
-  const items = folders.concat(comics);
-  const now = Date.now();
-  const recentCutoff = now - 30*24*60*60*1000;
-  // O Drive normalmente entrega createdTime como ISO. O fallback para
-  // modifiedTime cobre itens legados, atalhos e caches antigos que não
-  // tinham a data de criação persistida.
-  const itemTimestamp = item=>{
-    const raw = item && (item.createdTime || item.modifiedTime);
-    if(typeof raw === 'number' && Number.isFinite(raw)) return raw < 1e12 ? raw*1000 : raw;
-    const parsed = Date.parse(String(raw || ''));
-    return Number.isFinite(parsed) ? parsed : 0;
-  };
-  // Uma coleção deve subir quando ela própria OU qualquer HQ/pasta dentro
-  // dela for criada/alterada. Isso mantém Lançamentos realmente dinâmico:
-  // a coleção nova mais recente fica em primeiro, sem nome fixo/pin permanente.
-  const latestByRootId = new Map(folders.map(folder=>[folder.id,itemTimestamp(folder)]));
-  const rootFolderIdOf = item=>{
-    const parentId = item && (item._parentId!=null ? item._parentId : item.parentId);
-    if(folders.some(folder=>folder.id===parentId)) return parentId;
-    const pathIds = Array.isArray(item&&item._pathIds) ? item._pathIds : [];
-    return pathIds.length ? pathIds[0] : null;
-  };
-  (allFolders||[]).concat(allComics||[]).forEach(item=>{
-    const rootFolderId = rootFolderIdOf(item);
-    if(!rootFolderId || !latestByRootId.has(rootFolderId)) return;
-    latestByRootId.set(rootFolderId, Math.max(latestByRootId.get(rootFolderId), itemTimestamp(item)));
-  });
-  const launchTimestamp = item=>{
-    const rootFolderId = folders.some(folder=>folder.id===item.id) ? item.id : null;
-    return rootFolderId ? (latestByRootId.get(rootFolderId)||0) : itemTimestamp(item);
-  };
-  return items
-    .filter(item=>launchTimestamp(item) >= recentCutoff)
-    .sort((a,b)=>{
-      const dateDiff = launchTimestamp(b) - launchTimestamp(a);
-      return dateDiff || String(a.name||'').localeCompare(String(b.name||''),'pt-BR',{numeric:true});
-    })
-    .slice(0, 10);
+  return items.sort((a,b)=>{
+    const dateDiff=itemTimestamp(b)-itemTimestamp(a);
+    return dateDiff || String(a.name||'').localeCompare(String(b.name||''),'pt-BR',{numeric:true});
+  }).slice(0,20);
 }
 
 function comicsInsideMangaFolder(allComics, mangaFolderId, rootLabel){
@@ -12263,6 +12228,11 @@ const SHELVES = {
     logo: DC_LOGO,
     sections: ['batman','superman','flash','lanterna','mulhermaravilha','universoAbsoluto','classicoLiga','sagaLiga','darkseid'],
     pathKeywords: ['batman','superman','colecao flash','lanterna verde','mulher maravilha','wonder woman','universo absoluto','liga da justica da america','a saga da liga da justica','colecao darkseid']
+  },
+  variados: {
+    key: 'variados', label: 'Variados',
+    sections: [],
+    pathKeywords: []
   }
 };
 // Ordem das seções da estante padrão "Marvel + DC" (definida pelo usuário —
@@ -12424,7 +12394,7 @@ function paintHomeSectionsNow(wrap, data){
 
   const continueForShelf=filterContinueItemsForShelf(resolvedContinueItems,currentShelf);
   const launchItems = buildLaunchItems(allFolders, allComics);
-  const secLancamentos = buildHomeSection('Lançamentos', launchItems, (it)=>{
+  const secLancamentos = buildHomeSection('Adicionados Recentemente', launchItems, (it)=>{
     const isFolder = isHomeFolderItem(it);
     const card = buildCarouselCard(it, {
       isFolder, dlCorner:!isFolder, size:it.size, persistOffline:true
@@ -12432,7 +12402,7 @@ function paintHomeSectionsNow(wrap, data){
     if(!isFolder) card.dataset.cardKind='edicao';
     return card;
   }, {
-    kind: 'lancamentos', collectionTitle:'Lançamentos', browseItems:launchItems, hideViewAll:true
+    kind: 'lancamentos', collectionTitle:'Adicionados Recentemente', browseItems:launchItems, hideViewAll:true
   });
   if(secLancamentos){ built['lancamentos'] = secLancamentos; }
 
@@ -12831,14 +12801,18 @@ function paintHomeSectionsNow(wrap, data){
 
   // Coloca na tela só as seções da estante atual (SHELVES[currentShelf]),
   // na ordem definida ali — "continuar" vem sempre primeiro, quando existe.
-  // Seções fora da estante atual continuam ocultas; HQs Variadas é a exceção
-  // fixa, adicionada ao final somente com os filhos da pasta homônima no Drive.
+  // HQs Variadas só é construída e exibida na estante Variados; nas demais
+  // estantes, a ordem continua contendo exclusivamente suas seções próprias.
   const shelfDef = SHELVES[currentShelf] || SHELVES.marvel;
-  const variadasRoot=resolveHQsVariadasFolder(allFolders);
-  const variedItems=hqsVariadasDirectItems(variadasRoot,allFolders,allComics);
-  const secVariadas=buildHQsVariadasSection(variadasRoot,variedItems);
-  if(secVariadas)built['variadas']=secVariadas;
-  const orderedKeys = ['destaques','lancamentos','continuar', ...shelfDef.sections, 'variadas'];
+  if(currentShelf==='variados'){
+    const variadasRoot=resolveHQsVariadasFolder(allFolders);
+    const variedItems=hqsVariadasDirectItems(variadasRoot,allFolders,allComics);
+    const secVariadas=buildHQsVariadasSection(variadasRoot,variedItems);
+    if(secVariadas)built['variadas']=secVariadas;
+  }
+  const orderedKeys = currentShelf==='variados'
+    ? ['variadas']
+    : ['destaques','lancamentos','continuar', ...shelfDef.sections];
   orderedKeys.forEach(k=>{
     if(built[k]){
       built[k].dataset.homeKey = k; // âncora estável pra restaurar a posição da Home (ver captureHomeScroll)
@@ -13482,7 +13456,7 @@ async function openDevicesModal(){
    11) Inicialização
    --------------------------------------------------------------------- */
 /* ---------------------------------------------------------------------
-   10.5) Estantes (Marvel / DC)
+   10.5) Estantes (Marvel / DC / Variados)
    --------------------------------------------------------------------- */
 // Logo(s) de uma estante: uma imagem só, várias lado a lado (estante padrão
 // Marvel + DC) ou, sem imagem nenhuma, o nome em texto.

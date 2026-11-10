@@ -628,10 +628,13 @@
 /* v183: Vingadores/Justiceiro sempre abrem ficha; Vingadores vem antes do Quarteto. */
 /* v184: fichas remotas carregadas por ID sob demanda; IDs de atalhos preservados e snapshots V/J renovados. */
 /* v185: solicita persistência do armazenamento offline e espera commit IndexedDB antes de confirmar o download. */
-/* v186: preserva cache da pasta ao voltar, evitando estado transitório de loading. */
+/* v186: ajuste experimental de loading ao voltar; removido no v189. */
 /* v187: HQs Variadas vira grade de três colunas, alimentada pela pasta homônima no Drive. */
+/* v188: cria estante Variados e oculta HQs Variadas nas demais estantes. */
+/* v189: renomeia Lançamentos para Adicionados Recentemente e mostra até 20 itens. */
+/* v190: Adicionados Recentemente usa somente itens diretos da raiz do app. */
 // v156: o worker CBR extrai páginas vizinhas em uma única passagem do RAR.
-const CACHE_VERSION = 'v187';
+const CACHE_VERSION = 'v190';
 // Cache das capas: separado do da casca do app e mantido entre versões.
 const COVERS_CACHE = 'planeta-hq-covers-v1';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
