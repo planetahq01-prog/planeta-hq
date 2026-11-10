@@ -634,7 +634,8 @@
 /* v189: renomeia Lançamentos para Adicionados Recentemente e mostra até 20 itens. */
 /* v190: Adicionados Recentemente usa somente itens diretos da raiz do app. */
 // v156: o worker CBR extrai páginas vizinhas em uma única passagem do RAR.
-const CACHE_VERSION = 'v190';
+/* v192: linhas longas de publicação nas fichas quebram em várias linhas. */
+const CACHE_VERSION = 'v192';
 // Cache das capas: separado do da casca do app e mantido entre versões.
 const COVERS_CACHE = 'planeta-hq-covers-v1';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
