@@ -3211,19 +3211,14 @@ async function openComicCBR(blob,signal){
   return openComicCBRBlobUrl(sourceUrl,blob.size,signal);
 }
 
-// PDFs baixados usam Blob local; PDFs online usam a URL do proxy, permitindo
-// que o pdf.js peça somente as faixas necessárias em vez de transferir 1 GB.
-async function loadPdfFromSource(source, signal){
-  const isBlob=source instanceof Blob;
-  if(!isBlob && (typeof source!=='string'||!/^https?:\/\//i.test(source)))throw new TypeError('A origem do PDF é inválida.');
+// PDFs são abertos a partir do Blob completo, como no fluxo anterior.
+async function loadPdfFromBlob(source, signal){
+  if(!(source instanceof Blob))throw new TypeError('O PDF precisa ser baixado integralmente antes de ser aberto.');
   if(signal&&signal.aborted)throw new DOMException('Carregamento do PDF cancelado.','AbortError');
-  const objectUrl=isBlob?URL.createObjectURL(source):null;
+  const objectUrl=URL.createObjectURL(source);
   const loadingTask=pdfjsLib.getDocument({
-    url:objectUrl||source,
+    url:objectUrl,
     rangeChunkSize:1<<18,
-    disableAutoFetch:!isBlob,
-    disableStream:!isBlob,
-    disableRange:false,
     cMapUrl: new URL('./vendor/pdfjs/cmaps/', document.baseURI).href,
     cMapPacked: true
   });
@@ -3236,7 +3231,7 @@ async function loadPdfFromSource(source, signal){
     return pdf;
   }catch(error){
     loadingTask.destroy().catch(()=>{});
-    if(objectUrl)URL.revokeObjectURL(objectUrl);
+    URL.revokeObjectURL(objectUrl);
     throw error;
   }finally{
     if(signal)signal.removeEventListener('abort',onAbort);
@@ -3244,9 +3239,9 @@ async function loadPdfFromSource(source, signal){
 }
 
 async function openComicPDF(source, onProgress, knownSize, fileId, signal){
-  if(!(source instanceof Blob) && typeof source!=='string')throw new TypeError('A origem da HQ PDF é inválida.');
+  if(!(source instanceof Blob))throw new TypeError('A HQ PDF precisa estar totalmente baixada antes de ser aberta.');
   pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-  const pdf = await loadPdfFromSource(source, signal);
+  const pdf = await loadPdfFromBlob(source, signal);
   // PDFs podem conter páginas enormes (especialmente HQs escaneadas). Uma
   // página renderizada em canvas RGBA consome largura × altura × 4 bytes,
   // além das cópias temporárias do PDF.js e do JPEG. Portanto, o tamanho do
@@ -9980,8 +9975,13 @@ async function openReader(fileMeta, forceLocal, parentId){
       };
       const ext=fileMeta._ext||guessExt(fileMeta)||fileMeta.name.split('.').pop().toLowerCase();
       if(ext==='pdf'){
-        status.innerHTML = '<div class="spinner"></div><div>Abrindo PDF por partes...</div>';
-        doc=await openComicPDF(driveMediaUrl(fileMeta.id),null,Number(fileMeta.size)||0,fileMeta.id,myAbort.signal);
+        status.innerHTML = '<div class="spinner"></div><div>Baixando HQ... <span id="reader-status-pct">0%</span></div>';
+        let blob = await driveFetchBlob(fileMeta.id, p=>{ setPct(Math.round(p*100)); }, Number(fileMeta.size)||0, myAbort.signal);
+        if(myAbort.signal.aborted)throw new DOMException('Download cancelado.','AbortError');
+        status.innerHTML = '<div class="spinner"></div><div>Preparando a HQ baixada...</div>';
+        const opening = openComicFromBlob(fileMeta, blob, myAbort.signal);
+        blob = null;
+        doc = await opening;
       }else{
         // Arquivos de arquivo (CBZ/CBR) são baixados em blocos retomáveis; uma
         // falha repete apenas o bloco atual, sem perder bytes nem progresso.
