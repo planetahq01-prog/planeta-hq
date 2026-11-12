@@ -2581,71 +2581,89 @@ function driveMediaUrl(fileId){
 
 async function driveFetchBlob(fileId, onProgress, knownSize, signal){
   const url = driveMediaUrl(fileId);
-  const MAX_ATTEMPTS = 4;
+  const RANGE_BYTES = 8 * 1024 * 1024;
+  const MAX_ATTEMPTS_PER_RANGE = 5;
   const RETRYABLE_HTTP = new Set([408,425,429,500,502,503,504]);
-  let lastError = null;
-  for(let attempt=1; attempt<=MAX_ATTEMPTS; attempt++){
+  const parts = [];
+  let total = Number(knownSize) || 0;
+  let downloaded = 0;
+  let start = 0;
+
+  while(!total || start < total){
     if(signal && signal.aborted) throw new DOMException('Download cancelado.','AbortError');
-    const ctrl = new AbortController();
-    const onExternalAbort = ()=>ctrl.abort();
-    if(signal) signal.addEventListener('abort',onExternalAbort,{once:true});
-    try{
-      let res;
-      try{
-        res = await withStallTimeout(fetch(url,{cache:'no-store',signal:ctrl.signal}),20000,'Tempo esgotado ao contatar o proxy.');
-      }catch(networkErr){
-        if(signal && signal.aborted) throw new DOMException('Download cancelado.','AbortError');
-        throw Object.assign(new Error(networkErr.message||'Falha de rede ao contatar o proxy.'),{retryableProxy:true,networkFailure:true,cause:networkErr});
-      }
-      if(!res.ok){
-        const httpError = new Error(`Não foi possível baixar o arquivo (${res.status}).`);
-        httpError.retryableProxy = RETRYABLE_HTTP.has(res.status);
-        httpError.proxyStatus = res.status;
-        if(httpError.retryableProxy && attempt<MAX_ATTEMPTS){
-          try{await res.body?.cancel();}catch(e){}
-          throw httpError;
-        }
-        throw httpError;
-      }
-      const total = Number(res.headers.get('Content-Length')) || Number(knownSize) || 0;
-      const reader = res.body.getReader();
-      // Cada bloco vira uma parte Blob imutável. O Worker do CBR lê pequenas
-      // fatias sob demanda; não se monta um Uint8Array do tamanho do arquivo.
-      const chunks = [];
-      let received = 0;
-      let lastPct = -1;
-      while(true){
-        if(signal && signal.aborted) throw new DOMException('Download cancelado.','AbortError');
-        const {done,value} = await withStallTimeout(reader.read(),30000,'A conexão travou no meio do download.');
-        if(done) break;
-        chunks.push(new Blob([value]));
-        received += value.length;
-        if(onProgress && total){
-          const pct=Math.min(99,Math.max(1,Math.round((received/total)*100)));
-          if(pct!==lastPct){lastPct=pct;onProgress(pct/100);}
-        }
-      }
-      // Não anuncie 100% aqui: ainda falta compor o Blob (e, no download,
-      // gravá-lo no IndexedDB). O chamador confirma conclusão só após isso.
-      return new Blob(chunks);
-    }catch(err){
-      ctrl.abort();
+    const requestedEnd = total ? Math.min(total - 1, start + RANGE_BYTES - 1) : start + RANGE_BYTES - 1;
+    let lastError = null;
+    let rangeBytes = null;
+    let rangeEnd = -1;
+
+    for(let attempt=1; attempt<=MAX_ATTEMPTS_PER_RANGE; attempt++){
       if(signal && signal.aborted) throw new DOMException('Download cancelado.','AbortError');
-      lastError=err;
-      const retryable=err && (err.retryableProxy || err.networkFailure || !err.proxyStatus);
-      if(!retryable || attempt>=MAX_ATTEMPTS){
-        if(err && err.proxyStatus) throw err;
-        if(navigator.onLine===false) throw new Error('Sem conexão com a internet. Esta HQ não está salva localmente neste aparelho; abra a aba Baixados para conferir os arquivos offline.');
-        if(CONFIG.proxyUrl) throw new Error(`Falha de rede ao acessar o proxy após ${attempt} tentativa(s). Isso não confirma que a URL esteja errada; tente novamente. ${err && err.message || ''}`);
-        throw new Error(`Falha de rede/CORS após ${attempt} tentativa(s). Verifique sua conexão. ${err && err.message || ''}`);
+      const ctrl = new AbortController();
+      const onExternalAbort = ()=>ctrl.abort();
+      if(signal) signal.addEventListener('abort',onExternalAbort,{once:true});
+      const timer=setTimeout(()=>ctrl.abort(),90000);
+      let response=null;
+      try{
+        response=await fetch(url,{
+          headers:{Range:`bytes=${start}-${requestedEnd}`},
+          cache:'no-store',
+          signal:ctrl.signal
+        });
+        if(!response.ok){
+          const error=new Error(`O proxy respondeu HTTP ${response.status} ao buscar a faixa ${start}-${requestedEnd}.`);
+          error.proxyStatus=response.status;
+          error.retryableProxy=RETRYABLE_HTTP.has(response.status);
+          try{await response.body?.cancel();}catch(_){}
+          throw error;
+        }
+        if(response.status!==206){
+          try{await response.body?.cancel();}catch(_){}
+          throw new Error('O proxy não respeitou a solicitação de faixa (HTTP 206); o download seguro foi interrompido.');
+        }
+        const contentRange=/^bytes\s+(\d+)-(\d+)\/(\d+)$/i.exec(response.headers.get('Content-Range')||'');
+        if(!contentRange) throw new Error('O proxy não informou um Content-Range válido para a HQ.');
+        const actualStart=Number(contentRange[1]);
+        const actualEnd=Number(contentRange[2]);
+        const actualTotal=Number(contentRange[3]);
+        if(actualStart!==start || actualEnd<actualStart || actualEnd>requestedEnd || actualTotal<=actualEnd || (total && total!==actualTotal)){
+          try{await response.body?.cancel();}catch(_){}
+          throw new Error('A faixa recebida não corresponde à posição solicitada no arquivo.');
+        }
+        const bytes=new Uint8Array(await response.arrayBuffer());
+        if(bytes.byteLength!==actualEnd-actualStart+1) throw new Error('A faixa da HQ chegou incompleta; ela será solicitada novamente.');
+        rangeBytes=bytes;
+        rangeEnd=actualEnd;
+        total=actualTotal;
+        break;
+      }catch(error){
+        lastError=error;
+        if(signal && signal.aborted) throw new DOMException('Download cancelado.','AbortError');
+        if(error?.proxyStatus && !error.retryableProxy) break;
+        if(attempt<MAX_ATTEMPTS_PER_RANGE){
+          try{await response?.body?.cancel();}catch(_){}
+          await sleep(Math.min(12000,750*(2**(attempt-1))+Math.random()*500));
+        }
+      }finally{
+        clearTimeout(timer);
+        ctrl.abort();
+        if(signal) signal.removeEventListener('abort',onExternalAbort);
       }
-      if(onProgress) onProgress(0);
-      await sleep(Math.min(4000,500*(2**(attempt-1))+Math.random()*400));
-    }finally{
-      if(signal) signal.removeEventListener('abort',onExternalAbort);
+    }
+
+    if(!rangeBytes){
+      if(navigator.onLine===false) throw new Error('Sem conexão com a internet. A transferência será mantida para retomada quando a conexão voltar.');
+      throw new Error(`Não foi possível baixar a faixa ${start}-${requestedEnd} após ${MAX_ATTEMPTS_PER_RANGE} tentativas. ${lastError?.message||''}`);
+    }
+    parts.push(new Blob([rangeBytes]));
+    downloaded+=rangeBytes.byteLength;
+    start=rangeEnd+1;
+    if(onProgress && total){
+      const pct=Math.min(99,Math.max(1,Math.round(downloaded/total*100)));
+      onProgress(pct/100);
     }
   }
-  throw lastError || new Error('Não foi possível baixar a HQ. Tente novamente.');
+  if(downloaded!==total) throw new Error(`Download incompleto: foram recebidos ${downloaded} de ${total} bytes.`);
+  return new Blob(parts);
 }
 /* ---------------------------------------------------------------------
    3.4) Downloads em segundo plano — independentes da tela atual
@@ -3193,15 +3211,19 @@ async function openComicCBR(blob,signal){
   return openComicCBRBlobUrl(sourceUrl,blob.size,signal);
 }
 
-// PDFs chegam como Blob completo pelo fluxo normal de download. O pdf.js
-// abre uma URL Blob local para não materializar o arquivo inteiro em RAM.
-async function loadPdfFromBlob(source, signal){
-  if(!(source instanceof Blob))throw new TypeError('O PDF precisa ser baixado integralmente antes de ser aberto.');
+// PDFs baixados usam Blob local; PDFs online usam a URL do proxy, permitindo
+// que o pdf.js peça somente as faixas necessárias em vez de transferir 1 GB.
+async function loadPdfFromSource(source, signal){
+  const isBlob=source instanceof Blob;
+  if(!isBlob && (typeof source!=='string'||!/^https?:\/\//i.test(source)))throw new TypeError('A origem do PDF é inválida.');
   if(signal&&signal.aborted)throw new DOMException('Carregamento do PDF cancelado.','AbortError');
-  const objectUrl=URL.createObjectURL(source);
+  const objectUrl=isBlob?URL.createObjectURL(source):null;
   const loadingTask=pdfjsLib.getDocument({
-    url:objectUrl,
+    url:objectUrl||source,
     rangeChunkSize:1<<18,
+    disableAutoFetch:!isBlob,
+    disableStream:!isBlob,
+    disableRange:false,
     cMapUrl: new URL('./vendor/pdfjs/cmaps/', document.baseURI).href,
     cMapPacked: true
   });
@@ -3214,7 +3236,7 @@ async function loadPdfFromBlob(source, signal){
     return pdf;
   }catch(error){
     loadingTask.destroy().catch(()=>{});
-    URL.revokeObjectURL(objectUrl);
+    if(objectUrl)URL.revokeObjectURL(objectUrl);
     throw error;
   }finally{
     if(signal)signal.removeEventListener('abort',onAbort);
@@ -3222,9 +3244,9 @@ async function loadPdfFromBlob(source, signal){
 }
 
 async function openComicPDF(source, onProgress, knownSize, fileId, signal){
-  if(!(source instanceof Blob))throw new TypeError('A HQ PDF precisa estar totalmente baixada antes de ser aberta.');
+  if(!(source instanceof Blob) && typeof source!=='string')throw new TypeError('A origem da HQ PDF é inválida.');
   pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
-  const pdf = await loadPdfFromBlob(source, signal);
+  const pdf = await loadPdfFromSource(source, signal);
   // PDFs podem conter páginas enormes (especialmente HQs escaneadas). Uma
   // página renderizada em canvas RGBA consome largura × altura × 4 bytes,
   // além das cópias temporárias do PDF.js e do JPEG. Portanto, o tamanho do
@@ -9956,17 +9978,21 @@ async function openReader(fileMeta, forceLocal, parentId){
         const pctEl = document.getElementById('reader-status-pct');
         if(pctEl) pctEl.textContent = `${v}%`;
       };
-      // A HQ inteira é baixada pelo fluxo normal com progresso e retry.
-      // Não enviamos cabeçalho Range ao proxy para abrir CBR, CBZ ou PDF.
-      // Após a transferência, os leitores trabalham no Blob local para não
-      // duplicar arquivos grandes em um ArrayBuffer gigante.
-      status.innerHTML = '<div class="spinner"></div><div>Baixando HQ... <span id="reader-status-pct">0%</span></div>';
-      let blob = await driveFetchBlob(fileMeta.id, p=>{ setPct(Math.round(p*100)); }, Number(fileMeta.size)||0, myAbort.signal);
-      if(myAbort.signal.aborted)throw new DOMException('Download cancelado.','AbortError');
-      status.innerHTML = '<div class="spinner"></div><div>Preparando a HQ baixada...</div>';
-      const opening = openComicFromBlob(fileMeta, blob, myAbort.signal);
-      blob = null;
-      doc = await opening;
+      const ext=fileMeta._ext||guessExt(fileMeta)||fileMeta.name.split('.').pop().toLowerCase();
+      if(ext==='pdf'){
+        status.innerHTML = '<div class="spinner"></div><div>Abrindo PDF por partes...</div>';
+        doc=await openComicPDF(driveMediaUrl(fileMeta.id),null,Number(fileMeta.size)||0,fileMeta.id,myAbort.signal);
+      }else{
+        // Arquivos de arquivo (CBZ/CBR) são baixados em blocos retomáveis; uma
+        // falha repete apenas o bloco atual, sem perder bytes nem progresso.
+        status.innerHTML = '<div class="spinner"></div><div>Baixando HQ... <span id="reader-status-pct">0%</span></div>';
+        let blob = await driveFetchBlob(fileMeta.id, p=>{ setPct(Math.round(p*100)); }, Number(fileMeta.size)||0, myAbort.signal);
+        if(myAbort.signal.aborted)throw new DOMException('Download cancelado.','AbortError');
+        status.innerHTML = '<div class="spinner"></div><div>Preparando a HQ baixada...</div>';
+        const opening = openComicFromBlob(fileMeta, blob, myAbort.signal);
+        blob = null;
+        doc = await opening;
+      }
     }
     // Se, enquanto isto tudo baixava/abria, a pessoa já saiu pra outra HQ
     // (um token mais novo assumiu), esta chamada está obsoleta — não deve
