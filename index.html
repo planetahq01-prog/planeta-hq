@@ -11906,7 +11906,7 @@ function buildLaunchItems(allFolders, allComics){
   const rootId = String(CONFIG.rootFolderId||'');
   const parentIdOf = item=>String(item?._parentId ?? item?.parentId ?? '');
   const items = [...(allFolders||[]), ...(allComics||[])].filter(item=>
-    parentIdOf(item)===rootId
+    parentIdOf(item)===rootId && hasOwnCustomDetailMetadata(item)
   );
   const timestampOf = value=>{
     if(typeof value==='number' && Number.isFinite(value)) return value < 1e12 ? value*1000 : value;
@@ -12948,6 +12948,13 @@ async function renderHomeSections(forceRefresh, onProgress, {invalidatePersisten
   const myToken = ++homeToken;
   const isStale = t=>t!==homeToken;
   let variedRefreshRootId=null;
+
+  // A seção de recentes só pode decidir corretamente sobre as fichas remotas
+  // depois de carregar o catálogo de metadados do Worker. As fichas locais
+  // continuam imediatamente disponíveis; esta promessa também aproveita o
+  // carregamento compartilhado/cacheado usado pelo restante do app.
+  await loadAllCustomDetailMetadata();
+  if(isStale(myToken)) return;
 
   // 1) Se já temos algo em cache (mesmo desatualizado, mesmo durante um
   // "Atualizar" forçado), pinta na hora — a sensação é de carregamento

@@ -636,7 +636,8 @@
 // v156: o worker CBR extrai páginas vizinhas em uma única passagem do RAR.
 /* v192: linhas longas de publicação nas fichas quebram em várias linhas. */
 /* v193: downloads retomáveis por Range. PDFs voltaram ao fluxo de Blob completo. */
-const CACHE_VERSION = 'v194';
+/* v195: Adicionados Recentemente exibe apenas itens com ficha própria. */
+const CACHE_VERSION = 'v195';
 // Cache das capas: separado do da casca do app e mantido entre versões.
 const COVERS_CACHE = 'planeta-hq-covers-v1';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
