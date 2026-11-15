@@ -637,7 +637,7 @@
 /* v192: linhas longas de publicação nas fichas quebram em várias linhas. */
 /* v193: downloads retomáveis por Range. PDFs voltaram ao fluxo de Blob completo. */
 /* v195: Adicionados Recentemente exibe apenas itens com ficha própria. */
-const CACHE_VERSION = 'v195';
+const CACHE_VERSION = 'v196';
 // Cache das capas: separado do da casca do app e mantido entre versões.
 const COVERS_CACHE = 'planeta-hq-covers-v1';
 const CACHE_NAME = `planeta-hq-shell-${CACHE_VERSION}`;
@@ -983,6 +983,30 @@ self.addEventListener('fetch', (event) => {
   // requisição original sem cachear — o app segue funcionando, só sem o cache.
   if (req.method === 'GET') {
     const u = new URL(req.url);
+    if (u.origin === 'https://proxy1.planetahq01.workers.dev' && u.searchParams.get('detail_cover') === '1' && u.searchParams.get('id')) {
+      const key = new Request(`${u.origin}/?detail_cover=1&id=${encodeURIComponent(u.searchParams.get('id'))}`);
+      event.respondWith((async () => {
+        const cache = await caches.open(COVERS_CACHE);
+        const cached = await cache.match(key);
+        const expiresAt = cached ? Date.parse(cached.headers.get('Expires') || '') : 0;
+        if (cached && expiresAt > Date.now()) return cached;
+        try {
+          const res = await fetch(u.href, { mode: 'cors', cache: 'no-store' });
+          if (res.ok && (res.headers.get('content-type') || '').startsWith('image/')) {
+            const headers = new Headers(res.headers);
+            headers.set('Expires', new Date(Date.now() + 5 * 60 * 1000).toUTCString());
+            const cacheable = new Response(res.clone().body, { status: res.status, statusText: res.statusText, headers });
+            cache.put(key, cacheable.clone()).catch(() => {});
+            return cacheable;
+          }
+          return res;
+        } catch (e) {
+          if (cached) return cached;
+          return fetch(req, { cache: 'no-store' });
+        }
+      })());
+      return;
+    }
     if (u.origin === 'https://proxy1.planetahq01.workers.dev' && u.searchParams.get('cover') === '1' && u.searchParams.get('id')) {
       const key = new Request(`${u.origin}/?cover=1&id=${encodeURIComponent(u.searchParams.get('id'))}`);
       event.respondWith((async () => {
