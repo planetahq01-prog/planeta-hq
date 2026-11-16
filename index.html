@@ -11518,8 +11518,15 @@ const VINGADORES_DIRECT_CACHE_KEY = 'planetahq_vingadores_direct_cache_v3';
 const JUSTICEIRO_DIRECT_CACHE_KEY = 'planetahq_justiceiro_direct_cache_v3';
 const ARANHA_DIRECT_CACHE_KEY = 'planetahq_aranha_direct_cache_v1';
 const HOME_CACHE_MAX_AGE = 6*3600*1000;
-const DRIVE_CATALOG_REVALIDATE_INTERVAL = 60*1000;
-let lastSuccessfulDriveReconcileAt = 0;
+const DRIVE_CATALOG_REVALIDATE_INTERVAL = HOME_CACHE_MAX_AGE;
+const DRIVE_CATALOG_LAST_SUCCESS_KEY = 'planetahq_drive_catalog_last_success_v1';
+function readLastSuccessfulDriveReconcileAt(){
+  try{
+    const savedAt = Number(localStorage.getItem(DRIVE_CATALOG_LAST_SUCCESS_KEY) || 0);
+    return Number.isFinite(savedAt) && savedAt > 0 ? savedAt : 0;
+  }catch(_){ return 0; }
+}
+let lastSuccessfulDriveReconcileAt = readLastSuccessfulDriveReconcileAt();
 function homeDirectCacheKey(collectionKey){
   return collectionKey==='aranha'?ARANHA_DIRECT_CACHE_KEY
     :collectionKey==='vingadores'?VINGADORES_DIRECT_CACHE_KEY
@@ -11744,6 +11751,7 @@ async function getLibrarySections(forceRefresh){
     }
     if(!skipWrite){
       lastSuccessfulDriveReconcileAt = Date.now();
+      try{ localStorage.setItem(DRIVE_CATALOG_LAST_SUCCESS_KEY, String(lastSuccessfulDriveReconcileAt)); }catch(e){}
       revalidateFolderCovers();
     } // sem await: não atrasa a resposta, roda em segundo plano
     const [aranhaFolders, xmenFolders, mangaFolders, comics, allFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders, deadpoolFolders, wolverineFolders, motoqueiroFolders] = await Promise.all([
@@ -12938,9 +12946,9 @@ async function renderHomeSections(forceRefresh, onProgress, {invalidatePersisten
   // enquanto a pessoa rolava, produzindo os frames pretos vistos no WebView.
   // Atualizações explícitas continuam passando forceRefresh=true.
   if(!forceRefresh && wrap.querySelector('.home-section')) return;
-  // Ao abrir o app (ou voltar à Home após um intervalo), repinta o cache
-  // local imediatamente e consulta o Drive em segundo plano. Assim itens
-  // apagados/mandados à lixeira não ficam presos no cache de 6 horas.
+  // Repinta os dados locais imediatamente. Só refaz a varredura do Drive
+  // quando o cache persistido de seis horas venceu; reabrir o app não deve
+  // iniciar uma reconciliação completa em toda sessão.
   if(!forceRefresh && navigator.onLine!==false && Date.now()-lastSuccessfulDriveReconcileAt>=DRIVE_CATALOG_REVALIDATE_INTERVAL){
     forceRefresh=true;
   }
