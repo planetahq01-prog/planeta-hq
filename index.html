@@ -4185,12 +4185,10 @@ async function runInitialLoad(){
   clearInterval(stallWatch);
   progress.home = 1; recompute();
 
-  // Etapa 3: depois da Home ter pintado, dispara o carregamento das capas
-  // durante a abertura e aguarda a fila terminar, como no comportamento
-  // anterior da aplicação.
-  setLoadingSub('Carregando capas das seções…');
-  forceLoadAllPendingCovers();
-  await waitForVisibleCovers(20000, frac=>{ progress.covers = Math.max(progress.covers, frac); recompute(); });
+  // Não carregar em massa todas as capas no início. O IntersectionObserver
+  // agenda somente as que estão visíveis ou próximas da tela; isso evita
+  // disparar centenas de leituras R2 em cada abertura do app.
+  setLoadingSub('Capas serão carregadas conforme aparecem…');
   progress.covers = 1; recompute();
 
   if(finished) return;
