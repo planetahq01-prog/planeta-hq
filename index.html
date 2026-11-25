@@ -4185,10 +4185,12 @@ async function runInitialLoad(){
   clearInterval(stallWatch);
   progress.home = 1; recompute();
 
-  // Não carregar em massa todas as capas no início. O IntersectionObserver
-  // agenda somente as que estão visíveis ou próximas da tela; isso evita
-  // disparar centenas de leituras R2 em cada abertura do app.
-  setLoadingSub('Capas serão carregadas conforme aparecem…');
+  // Etapa 3: depois da Home ter pintado, dispara o carregamento das capas
+  // durante a abertura e aguarda a fila terminar, como no comportamento
+  // anterior da aplicação.
+  setLoadingSub('Carregando capas das seções…');
+  forceLoadAllPendingCovers();
+  await waitForVisibleCovers(20000, frac=>{ progress.covers = Math.max(progress.covers, frac); recompute(); });
   progress.covers = 1; recompute();
 
   if(finished) return;
@@ -11706,7 +11708,8 @@ async function getLibrarySections(forceRefresh){
           [HOME_COLLECTION_ROOTS.justiceiro.id]:cachedDirectCollectionItems(cJusticeiroDirect,cAllFolders.folders,cComics.comics,HOME_COLLECTION_ROOTS.justiceiro.id)
         },
         hadError: false,
-        errorMessage: null
+        errorMessage: null,
+        fromCache: true
       };
     }
   }
@@ -11776,7 +11779,8 @@ async function getLibrarySections(forceRefresh){
     ]);
     return { aranhaFolders, xmenFolders, mangaFolders, comics, allFolders, batmanFolders, salvatFolders, hulkFolders, lanternaFolders, ironmanFolders, supermanFolders, universoAbsolutoFolders, mulherMaravilhaFolders, doomsdayFolders, thanosFolders, darkseidFolders, quartetoFolders, deadpoolFolders, wolverineFolders, motoqueiroFolders, vingadoresFolders: raw.vingadoresFolders || [], justiceiroFolders: raw.justiceiroFolders || [], directHomeCollectionItemsByRoot,
       hadError: errorState.hadError,
-      errorMessage: errorState.lastError ? errorState.lastError.message : null };
+      errorMessage: errorState.lastError ? errorState.lastError.message : null,
+      fromCache: false };
   })();
   try{ return await librarySectionsPromise; }
   finally{ librarySectionsPromise = null; }
@@ -11906,14 +11910,109 @@ function comicsDirectlyInNamedFolder(allComics, targetNames){
   return list.sort((a,b)=>a.name.localeCompare(b.name,'pt-BR',{numeric:true}));
 }
 
-function buildLaunchItems(allFolders, allComics){
-  // Mostra os itens colocados diretamente na raiz configurada do app.
-  // O conteúdo dentro de uma pasta não altera a posição dessa pasta aqui.
+const RECENTLY_ADDED_COMIC_IDS_KEY = 'planetahq_recently_added_comic_ids_v1';
+const SHARED_RECENTLY_ADDED_CACHE_KEY = 'planetahq_shared_recently_added_v1';
+const SHARED_RECENTLY_ADDED_SYNC_KEY = 'planetahq_shared_recently_added_sync_v1';
+const SHARED_RECENTLY_ADDED_CACHE_TTL = 15*60*1000;
+function readRecentlyAddedComicIds(){
+  try{
+    const parsed=JSON.parse(localStorage.getItem(RECENTLY_ADDED_COMIC_IDS_KEY)||'[]');
+    return new Set(Array.isArray(parsed)?parsed.filter(id=>typeof id==='string'&&id):[]);
+  }catch(_){ return new Set(); }
+}
+function writeRecentlyAddedComicIds(ids){
+  try{ localStorage.setItem(RECENTLY_ADDED_COMIC_IDS_KEY,JSON.stringify([...ids])); }catch(_){}
+}
+function validRecentlyAddedId(id){ return typeof id==='string'&&/^[A-Za-z0-9_-]{10,100}$/.test(id); }
+function readSharedRecentlyAddedCache(){
+  try{
+    const saved=JSON.parse(localStorage.getItem(SHARED_RECENTLY_ADDED_CACHE_KEY)||'null');
+    if(saved&&Array.isArray(saved.ids)) return {savedAt:Number(saved.savedAt)||0,ids:new Set(saved.ids.filter(validRecentlyAddedId))};
+  }catch(_){}
+  return {savedAt:0,ids:new Set()};
+}
+let sharedRecentlyAddedState=readSharedRecentlyAddedCache();
+let sharedRecentlyAddedIds=sharedRecentlyAddedState.ids;
+function saveSharedRecentlyAddedIds(ids){
+  sharedRecentlyAddedIds=new Set([...ids].filter(validRecentlyAddedId));
+  try{ localStorage.setItem(SHARED_RECENTLY_ADDED_CACHE_KEY,JSON.stringify({savedAt:Date.now(),ids:[...sharedRecentlyAddedIds]})); }catch(_){}
+}
+function sharedRecentlyAddedUrl(){
+  const params=new URLSearchParams({recent_added:'1',code:ACCESS_CODE||'',device:getDeviceId(),type:getDeviceType()});
+  return `${CONFIG.proxyUrl}?${params.toString()}`;
+}
+async function loadSharedRecentlyAdded({force=false}={}){
+  const cached=readSharedRecentlyAddedCache();
+  if(cached.savedAt){ sharedRecentlyAddedIds=cached.ids; }
+  if(!force&&cached.savedAt&&Date.now()-cached.savedAt<SHARED_RECENTLY_ADDED_CACHE_TTL) return sharedRecentlyAddedIds;
+  if(!CONFIG.proxyUrl||!ACCESS_CODE) return sharedRecentlyAddedIds;
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),8000);
+  try{
+    const response=await fetch(sharedRecentlyAddedUrl(),{cache:'no-store',signal:controller.signal});
+    if(!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload=await response.json();
+    if(!Array.isArray(payload.ids)) throw new Error('Resposta de recentes compartilhados inválida.');
+    saveSharedRecentlyAddedIds(new Set(payload.ids));
+  }catch(error){ logWarn('[PlanetaHQ] Não foi possível carregar Adicionados Recentemente compartilhados.',error); }
+  finally{ clearTimeout(timer); }
+  return sharedRecentlyAddedIds;
+}
+async function syncSharedRecentlyAdded(comics){
+  if(!CONFIG.proxyUrl||!ACCESS_CODE||!Array.isArray(comics)) return false;
+  const rootId=String(CONFIG.rootFolderId||'');
+  const parentOf=item=>String(item?._parentId??item?.parentId??'');
+  const libraryIds=[...new Set(comics.map(item=>String(item?.id||'')).filter(validRecentlyAddedId))].sort();
+  const librarySet=new Set(libraryIds);
+  const rootIds=[...new Set(comics.filter(item=>parentOf(item)===rootId).map(item=>String(item?.id||'')).filter(id=>librarySet.has(id)))].sort();
+  const knownIds=[...readRecentlyAddedComicIds()].filter(id=>librarySet.has(id)).sort();
+  const signature=`${hashStr(`${libraryIds.join(',')}|${rootIds.join(',')}|${knownIds.join(',')}`).toString(36)}:${libraryIds.length}:${rootIds.length}:${knownIds.length}`;
+  try{
+    const prev=JSON.parse(localStorage.getItem(SHARED_RECENTLY_ADDED_SYNC_KEY)||'null');
+    if(prev?.signature===signature) return false;
+  }catch(_){}
+  const controller=new AbortController();
+  const timer=setTimeout(()=>controller.abort(),15000);
+  try{
+    const response=await fetch(sharedRecentlyAddedUrl(),{
+      method:'POST',cache:'no-store',signal:controller.signal,
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({rootIds,libraryIds,knownIds})
+    });
+    if(!response.ok) throw new Error(`HTTP ${response.status}`);
+    const payload=await response.json();
+    if(!Array.isArray(payload.ids)) throw new Error('Resposta de sincronização compartilhada inválida.');
+    saveSharedRecentlyAddedIds(new Set(payload.ids));
+    try{ localStorage.setItem(SHARED_RECENTLY_ADDED_SYNC_KEY,JSON.stringify({signature,savedAt:Date.now()})); }catch(_){}
+    return true;
+  }catch(error){ logWarn('[PlanetaHQ] Não foi possível sincronizar Adicionados Recentemente com o Worker.',error); }
+  finally{ clearTimeout(timer); }
+  return false;
+}
+
+function buildLaunchItems(allFolders, allComics, {pruneMissing=false}={}){
+  // Guarda o ID quando a HQ é vista diretamente na raiz. Depois, acompanha
+  // o mesmo arquivo por todo o índice da biblioteca, mesmo se ele for movido
+  // para uma subpasta; só o remove quando uma varredura completa confirma que
+  // o ID não está mais dentro da pasta principal. O arquivo não é copiado.
   const rootId = String(CONFIG.rootFolderId||'');
   const parentIdOf = item=>String(item?._parentId ?? item?.parentId ?? '');
-  const items = [...(allFolders||[]), ...(allComics||[])].filter(item=>
-    parentIdOf(item)===rootId && hasOwnCustomDetailMetadata(item)
-  );
+  const comics=Array.isArray(allComics)?allComics:[];
+  const folders=Array.isArray(allFolders)?allFolders:[];
+  const recentComicIds=readRecentlyAddedComicIds();
+  sharedRecentlyAddedIds.forEach(id=>recentComicIds.add(id));
+  comics.forEach(item=>{
+    if(item?.id!=null && parentIdOf(item)===rootId) recentComicIds.add(String(item.id));
+  });
+  if(pruneMissing && Array.isArray(allComics)){
+    const idsStillInsideRoot=new Set(comics.filter(item=>item?.id!=null).map(item=>String(item.id)));
+    for(const id of recentComicIds) if(!idsStillInsideRoot.has(id)) recentComicIds.delete(id);
+  }
+  writeRecentlyAddedComicIds(recentComicIds);
+  const items = [
+    ...folders.filter(item=>parentIdOf(item)===rootId && hasOwnCustomDetailMetadata(item)),
+    ...comics.filter(item=>item?.id!=null && recentComicIds.has(String(item.id)) && hasOwnCustomDetailMetadata(item))
+  ];
   const timestampOf = value=>{
     if(typeof value==='number' && Number.isFinite(value)) return value < 1e12 ? value*1000 : value;
     const parsed=Date.parse(String(value||''));
@@ -11926,7 +12025,7 @@ function buildLaunchItems(allFolders, allComics){
   return items.sort((a,b)=>{
     const dateDiff=itemTimestamp(b)-itemTimestamp(a);
     return dateDiff || String(a.name||'').localeCompare(String(b.name||''),'pt-BR',{numeric:true});
-  }).slice(0,20);
+  });
 }
 
 function comicsInsideMangaFolder(allComics, mangaFolderId, rootLabel){
@@ -12425,7 +12524,7 @@ function paintHomeSectionsNow(wrap, data){
   if(secFeatured){ built['destaques'] = secFeatured; }
 
   const continueForShelf=filterContinueItemsForShelf(resolvedContinueItems,currentShelf);
-  const launchItems = buildLaunchItems(allFolders, allComics);
+  const launchItems = buildLaunchItems(allFolders, allComics, {pruneMissing:data.freshDriveScan===true&&!hadError&&Array.isArray(allComics)});
   const secLancamentos = buildHomeSection('Adicionados Recentemente', launchItems, (it)=>{
     const isFolder = isHomeFolderItem(it);
     const card = buildCarouselCard(it, {
@@ -12906,7 +13005,8 @@ function homeSectionsSignature({aranhaFolders, xmenFolders, mangaFolders, batman
   const variedRoot=resolveHQsVariadasFolder(allFolders);
   const variedItems=hqsVariadasDirectItems(variedRoot,allFolders,allComics);
   const variedSignature=variedRoot?`${variedRoot.id}:${variedItems.map(item=>item.id+':'+item.name+':'+(item._shortcutId||'')).join(',')}`:'sem-pasta-hqs-variadas';
-  return [ids(aranhaFolders), ids(xmenFolders), ids(mangaFolders), ids(batmanFolders), ids(salvatFolders), ids(hulkFolders), ids(lanternaFolders), ids(ironmanFolders), ids(supermanFolders), ids(universoAbsolutoFolders), ids(mulherMaravilhaFolders), ids(doomsdayFolders), ids(thanosFolders), ids(darkseidFolders), ids(quartetoFolders), ids(deadpoolFolders), ids(wolverineFolders), ids(motoqueiroFolders), ids(vingadoresFolders), ids(justiceiroFolders), folderIds(allFolders), namedIds(allComics), directItems, variedSignature].join('|');
+  const sharedRecentSignature=[...sharedRecentlyAddedIds].sort().join(',');
+  return [ids(aranhaFolders), ids(xmenFolders), ids(mangaFolders), ids(batmanFolders), ids(salvatFolders), ids(hulkFolders), ids(lanternaFolders), ids(ironmanFolders), ids(supermanFolders), ids(universoAbsolutoFolders), ids(mulherMaravilhaFolders), ids(doomsdayFolders), ids(thanosFolders), ids(darkseidFolders), ids(quartetoFolders), ids(deadpoolFolders), ids(wolverineFolders), ids(motoqueiroFolders), ids(vingadoresFolders), ids(justiceiroFolders), folderIds(allFolders), namedIds(allComics), directItems, variedSignature, sharedRecentSignature].join('|');
 }
 let lastPaintedHomeSignature = null;
 
@@ -12959,7 +13059,7 @@ async function renderHomeSections(forceRefresh, onProgress, {invalidatePersisten
   // depois de carregar o catálogo de metadados do Worker. As fichas locais
   // continuam imediatamente disponíveis; esta promessa também aproveita o
   // carregamento compartilhado/cacheado usado pelo restante do app.
-  await loadAllCustomDetailMetadata();
+  await Promise.all([loadAllCustomDetailMetadata(),loadSharedRecentlyAdded()]);
   if(isStale(myToken)) return;
 
   // 1) Se já temos algo em cache (mesmo desatualizado, mesmo durante um
@@ -13101,6 +13201,10 @@ async function renderHomeSections(forceRefresh, onProgress, {invalidatePersisten
   ]);
   if(onProgress) onProgress(1);
   if(isStale(myToken)) return;
+  if(!sections.hadError&&sections.fromCache!==true&&Array.isArray(sections.comics)){
+    await syncSharedRecentlyAdded(sections.comics);
+    if(isStale(myToken)) return;
+  }
 
   // Se as coleções/HQs que chegaram agora do Drive são exatamente as mesmas
   // (mesmos IDs, mesma ordem) que já estão pintadas na tela, redesenhar
@@ -13140,7 +13244,8 @@ async function renderHomeSections(forceRefresh, onProgress, {invalidatePersisten
     allComics: sections.comics,
     allFolders: sections.allFolders,
     hadError: sections.hadError,
-    errorMessage: sections.errorMessage
+    errorMessage: sections.errorMessage,
+    freshDriveScan: sections.fromCache!==true
   };
   const freshSignature = homeSectionsSignature(freshData);
   if(invalidatePersistentCache && sections.hadError){
