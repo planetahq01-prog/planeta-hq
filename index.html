@@ -12011,7 +12011,10 @@ function buildLaunchItems(allFolders, allComics, {pruneMissing=false}={}){
   writeRecentlyAddedComicIds(recentComicIds);
   const items = [
     ...folders.filter(item=>parentIdOf(item)===rootId && hasOwnCustomDetailMetadata(item)),
-    ...comics.filter(item=>item?.id!=null && recentComicIds.has(String(item.id)) && hasOwnCustomDetailMetadata(item))
+    ...comics.filter(item=>{
+      const id=String(item?.id||'');
+      return !!id && recentComicIds.has(id) && (sharedRecentlyAddedIds.has(id) || hasOwnCustomDetailMetadata(item));
+    })
   ];
   const timestampOf = value=>{
     if(typeof value==='number' && Number.isFinite(value)) return value < 1e12 ? value*1000 : value;
