@@ -8105,6 +8105,25 @@ function customDetailRecordForItem(itemOrId){
     if(Object.prototype.hasOwnProperty.call(CUSTOM_DETAIL_METADATA,id)) return CUSTOM_DETAIL_METADATA[id];
   return null;
 }
+function detailMetadataNameKey(value){
+  return String(value??'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLocaleLowerCase('pt-BR').replace(/[^a-z0-9]+/g,' ').trim();
+}
+let detailMetadataNameIndexMaps=null;
+let detailMetadataNameIndex=new Set();
+function getDetailMetadataNameIndex(){
+  const maps=[CUSTOM_DETAIL_METADATA,DEMOLIDOR_DETAIL_METADATA,BATMAN_DETAIL_METADATA,HULK_DETAIL_METADATA,IRONMAN_DETAIL_METADATA,COLLECTION_DETAIL_RESEARCH];
+  if(detailMetadataNameIndexMaps&&maps.every((map,index)=>map===detailMetadataNameIndexMaps[index])) return detailMetadataNameIndex;
+  const names=new Set();
+  for(const map of maps) for(const [key,record] of Object.entries(map||{})){
+    for(const value of [key,record?.displayTitle,record?.name,record?.folderName,record?.collectionName,record?.title]){
+      const normalized=detailMetadataNameKey(value);
+      if(normalized) names.add(normalized);
+    }
+  }
+  detailMetadataNameIndexMaps=maps;
+  detailMetadataNameIndex=names;
+  return names;
+}
 function hasCustomDetailMetadata(itemOrId,parentId){
   const item=itemOrId&&typeof itemOrId==='object'?itemOrId:null;
   const id=String(item?item.id:(itemOrId??''));
@@ -8129,10 +8148,16 @@ function hasCustomDetailMetadata(itemOrId,parentId){
   return false;
 }
 function hasOwnCustomDetailMetadata(itemOrId){
+  const item=itemOrId&&typeof itemOrId==='object'?itemOrId:null;
+  if(item?.mimeType==='application/vnd.google-apps.folder'){
+    const folderName=detailMetadataNameKey(item.name);
+    if(!folderName) return false;
+    return getDetailMetadataNameIndex().has(folderName);
+  }
   const ids=detailMetadataIdCandidates(itemOrId);
-  if(!ids.length) return false;
   const legacyMaps=[DEMOLIDOR_DETAIL_METADATA,BATMAN_DETAIL_METADATA,HULK_DETAIL_METADATA,IRONMAN_DETAIL_METADATA];
-  return !!customDetailRecordForItem(itemOrId) || ids.some(id=>legacyMaps.some(map=>Object.prototype.hasOwnProperty.call(map,id))||Object.prototype.hasOwnProperty.call(COLLECTION_DETAIL_RESEARCH,id));
+  if((ids.length&&customDetailRecordForItem(itemOrId)) || ids.some(id=>legacyMaps.some(map=>Object.prototype.hasOwnProperty.call(map,id))||Object.prototype.hasOwnProperty.call(COLLECTION_DETAIL_RESEARCH,id))) return true;
+  return false;
 }
 function customDetailCoverRecord(itemId){
   const record=customDetailRecordForItem(itemId);
