@@ -13087,7 +13087,7 @@ async function renderHomeSections(forceRefresh, onProgress, {invalidatePersisten
   // depois de carregar o catálogo de metadados do Worker. As fichas locais
   // continuam imediatamente disponíveis; esta promessa também aproveita o
   // carregamento compartilhado/cacheado usado pelo restante do app.
-  await Promise.all([loadAllCustomDetailMetadata(),loadSharedRecentlyAdded()]);
+  await Promise.all([loadAllCustomDetailMetadata(),loadSharedRecentlyAdded({force:forceRefresh})]);
   if(isStale(myToken)) return;
 
   // 1) Se já temos algo em cache (mesmo desatualizado, mesmo durante um
